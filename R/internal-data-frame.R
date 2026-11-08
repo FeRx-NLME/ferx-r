@@ -46,6 +46,8 @@
 #    every column but ID, as it does in any CSV.)
 #  - Every column is written, under its own name, in its own order: the
 #    engine decides which columns it reads.
+#  - A 1-d array column (`tapply()`/`table()` output assigned with `$<-`) is
+#    the vector it holds (#722).
 # A column of any other type (a list, a matrix, complex) is refused, naming
 # it, and so are duplicate or empty column names.
 .ferx_data_csv_text <- function(df, arg = "data") {

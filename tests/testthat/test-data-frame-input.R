@@ -107,6 +107,12 @@ test_that("a 1-d array column is written as the vector it holds (#722)", {
   expect_identical(.df_csv_text(arr), .df_csv_text(vec))
   expect_identical(.df_csv_text(arr),
                    "ID,N,C,F\n1,2,a,lo\n1,2,\"b, c\",hi\n2,1,d,lo\n")
+  # The other common idiom: a 1-d `table`, which keeps that class once its dim
+  # is gone.
+  tab <- data.frame(ID = ids)
+  tab$N <- table(ids)[as.character(ids)]
+  expect_s3_class(tab$N, "table")
+  expect_identical(.df_csv_text(tab), "ID,N\n1,2\n1,2\n2,1\n")
 })
 
 test_that("a matrix column is still refused, with the whole message (#722)", {
@@ -187,7 +193,10 @@ test_that("ferx_model_validate() and ferx_fit() take a frame with a 1-d array co
   expect_identical(length(dim(arr$NOBS)), 1L)
   # One content-addressed file: both entry points read the same bytes.
   expect_identical(.data_arg(arr), .data_arg(vec))
-  expect_no_error(ferx_model_validate(ex$model, arr))
+  # Validate reports an engine refusal as `ok = FALSE`, not an error.
+  res <- NULL
+  utils::capture.output(res <- ferx_model_validate(ex$model, arr))
+  expect_true(isTRUE(res$ok))
   settings <- list(maxiter = 5L)
   .expect_same_fit(.fit_quiet(ex$model, arr, settings = settings, covariance = FALSE),
                    .fit_quiet(ex$model, vec, settings = settings, covariance = FALSE))
