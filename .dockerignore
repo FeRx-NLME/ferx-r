@@ -19,3 +19,5 @@ src/rust/vendor/
 src/rust/vendor.tar.xz
 src/rust/rust-toolchain.toml
 .dockerignore
+*.Rcheck/
+*.tar.gz
