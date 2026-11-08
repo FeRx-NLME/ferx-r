@@ -50,6 +50,15 @@
 # it, and so are duplicate or empty column names.
 .ferx_data_csv_text <- function(df, arg = "data") {
   df <- as.data.frame(df, stringsAsFactors = FALSE, optional = TRUE)
+  # A 1-d array column (`d$N <- tapply(...)[as.character(d$ID)]`, or a
+  # dplyr::mutate() of one) is a plain vector with a `dim` of length 1:
+  # as.data.frame() keeps that dim, data.frame() drops it. Drop it here too,
+  # so it is written as the vector it is (#722). `dim<-` NULL also drops the
+  # dimnames but keeps every other attribute, so a factor keeps its class and
+  # levels. A matrix column (a dim of length 2) is left for the check below.
+  for (j in which(vapply(df, function(v) length(dim(v)) == 1L, logical(1)))) {
+    dim(df[[j]]) <- NULL
+  }
   nms <- names(df)
   if (length(nms) == 0L) {
     stop(sprintf("`%s` has no columns.", arg), call. = FALSE)

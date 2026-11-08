@@ -87,6 +87,38 @@ test_that("a column that is not a vector of numbers, text or dates is refused, b
   expect_error(.data_arg(42), "not numeric")
 })
 
+test_that("a 1-d array column is written as the vector it holds (#722)", {
+  # `tapply(...)[...]` is a 1-d array; `$<-` keeps its dim, data.frame() does
+  # not, so only a frame built this way reached the refusal.
+  ids <- c(1L, 1L, 2L)
+  narm <- tapply(ids, ids, length)[as.character(ids)]
+  expect_identical(length(dim(narm)), 1L)
+  chr <- array(c("a", "b, c", "d"), dim = 3L, dimnames = list(c("x", "y", "z")))
+  fac <- factor(c("lo", "hi", "lo"), levels = c("lo", "hi"))
+  dim(fac) <- 3L
+  arr <- data.frame(ID = ids)
+  arr$N <- narm
+  arr$C <- chr
+  arr$F <- fac
+  vec <- data.frame(ID = ids)
+  vec$N <- as.vector(narm)
+  vec$C <- as.vector(chr)
+  vec$F <- factor(c("lo", "hi", "lo"), levels = c("lo", "hi"))
+  expect_identical(.df_csv_text(arr), .df_csv_text(vec))
+  expect_identical(.df_csv_text(arr),
+                   "ID,N,C,F\n1,2,a,lo\n1,2,\"b, c\",hi\n2,1,d,lo\n")
+})
+
+test_that("a matrix column is still refused, with the whole message (#722)", {
+  df <- data.frame(ID = 1:2)
+  df$M <- matrix(1:4, nrow = 2L)
+  expect_error(
+    .data_arg(df),
+    "`data` column(s) `M` cannot be written as CSV: give each a number, text, factor, logical or date.",
+    fixed = TRUE
+  )
+})
+
 test_that("the same frame lands at one content-addressed file holding exactly its text", {
   df <- data.frame(ID = 1:3, DV = c(0.1, 0.2, 0.3))
   a <- .data_arg(df)
@@ -142,6 +174,23 @@ test_that("an mbma_placebo fit of the data.frame is identical to the fit of its 
                          covariance = FALSE)
   .expect_same_fit(from_df, from_csv)
   expect_identical(from_df$theta_levels$value, from_csv$theta_levels$value)
+})
+
+test_that("ferx_model_validate() and ferx_fit() take a frame with a 1-d array column (#722)", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  d <- .read_example("warfarin")
+  vec <- d
+  vec$NOBS <- as.vector(tapply(d$ID, d$ID, length)[as.character(d$ID)])
+  arr <- d
+  arr$NOBS <- tapply(d$ID, d$ID, length)[as.character(d$ID)]
+  expect_identical(length(dim(arr$NOBS)), 1L)
+  # One content-addressed file: both entry points read the same bytes.
+  expect_identical(.data_arg(arr), .data_arg(vec))
+  expect_no_error(ferx_model_validate(ex$model, arr))
+  settings <- list(maxiter = 5L)
+  .expect_same_fit(.fit_quiet(ex$model, arr, settings = settings, covariance = FALSE),
+                   .fit_quiet(ex$model, vec, settings = settings, covariance = FALSE))
 })
 
 test_that("values that need 17 significant digits reach the engine exactly", {

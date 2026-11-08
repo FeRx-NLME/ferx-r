@@ -3480,7 +3480,9 @@ test_that("cov_matrix labels a block omega's rows in the order it stores them", 
   # zeros either vector carries - have to line up slot for slot.
   om_rows <- grep("^ETA_", names(d), value = TRUE)
   expect_equal(length(om_rows), length(fit$se_omega))
-  expect_identical(which(unname(d[om_rows]) == 0), which(fit$se_omega == 0))
+  expect_identical(which(unname(d[om_rows]) == 0), which(unname(fit$se_omega) == 0))
+  # ... and since #722 it is named by those same rows.
+  expect_identical(names(fit$se_omega), om_rows)
 
   # cor_matrix inherits the dimnames, so it moves with them.
   expect_identical(rownames(fit$cor_matrix), rownames(fit$cov_matrix))
