@@ -537,33 +537,6 @@
   }
 }
 
-# Internal: the names of a `se_omega` vector of length `n_se`, in the layout
-# `.omega_se_at()` reads, spelled as `cov_matrix`'s labels are (the glue's
-# `cov_matrix_labels`): a variance is the bare eta name, a block covariance
-# `ROW ~ COL`, and an eta without a name falls back to `OMEGA(i,j)`. NULL for a
-# length that is neither layout, so such a vector stays unnamed (#722).
-.ferx_omega_se_names <- function(eta_names, n_eta, n_se) {
-  if (n_eta < 1L || n_se < 1L) return(NULL)
-  eta <- function(k) {
-    if (length(eta_names) == n_eta && !is.na(eta_names[k]) && nzchar(eta_names[k])) eta_names[k] else NA_character_
-  }
-  label <- function(r, c) {
-    a <- eta(r); b <- eta(c)
-    if (r == c && !is.na(a)) a
-    else if (!is.na(a) && !is.na(b)) sprintf("%s ~ %s", a, b)
-    else sprintf("OMEGA(%d,%d)", r, c)
-  }
-  if (n_se == n_eta) {
-    return(vapply(seq_len(n_eta), function(k) label(k, k), character(1)))
-  }
-  if (n_se == n_eta * (n_eta + 1L) / 2L) {
-    # Column-major lower triangle, `r >= c`.
-    rc <- do.call(rbind, lapply(seq_len(n_eta), function(c) cbind(r = c:n_eta, c = c)))
-    return(vapply(seq_len(nrow(rc)), function(k) label(rc[k, "r"], rc[k, "c"]), character(1)))
-  }
-  NULL
-}
-
 .dw_label <- function(dw) {
   if (dw < 1.5) "positive autocorrelation"
   else if (dw > 2.5) "negative autocorrelation"
@@ -847,10 +820,15 @@
   if (length(result$se_omega) == 0) result$se_omega <- NULL
   if (length(result$se_sigma) == 0) result$se_sigma <- NULL
   # The omega and sigma SEs, and the eta shrinkage, by the names `omega` and
-  # `sigma` carry (#722): a vector of another length stays unnamed.
+  # `sigma` carry (#722): a vector of another length stays unnamed. The glue
+  # labels `se_omega` with the function that labels `cov_matrix`'s rows, so a
+  # block covariance is `ETA_V ~ ETA_CL` in both.
   n_eta_nm <- nrow(result$omega)
-  om_se_nms <- .ferx_omega_se_names(result$eta_names, n_eta_nm, length(result$se_omega))
-  if (!is.null(om_se_nms)) names(result$se_omega) <- om_se_nms
+  om_se_nms <- as.character(unlist(result$se_omega_labels, use.names = FALSE))
+  if (length(result$se_omega) > 0L && length(om_se_nms) == length(result$se_omega)) {
+    names(result$se_omega) <- om_se_nms
+  }
+  result$se_omega_labels <- NULL
   if (length(result$se_sigma) > 0L && length(result$sigma_names) == length(result$se_sigma)) {
     names(result$se_sigma) <- result$sigma_names
   }

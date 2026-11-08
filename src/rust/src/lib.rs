@@ -6022,23 +6022,16 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
     let theta = |k: usize| named(&p.theta_names, k).unwrap_or_else(|| format!("THETA{}", k + 1));
     let eta = |k: usize| named(&p.omega.eta_names, k);
     let sigma = |k: usize| named(&p.sigma.names, k).unwrap_or_else(|| format!("SIGMA({})", k + 1));
-    // Column-major lower triangle, `row >= col`; one entry per column when diagonal.
-    let lower_tri = |n: usize, diagonal: bool| {
-        (0..n).flat_map(move |c| (c..if diagonal { c + 1 } else { n }).map(move |r| (r, c)))
-    };
 
     let mut labels: Vec<String> = (0..p.theta.len()).map(theta).collect();
-    for (r, c) in lower_tri(p.omega.dim(), p.omega.diagonal) {
-        labels.push(match (eta(r), eta(c)) {
-            (Some(a), _) if r == c => a,
-            (Some(a), Some(b)) => format!("{a} ~ {b}"),
-            _ => format!("OMEGA({},{})", r + 1, c + 1),
-        });
-    }
+    labels.extend(
+        lower_triangle(p.omega.dim(), p.omega.diagonal)
+            .map(|(r, c)| omega_element_label(&p.omega.eta_names, r, c)),
+    );
     labels.extend((0..p.sigma.values.len()).map(sigma));
     if let Some(ref iov) = p.omega_iov {
         let kappa = |k: usize| named(&iov.eta_names, k).or_else(|| named(&model.kappa_names, k));
-        for (r, c) in lower_tri(iov.dim(), iov.diagonal) {
+        for (r, c) in lower_triangle(iov.dim(), iov.diagonal) {
             labels.push(match (kappa(r), kappa(c)) {
                 (Some(a), _) if r == c => a,
                 (Some(a), Some(b)) => format!("{a} ~ {b}"),
@@ -6066,6 +6059,43 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
     } else {
         Vec::new()
     }
+}
+
+/// Column-major lower triangle of an `n`-square matrix, `row >= col`, as
+/// `pack_params` packs a block; one entry per column when `diagonal`.
+fn lower_triangle(n: usize, diagonal: bool) -> impl Iterator<Item = (usize, usize)> {
+    (0..n).flat_map(move |c| (c..if diagonal { c + 1 } else { n }).map(move |r| (r, c)))
+}
+
+/// The label of omega element `(r, c)` (0-based, `r >= c`): the bare eta name on
+/// the diagonal, `ROW ~ COL` off it, `OMEGA(i,j)` when an eta it needs has no
+/// name. The one spelling of an omega element, read by both `cov_matrix`'s rows
+/// ([`cov_matrix_labels`]) and `se_omega`'s names ([`se_omega_labels`]), so the
+/// two cannot drift apart (ferx-r #722).
+fn omega_element_label(eta_names: &[String], r: usize, c: usize) -> String {
+    let eta = |k: usize| eta_names.get(k).filter(|n| !n.is_empty());
+    match (eta(r), eta(c)) {
+        (Some(a), _) if r == c => a.clone(),
+        (Some(a), Some(b)) => format!("{a} ~ {b}"),
+        _ => format!("OMEGA({},{})", r + 1, c + 1),
+    }
+}
+
+/// The names of a fit's `se_omega` (ferx-r #722), read from the fit alone so a
+/// reloaded fit gets them without its model: `n_eta` entries are the diagonal,
+/// `n_eta (n_eta + 1) / 2` the block's lower triangle in [`lower_triangle`]
+/// order. Empty for any other length, which R leaves unnamed.
+fn se_omega_labels(eta_names: &[String], n_eta: usize, n_se: usize) -> Vec<String> {
+    let diagonal = if n_se == n_eta {
+        true
+    } else if n_se == n_eta * (n_eta + 1) / 2 {
+        false
+    } else {
+        return Vec::new();
+    };
+    lower_triangle(n_eta, diagonal)
+        .map(|(r, c)| omega_element_label(eta_names, r, c))
+        .collect()
 }
 
 /// The structured warnings that carry a `details` payload (ferx-core #2268), each
@@ -6871,6 +6901,8 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
             })
             .collect::<Vec<_>>(),
         se_theta = se_theta,
+        // `se_omega`'s names, in `cov_matrix`'s spelling (ferx-r #722).
+        se_omega_labels = se_omega_labels(&result.eta_names, n_eta, se_omega.len()),
         se_omega = se_omega,
         se_sigma = se_sigma,
         // Per-parameter FIX flags, parallel to `theta`, the omega diagonal and
