@@ -162,10 +162,16 @@ A Docker image is available that bundles ferx CLI, the ferx R package, and RStud
 # Build
 docker build -t ferx:latest .
 
-# Run RStudio Server
-docker run --rm -p 8787:8787 -e PASSWORD=ferx ferx:latest
-# -> http://localhost:8787   user: rstudio   password: ferx
+# Run RStudio Server, reachable from this machine only
+docker run --rm -p 127.0.0.1:8787:8787 -e PASSWORD='<your password>' ferx:latest
+# -> http://localhost:8787   user: rstudio
 ```
+
+Pick your own password: the image contains none, and RStudio Server sets the
+`rstudio` user's password from `PASSWORD` when the container starts. Keep the
+`127.0.0.1:` prefix unless you mean to serve RStudio to your network; without
+it, Docker publishes the port on every interface, so anyone who can reach the
+machine can try to log in.
 
 ## Quick Start
 

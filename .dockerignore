@@ -1,23 +1,53 @@
-.git/
-.gitignore
+# ALLOWLIST: the build context is only what installing the package needs.
+# Everything else is excluded first, so a stray local file - a NONMEM or other
+# license file, an .env, a token in .Renviron, credentials, a check tree - can
+# never reach an image, whatever sits in the checkout. (The RStudio image keeps
+# the whole context at /opt/ferx; the slim image installs everything under
+# inst/.) Add a path here only if `R CMD INSTALL` needs it.
+# .github/workflows/docker.yml also scans every built image for secrets.
+*
+
+!DESCRIPTION
+!NAMESPACE
+!LICENSE
+!LICENSE.md
+!INDEX
+!NEWS.md
+!R/
+!man/
+!inst/
+!src/
+
+# Inside the allowed directories: local build output and generated files.
 src/rust/target/
-src/ferx.so
-src/entrypoint.o
-*.Rproj
-.Rproj.user/
-.Rhistory
-.RData
-.Renviron
-inst/doc/
-docs/
-Dockerfile
-Dockerfile.slim
-.claude/
-.github/
 src/rust/.cargo/
 src/rust/vendor/
 src/rust/vendor.tar.xz
+src/rust/vendor-config.toml
+src/rust/vendor-Cargo.lock
 src/rust/rust-toolchain.toml
-.dockerignore
-*.Rcheck/
-*.tar.gz
+src/*.o
+src/*.so
+src/*.dll
+inst/doc/
+
+# Never, anywhere below an allowed directory (belt and braces for files the
+# allowlist above would otherwise let through).
+**/.Renviron
+**/.Rprofile
+**/.Rhistory
+**/.RData
+**/.env
+**/.env.*
+**/.netrc
+**/.git-credentials
+**/.npmrc
+**/*.lic
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/id_rsa*
+**/id_ed25519*
+**/.git
+**/.DS_Store

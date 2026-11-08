@@ -5,9 +5,10 @@
 # Build (from this directory):
 #   docker build -t ferx:latest .
 #
-# Run RStudio Server:
-#   docker run --rm -p 8787:8787 -e PASSWORD=ferx ferx:latest
-#   -> http://localhost:8787   user: rstudio   password: ferx
+# Run RStudio Server (on this machine only, with a password you choose; the
+# image holds no password - rocker sets it from PASSWORD at start-up):
+#   docker run --rm -p 127.0.0.1:8787:8787 -e PASSWORD='<your password>' ferx:latest
+#   -> http://localhost:8787   user: rstudio
 #
 # Run the ferx CLI directly:
 #   docker run --rm -v "$PWD:/work" -w /work ferx:latest ferx model.ferx --data data.csv
