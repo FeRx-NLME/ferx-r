@@ -142,6 +142,36 @@ jobs:
           cache-from: type=gha,scope=slim-${{ matrix.arch }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
+      # The push above is a cache rebuild, not the ferx-r:smoke image scanned
+      # earlier. Pull the bytes that were actually pushed (by digest, still
+      # untagged) and scan those, so "what was scanned" and "what is
+      # published" are provably the same image. Runs before the digest is
+      # handed to the publish job: a failure here means no tag ever points at
+      # it.
+      - name: Secret scan of the pushed image
+        id: pushed-scan
+        if: github.event_name == 'push'
+        run: |
+          ref="${{ env.IMAGE }}@${{ steps.push.outputs.digest }}"
+          docker pull --platform "${{ matrix.platform }}" "$ref"
+          tools/scan-image-secrets.sh "$ref"
+
+      # If that scan failed, the untagged image is still in the registry, where
+      # anyone could pull it by digest once the package is public. Delete it.
+      - name: Delete the pushed image after a failed scan
+        if: failure() && steps.pushed-scan.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          id="$(gh api --paginate "/orgs/FeRx-NLME/packages/container/ferx-r/versions" \
+                  --jq ".[] | select(.name == \"$DIGEST\") | .id")"
+          if [ -n "$id" ] && gh api -X DELETE "/orgs/FeRx-NLME/packages/container/ferx-r/versions/$id"; then
+            echo "Deleted $DIGEST (package version $id) after its secret scan failed."
+          else
+            echo "::error title=Delete it by hand::$DIGEST failed its secret scan and could not be deleted automatically. Remove it in the package settings now."
+          fi
+
       - name: Export digest
         if: github.event_name == 'push'
         run: |
