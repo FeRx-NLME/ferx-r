@@ -8,6 +8,10 @@ name: docker
 #   pull request  -> build + smoke test only, nothing is pushed
 #   manual run    -> build + smoke test only, nothing is pushed (from any branch)
 #
+# Pull requests and manual runs also build and smoke-test the RStudio image
+# (root Dockerfile, never published), so a Dependabot base-image bump
+# (.github/dependabot.yml) is tested for both images before merge.
+#
 # Only `push` events publish, and `on.push` below admits only main and v* tags,
 # so an unreviewed branch can never reach the registry.
 #
@@ -37,6 +41,7 @@ on:
     # only when something that shapes the image changes.
     paths:
       - Dockerfile.slim
+      - Dockerfile
       - .dockerignore
       - .github/workflows/docker.yml
       - DESCRIPTION
@@ -184,3 +189,70 @@ jobs:
 
       - name: Inspect
         run: docker buildx imagetools inspect "${{ env.IMAGE }}:${{ steps.meta.outputs.version }}"
+
+      # GHCR creates a new package as private, and only an org owner can make
+      # it public (a one-time step after the first publish). Until then, users'
+      # `docker pull` fails without a login. This step checks what an
+      # anonymous user sees (empty Docker config: no credentials) and leaves a
+      # warning on every publish run until the package is public. It never
+      # fails the run.
+      - name: Check anonymous pull (package visibility)
+        run: |
+          export DOCKER_CONFIG="$(mktemp -d)"
+          ref="${{ env.IMAGE }}:${{ steps.meta.outputs.version }}"
+          if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+            echo "Anonymous pull of $ref works: the package is public."
+          else
+            msg="Anonymous pull of $ref fails: the ghcr.io package is not public. An org owner must open https://github.com/orgs/FeRx-NLME/packages/container/package/ferx-r/settings and use Danger Zone > Change visibility > Public (one time)."
+            echo "::warning title=GHCR package is private::$msg"
+            echo "### GHCR package is private" >> "$GITHUB_STEP_SUMMARY"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # The RStudio image (root Dockerfile) is not published. It is built and
+  # smoke-tested on pull requests and manual runs so that a change to it, or a
+  # Dependabot rocker/tidyverse bump, is tested before merge. amd64 only: the
+  # recipe has no arch-specific step, and the slim job covers arm64.
+  rstudio:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: ferx-r:rstudio
+          cache-from: type=gha,scope=rstudio
+          cache-to: type=gha,mode=max,scope=rstudio
+
+      - name: Smoke test
+        run: |
+          docker run --rm ferx-r:rstudio Rscript -e '
+            library(ferx)
+            ex <- ferx_example("warfarin")
+            fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
+            stopifnot(is.finite(fit$ofv))
+            cat("OFV", fit$ofv, "\n")'
+          # The CLI must carry the survival feature, like the R package.
+          docker run --rm ferx-r:rstudio \
+            ferx check /usr/local/lib/R/site-library/ferx/examples/models/tte_exponential.ferx
+          # RStudio Server comes up.
+          docker run -d --name rs -p 8787:8787 -e PASSWORD=ferx ferx-r:rstudio
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/auth-sign-in || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          docker logs rs | tail -20
+          docker rm -f rs
+          test "$code" = "200"
+          docker image ls ferx-r:rstudio

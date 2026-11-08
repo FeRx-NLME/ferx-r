@@ -96,6 +96,16 @@ The cargo feature set is `CARGO_FEATURES` in `src/Makevars`, assigned with `?=` 
 
 A release source tarball must build offline (GxP validation rebuilds it with no network and a read-only `CARGO_HOME`). Before `R CMD build`, run `tools/vendor-rust.sh`: it vendors every crate `Cargo.lock` pins (ferx-core/ferx-tools at the pinned commit included) into `src/rust/vendor.tar.xz`, together with the `[source]` replacement `cargo vendor` printed. When that file is present and no sibling checkout is, `src/Makevars` unpacks it, appends the replacement to `.cargo/config.toml` and runs `cargo build --offline --locked`; without it the build is the usual online one. **Never commit `vendor.tar.xz`** (~25 MB per pin bump; it is gitignored): GitHub installs must keep fetching the pinned ferx-core online. `tools/vendor-rust.sh --clean` removes it - do that after building a release tarball, or every later local build in that checkout tries the vendored set first. A lock bump makes that set stale; Makevars compares the lock packed into the tarball with the current one and refuses a mismatch by name. CI's `offline-install` job installs a vendored tarball inside `unshare --net`.
 
+### Docker images (#723)
+
+Two images: `Dockerfile.slim` (R + ferx + the `ferx` CLI; published by `.github/workflows/docker.yml` to `ghcr.io/ferx-nlme/ferx-r` on every `main` push that can change it, and on `v*` tags) and the root `Dockerfile` (RStudio; built and smoke-tested on PRs, never published). Both build the CLI and the package from the ferx-core commit `Cargo.lock` pins, so **a pin bump needs no Dockerfile edit**. What does:
+
+- **The R version** is the rocker base tag (`rocker/r-ver` in both `Dockerfile.slim` stages, `rocker/tidyverse` in `Dockerfile`), written as a literal so Dependabot (`docker` ecosystem, monthly, one grouped PR) proposes new ones. Keep all three FROM lines on one R version.
+- **A new system library** the package needs at build or run time goes in the slim build stage's `apt-get` (build) or a runtime `apt-get` (run), and the root `Dockerfile`'s. The PR smoke tests (`library(ferx)` + a fit, both images) catch a missing one.
+- **Actions** move with the existing `github-actions` Dependabot entry.
+
+Never build ferx-core outside `src/Makevars` without `cargo +stable`: ferx-core's own `rust-toolchain.toml` names nightly, which rustup installs unasked. Never clone it to `<package>/../ferx-core` in an image: that is the sibling path, and Makevars patches it in. `docker-cleanup.yml` deletes old `:sha` images weekly (keeps `latest`, release tags and the 30 newest). A publish run warns ("GHCR package is private") while anonymous pulls fail; only an org owner can make the package public.
+
 ## Architecture
 
 ```

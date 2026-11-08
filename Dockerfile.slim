@@ -14,15 +14,19 @@
 #   docker run --rm -v "$PWD:/work" ferx-r:slim ferx model.ferx --data data.csv
 #
 # Both the R package and the CLI are built from the ferx-core commit pinned in
-# src/rust/Cargo.lock, so they run the same engine (the root Dockerfile builds
-# the CLI from ferx-core `main` HEAD instead).
-
-ARG R_VERSION=4.6.0
+# src/rust/Cargo.lock, so they run the same engine (the root Dockerfile uses
+# the same recipe). A ferx-core pin bump therefore needs no edit here.
+#
+# The R version is the base image tag, written out in both FROM lines (not an
+# ARG) so Dependabot can read it: .github/dependabot.yml proposes new
+# rocker/r-ver and rocker/tidyverse tags as one PR, which the docker workflow
+# builds and smoke-tests before anyone merges it. Keep both FROM lines, and the
+# root Dockerfile's rocker/tidyverse tag, on the same R version.
 
 # ===========================================================================
 # Build stage: Rust toolchain, ferx CLI, R package.
 # ===========================================================================
-FROM rocker/r-ver:${R_VERSION} AS build
+FROM rocker/r-ver:4.6.0 AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake pkg-config libnlopt-dev \
@@ -80,7 +84,7 @@ RUN R CMD INSTALL --no-multiarch /src/ferx \
 # ===========================================================================
 # Runtime stage: R + installed packages + the CLI. No compilers, no Rust.
 # ===========================================================================
-FROM rocker/r-ver:${R_VERSION}
+FROM rocker/r-ver:4.6.0
 
 ARG FERX_R_REVISION=unknown
 LABEL org.opencontainers.image.title="ferx-r (slim)" \
