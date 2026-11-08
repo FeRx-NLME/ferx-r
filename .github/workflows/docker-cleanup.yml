@@ -10,6 +10,14 @@ name: docker-cleanup
 # manifest that a kept image still points at, and `validate` checks that after.
 #
 # Weekly on schedule. A manual run is a dry run unless `dry_run` is unticked.
+#
+# A manual run with `delete_tags` set does only that instead: it deletes the
+# images carrying those tags (wildcards allowed, e.g. `042ee7e*` for both the
+# short and the full commit SHA tag), their platform images and attestations,
+# and the per-architecture indexes left without their children. `latest` and
+# release tags are excluded even if a pattern matches them. Used to remove the
+# images published before every image went through the full secret scan
+# (#733/#734), ahead of making the package public.
 
 on:
   schedule:
@@ -20,6 +28,10 @@ on:
         description: Only log what would be deleted
         type: boolean
         default: true
+      delete_tags:
+        description: "Only delete images with these tags (comma-separated, wildcards ok); empty = the retention policy"
+        type: string
+        default: ''
 
 concurrency:
   group: ${{ github.workflow }}
@@ -35,7 +47,9 @@ jobs:
     steps:
       # Pinned to the v1.2.2 commit: a third-party action holding delete rights
       # on the package.
-      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+      - name: Retention policy
+        if: github.event_name == 'schedule' || inputs.delete_tags == ''
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
           package: ferx-r
           exclude-tags: latest,v*,*.*.*
@@ -43,3 +57,15 @@ jobs:
           delete-untagged: true
           validate: true
           dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+      - name: Delete images by tag
+        if: github.event_name == 'workflow_dispatch' && inputs.delete_tags != ''
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          package: ferx-r
+          delete-tags: ${{ inputs.delete_tags }}
+          exclude-tags: latest,v*,*.*.*
+          delete-ghost-images: true
+          delete-partial-images: true
+          validate: true
+          dry-run: ${{ inputs.dry_run }}
