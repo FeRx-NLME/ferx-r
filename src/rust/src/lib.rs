@@ -6305,7 +6305,6 @@ fn fit_result_to_list(
     fit_view_to_list(result, view)
 }
 
-/// The fit list, for a fresh fit and a loaded one alike.
 /// Every θ the covariance step reports no standard error for: the θ entries of
 /// `FitResult::held_at_bound` (ferx-core #2797) whatever their reason, plus
 /// `profiled_levels_at_bound` (#2112), which a fit from before #2797 carries
@@ -6339,6 +6338,7 @@ fn held_at_bound_to_r(held: &[ferx_core::HeldAtBound]) -> List {
     )
 }
 
+/// The fit list, for a fresh fit and a loaded one alike.
 fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<List, String> {
     // Theta
     let theta_names: Vec<String> = result.theta_names.clone();
