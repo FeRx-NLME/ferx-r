@@ -1014,6 +1014,24 @@
 #'
 #'   Full slot descriptions:
 #'   \item{converged}{Logical; did the optimizer converge}
+#'   \item{status}{String; ferx-core's usability verdict beside
+#'     `converged`: `"converged"`, `"converged_with_issues"` or
+#'     `"not_converged"`. `converged` keeps its meaning (the optimizer's stop,
+#'     verified); `status` adds what qualifies it, listed in `status_reasons`.
+#'     Read from the engine, never recomputed in R.}
+#'   \item{status_label}{String; the console spelling of `status`
+#'     (`"CONVERGED"`, `"CONVERGED WITH ISSUES"`, `"NOT CONVERGED"`), as the
+#'     STATUS line prints it.}
+#'   \item{status_reasons}{Character vector, in the engine's fixed order:
+#'     `"evaluation_only"`, `"budget_spent"`, each critical warning code
+#'     (e.g. `"condition_number"`), `"covariance_failed"`, and
+#'     `"collapsed_at_guard: <names>"`. Empty for a clean converged fit; a
+#'     not-converged fit lists them too.}
+#'   \item{eval_budget_spent}{Logical; the outer optimizer spent its
+#'     evaluation budget.}
+#'   \item{evaluation_only}{Logical; no stage estimated - the run scored the
+#'     given values by request (`maxiter = 0`, or a standalone
+#'     `imp_eval_only` / `agq_eval_only` chain).}
 #'   \item{method}{Estimation method used}
 #'   \item{interaction}{Logical; the interaction flag the fitted objective
 #'     ran under. `TRUE` for FOCEI and `FALSE` for FOCE; SAEM, VI and
@@ -3143,19 +3161,36 @@ print.ferx_fit <- function(x, ...) {
     cat(" ODE solution: exact (linear system, matrix exponential)\n")
   }
 
-  # STATUS line - the most important diagnostic; colour green/red so the
-  # eye locks on it immediately.
-  status_lbl <- if (isTRUE(x$converged)) "CONVERGED" else "NOT CONVERGED"
-  status_style <- if (isTRUE(x$converged)) "green" else "red"
-  status_tail <- character(0)
-  # Categories come from the engine; no R-side string parsing needed. Read
-  # through .ferx_fit_warnings() so a loaded fit's flat warnings count too.
-  ws <- .ferx_fit_warnings(x)
-  if (!is.null(ws) && is.data.frame(ws) && all(c("severity", "category") %in% names(ws))) {
-    crit_rows <- ws[ws$severity == "critical", , drop = FALSE]
-    if (nrow(crit_rows) > 0L) {
-      cats <- unique(crit_rows$category)
-      status_tail <- c(status_tail, sprintf("(%s)", paste(cats, collapse = ", ")))
+  # STATUS line - the most important diagnostic; colour green/yellow/red so
+  # the eye locks on it immediately. The verdict and its reasons are ferx-core's
+  # (`FitResult::status()`, #2799), printed with core's own labels; R does not
+  # recompute them. A list without them (built by hand, or by a ferx older
+  # than #2799) falls back to `converged` alone.
+  status_tok <- x[["status"]]
+  if (is.character(status_tok) && length(status_tok) == 1L && !is.na(status_tok)) {
+    status_lbl <- x[["status_label"]] %||% toupper(gsub("_", " ", status_tok, fixed = TRUE))
+    status_style <- switch(status_tok,
+      converged = "green",
+      converged_with_issues = "yellow",
+      "red"
+    )
+    status_tail <- character(0)
+    if (length(x[["status_reasons"]]) > 0L) {
+      status_tail <- sprintf("(%s)", paste(x[["status_reasons"]], collapse = ", "))
+    }
+  } else {
+    status_lbl <- if (isTRUE(x$converged)) "CONVERGED" else "NOT CONVERGED"
+    status_style <- if (isTRUE(x$converged)) "green" else "red"
+    status_tail <- character(0)
+    # Categories come from the engine; no R-side string parsing needed. Read
+    # through .ferx_fit_warnings() so a loaded fit's flat warnings count too.
+    ws <- .ferx_fit_warnings(x)
+    if (!is.null(ws) && is.data.frame(ws) && all(c("severity", "category") %in% names(ws))) {
+      crit_rows <- ws[ws$severity == "critical", , drop = FALSE]
+      if (nrow(crit_rows) > 0L) {
+        cats <- unique(crit_rows$category)
+        status_tail <- c(status_tail, sprintf("(%s)", paste(cats, collapse = ", ")))
+      }
     }
   }
   if (!is.null(x$n_iterations)) status_tail <- c(status_tail, sprintf("%d iterations", x$n_iterations))

@@ -4790,6 +4790,15 @@ fn default_fit_result(
         // ferx-core main added a checkpoint-restore flag; a defaulted FitResult is
         // never a restored one.
         restored_from_checkpoint: false,
+        // ferx-core #2799: the inputs to `FitResult::status()`. The scaffold ran
+        // no optimizer, so it neither spent a budget nor was evaluation-only.
+        eval_budget_spent: false,
+        evaluation_only: false,
+        // ferx-core #2797 / #2785: nothing is held at a bound and no outer
+        // optimizer ran, so there is no stop reason or Newton decrement.
+        held_at_bound: Vec::new(),
+        optimizer_stop: None,
+        newton_decrement: None,
         // ferx-core #2695: bundle slots no skeleton step reads.
         cov_fixed: Vec::new(),
         interface_extras: None,
@@ -6844,8 +6853,23 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
     // level block.
     let theta_levels = view.theta_levels;
 
+    // ferx-core #2799: the usability verdict beside `converged`, read from core
+    // (`FitResult::status()`) and never recomputed here. `status` is the YAML
+    // token, `status_label` the console spelling, `status_reasons` each
+    // `StatusReason::label()` in core's fixed order.
+    let fit_status = result.status();
+    let status_reasons: Vec<String> = fit_status.reasons().iter().map(|r| r.label()).collect();
+
     Ok(list!(
         converged = result.converged,
+        status = fit_status.token(),
+        status_label = fit_status.label(),
+        status_reasons = status_reasons,
+        // The two inputs to the verdict core does not derive from other fields:
+        // the outer optimizer spent its evaluation budget, and no stage
+        // estimated (`maxiter = 0`, or a standalone imp/agq eval-only chain).
+        eval_budget_spent = result.eval_budget_spent,
+        evaluation_only = result.evaluation_only,
         method = method_label,
         method_chain = method_chain,
         // The interaction flag the fit's objective ran under, which SAEM, IMP

@@ -1062,6 +1062,24 @@ A named list. Where to find commonly-needed quantities:\tabular{llll}{
 
 Full slot descriptions:
 \item{converged}{Logical; did the optimizer converge}
+\item{status}{String; ferx-core's usability verdict beside
+\code{converged}: \code{"converged"}, \code{"converged_with_issues"} or
+\code{"not_converged"}. \code{converged} keeps its meaning (the optimizer's stop,
+verified); \code{status} adds what qualifies it, listed in \code{status_reasons}.
+Read from the engine, never recomputed in R.}
+\item{status_label}{String; the console spelling of \code{status}
+(\code{"CONVERGED"}, \code{"CONVERGED WITH ISSUES"}, \code{"NOT CONVERGED"}), as the
+STATUS line prints it.}
+\item{status_reasons}{Character vector, in the engine's fixed order:
+\code{"evaluation_only"}, \code{"budget_spent"}, each critical warning code
+(e.g. \code{"condition_number"}), \code{"covariance_failed"}, and
+\code{"collapsed_at_guard: <names>"}. Empty for a clean converged fit; a
+not-converged fit lists them too.}
+\item{eval_budget_spent}{Logical; the outer optimizer spent its
+evaluation budget.}
+\item{evaluation_only}{Logical; no stage estimated - the run scored the
+given values by request (\code{maxiter = 0}, or a standalone
+\code{imp_eval_only} / \code{agq_eval_only} chain).}
 \item{method}{Estimation method used}
 \item{interaction}{Logical; the interaction flag the fitted objective
 ran under. \code{TRUE} for FOCEI and \code{FALSE} for FOCE; SAEM, VI and

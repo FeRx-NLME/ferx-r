@@ -126,6 +126,11 @@ ferx_load_fit <- function(path) {
   extras <- .fitrx_read_interface_extras(loaded$interface_extras)
   raw$model_path <- model_path
   raw$data_path <- data_path
+  # The two inputs to the status verdict (ferx-core #2799). Core reads a bundle
+  # written before they existed as FALSE, and its `status` / `status_reasons`
+  # come from that read; this keeps the R shape a plain logical either way.
+  raw$eval_budget_spent <- isTRUE(raw$eval_budget_spent)
+  raw$evaluation_only <- isTRUE(raw$evaluation_only)
 
   # What needs the model file, which the converter leaves to this caller: a
   # failure here costs these fields, not the fit (#531).
