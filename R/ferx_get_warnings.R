@@ -453,6 +453,11 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     if (grepl("egative", message, ignore.case = TRUE)) {
       return("Negative IWRES autocorrelation suggests over-parameterisation or a misspecified error model. Consider removing a parameter or simplifying the residual model.")
     }
+    # On a compartment-free model (MBMA, other algebraic structural models)
+    # the engine's own advice names a `correlation ar1(RHO) by ...` line
+    # (ferx-core #2815); transit absorption, a compartment or IOV on ka/F do
+    # not exist there, so defer to the message.
+    if (grepl("`correlation ", message, fixed = TRUE)) return(NULL)
     return(paste0(
       "Positive IWRES autocorrelation suggests missing structural dynamics.",
       " Consider transit absorption, an extra compartment, or IOV on ka/F."

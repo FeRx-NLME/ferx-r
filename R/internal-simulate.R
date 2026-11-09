@@ -88,6 +88,13 @@ validate_fit_for_params <- function(fit) {
     # The profiled levels the fit held on their bound (ferx-core #2112), by
     # name: the glue gives them no level `se` and sets them on the skeleton.
     profiled_levels_at_bound = as.character(fit$profiled_levels_at_bound %||% character(0)),
+    # Every coordinate the step held (ferx-core #2797), as `fit$held_at_bound`'s
+    # columns: the glue gives them to the uncertainty draws, which keep each on
+    # its value (#737 review, finding 3).
+    held_parameter = as.character(fit$held_at_bound$parameter),
+    held_kind = as.character(fit$held_at_bound$kind),
+    held_index = as.integer(fit$held_at_bound$index),
+    held_reason = as.character(fit$held_at_bound$reason),
     stat_covariate = as.character(cs$covariate),
     stat_median = as.numeric(cs$median),
     stat_mean = as.numeric(cs$mean),

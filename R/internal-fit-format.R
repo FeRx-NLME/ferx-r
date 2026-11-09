@@ -125,7 +125,8 @@
     as.numeric(m), nrow(m),
     .ferx_kappa_labels(fit$kappa_names, nrow(m)),
     if (is.null(fit$kappa_fixed)) NULL else as.logical(fit$kappa_fixed),
-    if (is.null(fit$se_kappa)) NULL else as.numeric(fit$se_kappa),
+    # A kappa held at the guard (ferx-core #2797) prints `N/A`.
+    .ferx_se_masked(fit, "kappa", fit$se_kappa, nrow(m)),
     types,
     if (is.null(fit$kappa_weights)) NULL else as.character(fit$kappa_weights),
     if (is.null(fit$kappa_weight_typical)) NULL else as.numeric(fit$kappa_weight_typical),
@@ -167,7 +168,9 @@
     as.numeric(m), n,
     .ferx_eta_labels(fit$eta_names, n),
     if (is.null(fit$omega_fixed)) NULL else as.logical(fit$omega_fixed),
-    if (is.null(fit$se_omega)) NULL else as.numeric(fit$se_omega),
+    # An ETA variance held at the guard (ferx-core #2797) prints `N/A`.
+    .ferx_se_masked(fit, "omega", fit$se_omega, n,
+                    function(i) .omega_se_slot(fit$se_omega, n, i)),
     types,
     if (is.null(fit$omega_init_as_sd)) NULL else as.logical(fit$omega_init_as_sd),
     ifelse(is.na(idx), NA_character_, linked),
@@ -359,8 +362,7 @@
   )
   extra <- list()
   # Condition number (NONMEM convention: > 1000 flags ill-conditioning).
-  if (!is.null(result$condition_number) && is.finite(result$condition_number) &&
-        result$condition_number > 1000) {
+  if (.ferx_cn_flagged(result$condition_number)) {
     extra[[length(extra) + 1L]] <- data.frame(
       severity      = "critical",
       category      = "condition_number",
@@ -516,6 +518,120 @@
 # FIX on a whole block), so an off-diagonal is fixed when either eta is.
 .ferx_omega_is_fixed <- function(omega_fixed, i, j) {
   .ferx_is_fixed(omega_fixed, i) || .ferx_is_fixed(omega_fixed, j)
+}
+
+# R's condition-number flag: NONMEM's convention, a condition number above
+# 1000 flags an ill-conditioned parameter space. ferx-core computes the number
+# but raises no warning for it, so the critical `condition_number` row in
+# `warnings_structured` is R's own.
+.ferx_cn_flagged <- function(cn) {
+  !is.null(cn) && length(cn) == 1L && is.finite(cn) && cn > 1000
+}
+
+# The critical warning categories R raises itself and the engine's
+# `FitResult::status()` therefore never sees: today only the condition-number
+# flag. Drop an entry once ferx-core emits that warning itself.
+.ferx_r_critical_categories <- function(result) {
+  if (.ferx_cn_flagged(result$condition_number)) "condition_number" else character(0)
+}
+
+# `result` with R's own critical flags folded into the engine's verdict
+# (#737 review, finding 1). Without this, a fit whose only critical warning is
+# R's condition-number flag read `CONVERGED` with no reason, while
+# `ferx_get_warnings()` counted a critical warning. Each flag joins
+# `status_reasons` where core puts a critical warning code: after
+# `evaluation_only` / `budget_spent` and before `covariance_failed` /
+# `collapsed_at_guard`. It turns `converged` into `converged_with_issues`,
+# core's rule for a converged fit with a reason. A not-converged verdict stays
+# not converged. A category core already lists is not added twice.
+.ferx_status_with_r_flags <- function(result) {
+  add <- setdiff(.ferx_r_critical_categories(result), result$status_reasons)
+  if (length(add) == 0L || !is.character(result$status)) return(result)
+  r <- as.character(result$status_reasons %||% character(0))
+  tail_at <- which(r == "covariance_failed" | startsWith(r, "collapsed_at_guard"))
+  pos <- if (length(tail_at) > 0L) min(tail_at) - 1L else length(r)
+  result$status_reasons <- append(r, add, after = pos)
+  if (identical(result$status, "converged")) {
+    result$status <- "converged_with_issues"
+    result$status_label <- "CONVERGED WITH ISSUES"
+  }
+  result
+}
+
+# The engine's usability verdict on a fit (ferx-core #2799): `token`
+# (`converged`, `converged_with_issues`, `not_converged`), `label` (the
+# console's `CONVERGED WITH ISSUES`) and `reasons` (character, in the engine's
+# order). Every fit the glue builds or loads carries all three; a fit object
+# made before they existed falls back to `converged` alone, with no reasons.
+.ferx_fit_status <- function(fit) {
+  token <- fit$status
+  label <- fit$status_label
+  if (is.character(token) && length(token) == 1L &&
+      is.character(label) && length(label) == 1L) {
+    return(list(token = token, label = label,
+                reasons = as.character(fit$status_reasons %||% character(0))))
+  }
+  ok <- isTRUE(fit$converged)
+  list(token = if (ok) "converged" else "not_converged",
+       label = if (ok) "CONVERGED" else "NOT CONVERGED",
+       reasons = character(0))
+}
+
+# Whether parameter `i` of the family `kind` ("theta", "omega", "sigma" or
+# "kappa") has no standard error to report: it is in `fit$held_at_bound`
+# (ferx-core #2797), a profiled level on its declared bound or a coordinate
+# collapsed onto the engine's internal guard. The engine keeps such an SE as 0
+# when its step held it (as for FIX) and as the unconditional value when it did
+# not; neither is a standard error, and ferx-core's console prints `N/A` for
+# both. A fit object made before the field existed falls back to
+# `profiled_levels_at_bound` for its thetas.
+.ferx_se_held <- function(fit, kind, i) {
+  h <- fit$held_at_bound
+  if (is.data.frame(h)) {
+    return(any(h$kind == kind & h$index == i))
+  }
+  identical(kind, "theta") && isTRUE(names(fit$theta)[i] %in% fit$profiled_levels_at_bound)
+}
+
+# The names of every theta with no standard error: the entries of kind
+# "theta" in `held_at_bound` (a list from the glue, or its data frame), and
+# `profiled_levels_at_bound` for a fit object made before `held_at_bound`
+# existed.
+.ferx_held_theta_names <- function(fit) {
+  h <- fit$held_at_bound
+  from_held <- if (!is.null(h$kind)) {
+    as.character(h$parameter)[as.character(h$kind) == "theta"]
+  } else {
+    character(0)
+  }
+  unique(c(as.character(fit$profiled_levels_at_bound %||% character(0)), from_held))
+}
+
+# `se` with NA at each entry of family `kind` that `.ferx_se_held()` marks,
+# for a formatter that prints a missing SE as `N/A`. `slot(i)` maps the
+# family's i-th parameter to its entry of `se` (the identity, except for a block
+# omega's lower triangle).
+.ferx_se_masked <- function(fit, kind, se, n, slot = function(i) i) {
+  if (is.null(se)) return(NULL)
+  se <- as.numeric(se)
+  for (i in seq_len(n)) {
+    k <- slot(i)
+    if (!is.na(k) && k <= length(se) && .ferx_se_held(fit, kind, i)) se[k] <- NA_real_
+  }
+  se
+}
+
+# The entry of `se_omega` that holds the variance of ETA `i`: its diagonal
+# entry, or its slot in a block omega's column-major lower triangle (the
+# layout `.omega_se_at()` reads).
+.omega_se_slot <- function(se_omega, n_eta, i) {
+  n_lt <- n_eta * (n_eta + 1L) / 2L
+  if (length(se_omega) == n_lt && n_lt != n_eta) {
+    col_offset <- if (i == 1L) 0L else (i - 1L) * n_eta - (i - 1L) * (i - 2L) / 2L
+    as.integer(col_offset + 1L)
+  } else {
+    i
+  }
 }
 
 # Internal: look up SE for omega element (i, j) from se_omega vector.
@@ -791,6 +907,19 @@
   )
   result$profiled_blocks <- as.character(result$profiled_blocks %||% character(0))
   result$profiled_levels_at_bound <- as.character(result$profiled_levels_at_bound %||% character(0))
+  # The coordinates the covariance step reports no SE for (ferx-core #2797),
+  # one row each; zero rows for a fit that holds none.
+  h <- result$held_at_bound
+  result$held_at_bound <- data.frame(
+    parameter = as.character(h$parameter %||% character(0)),
+    kind = as.character(h$kind %||% character(0)),
+    index = as.integer(h$index %||% integer(0)),
+    reason = as.character(h$reason %||% character(0)),
+    stringsAsFactors = FALSE
+  )
+  # The engine's verdict (ferx-core #2799): reasons as a character vector,
+  # empty for a clean fit.
+  result$status_reasons <- as.character(unlist(result$status_reasons, use.names = FALSE) %||% character(0))
   # `[covariate_model]` statistics (#412), through the constructor
   # `ferx_load_fit()` uses. Zero rows for a model with no symbolic centre.
   cs <- result$covariate_stats
@@ -1201,6 +1330,9 @@
   # ETA normality, dropped `[output]` columns). No string re-parsing of core
   # messages happens here.
   result$warnings_structured <- .ferx_assemble_structured_warnings(raw, result)
+  # The verdict counts the critical flags R raises itself (#737 review,
+  # finding 1), which the engine's `status()` cannot see.
+  result <- .ferx_status_with_r_flags(result)
   # The structured warnings' `details` payloads (ferx-core #2268).
   result$warning_details <- .ferx_parse_warning_details(raw$warning_details)
 

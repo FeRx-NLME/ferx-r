@@ -1,0 +1,25 @@
+[parameters]
+  theta TVCL(0.12250099819205257, 0.001, 10.0)
+  theta TVV(7.753670975867449, 0.1, 500.0)
+  theta TVKA(0.9982755334099482, 0.01, 50.0)
+  omega ETA_CL ~ 0.0792688562315328
+  omega ETA_V  ~ 0.05944155243978235
+  omega ETA_KA ~ 6.1442123533282098e-6
+  sigma PROP_ERR ~ 0.10069194732313741 (sd)
+
+[individual_parameters]
+  CL = TVCL * exp(ETA_CL)
+  V  = TVV  * exp(ETA_V)
+  KA = TVKA * exp(ETA_KA)
+
+[structural_model]
+  pk one_cpt_oral(cl=CL, v=V, ka=KA)
+
+[error_model]
+  DV ~ proportional(PROP_ERR)
+
+[fit_options]
+  method     = focei
+  maxiter    = 0
+  covariance = true
+  analytic_cov_hessian = true

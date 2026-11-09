@@ -17,8 +17,10 @@
   if (is.null(theta_names)) theta_names <- paste0("THETA", seq_along(fit$theta))
   for (i in seq_along(fit$theta)) {
     se        <- if (!is.null(fit$se_theta) && length(fit$se_theta) >= i) fit$se_theta[i] else NA_real_
-    # A profiled level held on its bound has no SE; the engine's 0 is not one (ferx-core #2112).
-    if (theta_names[i] %in% fit$profiled_levels_at_bound) se <- NA_real_
+    # A held theta - a profiled level on its bound (ferx-core #2112) or one
+    # collapsed onto the internal guard (#2797) - has no SE; the engine's
+    # number is not one.
+    if (.ferx_se_held(fit, "theta", i)) se <- NA_real_
     transform <- if (!is.null(fit$theta_transforms) && length(fit$theta_transforms) >= i) fit$theta_transforms[i] else "identity"
     rows[[length(rows) + 1L]] <- .ferx_est_row(theta_names[i], fit$theta[i], se, transform, FALSE,
                                                fixed = .ferx_is_fixed(fit$theta_fixed, i))
@@ -38,6 +40,7 @@
   for (i in seq_len(n_eta)) {
     pname    <- if (!is.null(fit$eta_names) && length(fit$eta_names) >= i && nzchar(fit$eta_names[i])) fit$eta_names[i] else sprintf("OMEGA(%d,%d)", i, i)
     se       <- .omega_se_at(fit$se_omega, n_eta, i, i)
+    if (.ferx_se_held(fit, "omega", i)) se <- NA_real_
     init_sd  <- !is.null(fit$omega_init_as_sd) && length(fit$omega_init_as_sd) >= i && isTRUE(fit$omega_init_as_sd[i])
     scale    <- if (length(fit$eta_param_types) >= i) fit$eta_param_types[[i]] else NA_character_
     rows[[length(rows) + 1L]] <- .ferx_est_row(pname, om[i, i], se, "variance", init_sd,
@@ -50,6 +53,7 @@
   for (i in seq_along(fit$sigma)) {
     pname         <- if (!is.null(fit$sigma_names) && length(fit$sigma_names) >= i && nzchar(fit$sigma_names[i])) fit$sigma_names[i] else sprintf("SIGMA(%d)", i)
     se            <- if (!is.null(fit$se_sigma) && length(fit$se_sigma) >= i) fit$se_sigma[i] else NA_real_
+    if (.ferx_se_held(fit, "sigma", i)) se <- NA_real_
     sig_transform <- if (!is.null(fit$sigma_types) && length(fit$sigma_types) >= i) fit$sigma_types[i] else "proportional"
     init_sd       <- !is.null(fit$sigma_init_as_sd) && length(fit$sigma_init_as_sd) >= i && isTRUE(fit$sigma_init_as_sd[i])
     rows[[length(rows) + 1L]] <- .ferx_est_row(pname, fit$sigma[i], se, sig_transform, init_sd,
@@ -68,6 +72,7 @@
     n_se   <- length(fit$se_kappa)
     for (i in seq_len(n_kap)) {
       se      <- if (n_se >= i) fit$se_kappa[[i]] else NA_real_
+      if (.ferx_se_held(fit, "kappa", i)) se <- NA_real_
       # The kappa's scale (ferx-core #1643) is its own column: `transform`
       # stays "variance", since it picks how the variance's interval is
       # formed, and a "logit" there would inv_logit() a variance. NA on a fit

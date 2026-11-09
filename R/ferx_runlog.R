@@ -162,9 +162,10 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     final_str <- .runlog_value(thetas[i], fixed)
     se_str    <- ""
     rse_str   <- ""
-    # A profiled level the covariance step held on its declared bound
-    # (ferx-core #2112): its SE 0 is not one. `N/A`, as print() shows it.
-    held <- nm %in% fit$profiled_levels_at_bound
+    # A held theta - a profiled level on its declared bound (ferx-core #2112)
+    # or one collapsed onto the internal guard (#2797): its SE is not one.
+    # `N/A`, as print() shows it.
+    held <- .ferx_se_held(fit, "theta", i)
     if (has_se && !fixed && held) {
       se_str  <- sprintf("%8s", "N/A")
       rse_str <- sprintf("%7s", "N/A")
@@ -211,6 +212,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     rse_str <- ""
     if (has_se && !is.null(se_om) && !fixed) {
       se_val  <- .omega_se_at(se_om, n_eta, i, i)
+      if (.ferx_se_held(fit, "omega", i)) se_val <- NA_real_
       se_str  <- if (is.finite(se_val)) sprintf("%8.4g", se_val) else sprintf("%8s", "N/A")
       rse_val <- if (is.finite(se_val) && om[i, i] != 0) abs(se_val / om[i, i]) * 100 else NA
       rse_str <- if (is.finite(rse_val)) sprintf("%6.1f%%", rse_val) else sprintf("%7s", "N/A")
@@ -253,6 +255,7 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     rse_str <- ""
     if (has_se && !is.null(se_sig) && i <= length(se_sig) && !fixed) {
       se_val  <- se_sig[i]
+      if (.ferx_se_held(fit, "sigma", i)) se_val <- NA_real_
       se_str  <- if (is.finite(se_val)) sprintf("%8.4g", se_val) else sprintf("%8s", "N/A")
       rse_val <- if (is.finite(se_val) && sigmas[i] != 0) abs(se_val / sigmas[i]) * 100 else NA
       rse_str <- if (is.finite(rse_val)) sprintf("%6.1f%%", rse_val) else sprintf("%7s", "N/A")
@@ -329,7 +332,13 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     sprintf("  OFV   = %.6g", fit$ofv %||% NA_real_),
     sprintf("  AIC   = %.6g", fit$aic %||% NA_real_),
     sprintf("  BIC   = %.6g", fit$bic %||% NA_real_),
-    sprintf("  Convergence: %s", if (isTRUE(fit$converged)) "YES" else "NO")
+    sprintf("  Convergence: %s", if (isTRUE(fit$converged)) "YES" else "NO"),
+    # The engine's verdict (ferx-core #2799) and its reasons.
+    local({
+      st <- .ferx_fit_status(fit)
+      sprintf("  Status:      %s%s", st$label,
+              if (length(st$reasons) > 0L) sprintf(" (%s)", paste(st$reasons, collapse = ", ")) else "")
+    })
   )
   lines <- c(lines, .blank())
 

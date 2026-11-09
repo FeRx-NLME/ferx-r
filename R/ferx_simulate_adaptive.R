@@ -147,8 +147,12 @@
 #'       fraction of windows between consecutive realized decisions whose area
 #'       under the monitored signal fell inside the \code{auc_target} band
 #'       (NA when no \code{auc_target} is declared, or with fewer than two
-#'       decisions), and ETA_SUPPLIED (\code{TRUE} when the run used the
-#'       subject's row of \code{etas}, \code{FALSE} when its eta was drawn).}
+#'       decisions), ETA_SUPPLIED (\code{TRUE} when the run used the
+#'       subject's row of \code{etas}, \code{FALSE} when its eta was drawn),
+#'       and DOSE_ORACLE (\code{TRUE} for a subject whose eta was drawn and
+#'       whose dose expressions read its drawn individual parameters, under
+#'       the block's \code{dose_knowledge = oracle}: a perfect-information
+#'       comparison arm, never a dosing rule).}
 #'   }
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine

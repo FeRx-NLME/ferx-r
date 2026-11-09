@@ -1473,7 +1473,10 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
             .iter()
             .map(|e| e.auc_target_attainment)
             .collect::<Vec<Option<f64>>>(),
-        ETA_SUPPLIED = m.iter().map(|e| e.eta_supplied).collect::<Vec<bool>>()
+        ETA_SUPPLIED = m.iter().map(|e| e.eta_supplied).collect::<Vec<bool>>(),
+        // ferx-core #944: a drawn subject dosed from its drawn individual
+        // parameters under `dose_knowledge = oracle`.
+        DOSE_ORACLE = m.iter().map(|e| e.dose_oracle).collect::<Vec<bool>>()
     );
 
     list!(
@@ -1608,7 +1611,7 @@ fn ferx_rust_simulate_with_uncertainty(
             )),
         };
 
-        let fit_result =
+        let mut fit_result =
             match build_fit_result_for_uncertainty(
                 &parsed.model,
                 &theta,
@@ -1630,6 +1633,15 @@ fn ferx_rust_simulate_with_uncertainty(
                 Ok(f) => f,
                 Err(e) => return Err(e),
             };
+        // What the fit's covariance step held (#737 review, finding 3): the
+        // asymptotic draws keep a profiled level on its bound (ferx-core #2418)
+        // and a guard collapse on its rail (#2797) from these two lists. A zero
+        // row in the matrix is not enough, since the regularised Cholesky adds
+        // 1e-8 to it, and the coordinate would scatter about 1e-4 around its value.
+        let template = &parsed.model.default_params;
+        fit_result.profiled_levels_at_bound =
+            profiled_levels_at_bound_from_r(&fit_bindings, &template.theta_names)?;
+        fit_result.held_at_bound = held_at_bound_from_r(&fit_bindings, template)?;
 
         let opts = ferx_core::SimulateUncertaintyOptions {
             n_uncertainty_draws: n_uncertainty_draws.max(0) as usize,
@@ -2649,10 +2661,11 @@ fn level_contrast_from_token(token: &str) -> std::result::Result<LevelContrast, 
 /// `ref` reference level, for every level without a covariance (`se`) or
 /// without kept SIR draws (`sir_lo`, `sir_hi`). `profiled` is TRUE on every
 /// level of a block the fit solved for rather than searched (ferx-core #1065),
-/// read from the fit's `profiled_blocks`. `se` is also NA for a profiled level
-/// the covariance step held on its declared bound (`held`, the fit's
-/// `profiled_levels_at_bound`, ferx-core #2112): the engine reports `0.0` there,
-/// as for a FIX theta, which is not a standard error. Zero rows for a model with
+/// read from the fit's `profiled_blocks`. `se` is also NA for a level the
+/// covariance step held (`held`: a profiled level on its declared bound,
+/// ferx-core #2112, or a level θ collapsed onto the internal guard, #2797): the
+/// engine reports `0.0` there, as for a FIX theta, which is not a standard
+/// error. Zero rows for a model with
 /// no level block.
 #[allow(clippy::too_many_arguments)]
 fn level_bindings_to_r(
@@ -4013,6 +4026,84 @@ fn profiled_levels_at_bound_from_r(
     Ok(held)
 }
 
+/// The fit's `held_at_bound` (ferx-core #2797) from the `held_*` columns of the
+/// `fit_bindings` list, rebuilt as the engine's entries. R's table has no packed
+/// index, so it is found again: a θ's is its index, and any other's is the
+/// coordinate the engine names the same (`coordinate_names`, which named it in
+/// the first place). Empty when the columns are absent. A row that names no
+/// coordinate of the model is refused rather than dropped, since the draws would
+/// then scatter what the fit held.
+fn held_at_bound_from_r(
+    r: &List,
+    params: &ModelParameters,
+) -> std::result::Result<Vec<ferx_core::HeldAtBound>, String> {
+    let cols: HashMap<&str, Robj> = r.iter().collect();
+    let strings = |name: &str| -> std::result::Result<Vec<String>, String> {
+        match cols.get(name) {
+            None => Ok(Vec::new()),
+            Some(v) if v.is_null() => Ok(Vec::new()),
+            Some(v) => v.as_string_vector().ok_or_else(|| {
+                format!("internal: `fit_bindings${name}` is not a character vector")
+            }),
+        }
+    };
+    let names = strings("held_parameter")?;
+    let kinds = strings("held_kind")?;
+    let reasons = strings("held_reason")?;
+    let index: Vec<i32> = match cols.get("held_index") {
+        None => Vec::new(),
+        Some(v) if v.is_null() => Vec::new(),
+        Some(v) => v.as_integer_vector().ok_or_else(|| {
+            "internal: `fit_bindings$held_index` is not an integer vector".to_string()
+        })?,
+    };
+    let n = names.len();
+    if kinds.len() != n || reasons.len() != n || index.len() != n {
+        return Err("internal: the `fit_bindings$held_*` columns are not parallel".to_string());
+    }
+    let coords = ferx_core::estimation::parameterization::coordinate_names(params);
+    (0..n)
+        .map(|i| {
+            let refuse = |why: &str| {
+                format!("fit$held_at_bound row {} (`{}`): {why}", i + 1, names[i])
+            };
+            let kind = match kinds[i].as_str() {
+                "theta" => ParameterKind::Theta,
+                "omega" => ParameterKind::Omega,
+                "sigma" => ParameterKind::Sigma,
+                "kappa" => ParameterKind::Kappa,
+                other => return Err(refuse(&format!("`{other}` is not a parameter family"))),
+            };
+            let idx = usize::try_from(index[i] - 1)
+                .map_err(|_| refuse("its index is not a positive integer"))?;
+            let packed_index = if kind == ParameterKind::Theta {
+                (idx < params.theta.len())
+                    .then_some(idx)
+                    .ok_or_else(|| refuse("the model has no such theta"))?
+            } else {
+                let mut at = coords.iter().enumerate().filter(|(_, c)| **c == names[i]);
+                match (at.next(), at.next()) {
+                    (Some((p, _)), None) => p,
+                    _ => return Err(refuse("it names no single coordinate of the model")),
+                }
+            };
+            let reason = match reasons[i].as_str() {
+                "profiled_bound" => HeldReason::ProfiledBound,
+                "collapsed_at_guard" => HeldReason::CollapsedAtGuard,
+                // As core reads a reason it does not know (#2817): still held.
+                _ => HeldReason::Unknown,
+            };
+            Ok(ferx_core::HeldAtBound {
+                name: names[i].clone(),
+                kind,
+                index: idx,
+                packed_index,
+                reason,
+            })
+        })
+        .collect()
+}
+
 /// θ indices as the θ names R carries them by (`profiled_levels_at_bound`).
 fn theta_names_at(theta_names: &[String], idx: &[usize]) -> Vec<String> {
     idx.iter()
@@ -4904,9 +4995,18 @@ fn default_fit_result(
         // ferx-core #1065: the uncertainty draws do not read which blocks were
         // profiled; the fit's level values are already in `theta`.
         profiled_blocks: Vec::new(),
-        // ferx-core #2112: nor which levels a covariance step held on a bound;
-        // the matrix handed in already has their rows zero.
+        // ferx-core #2112 / #2797: which coordinates the fit's step held. The
+        // uncertainty draws read both lists, so `ferx_rust_simulate_with_uncertainty`
+        // sets them from the fit's bindings; no other skeleton step reads them.
         profiled_levels_at_bound: Vec::new(),
+        held_at_bound: Vec::new(),
+        // ferx-core #2799 / #2785: no optimizer ran in this scaffold, so it
+        // spent no budget, scored nothing by request, and has no stop or
+        // Newton decrement to report.
+        eval_budget_spent: false,
+        evaluation_only: false,
+        newton_decrement: None,
+        optimizer_stop: None,
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
@@ -5994,6 +6094,21 @@ fn cov_matrix_held(model: &CompiledModel, theta_fixed: &[bool], cov_matrix_dim: 
     }
 }
 
+/// The FIX mask [`cov_matrix_held`] builds, plus every row the fit's own
+/// covariance step held (`FitResult::cov_fixed`): since ferx-core #2797 a
+/// coordinate collapsed onto the internal guard is held like a FIX one when `R`
+/// is clean, with an all-zero row and column. Left out of the mask, that row
+/// would read as an estimated parameter with a zero variance, and `cor_matrix`
+/// would warn about it. A step mask of another length is ignored.
+fn with_step_held(mut mask: Vec<bool>, step: &[bool]) -> Vec<bool> {
+    if mask.len() == step.len() {
+        for (m, &s) in mask.iter_mut().zip(step) {
+            *m |= s;
+        }
+    }
+    mask
+}
+
 /// Row / column labels of the packed covariance matrix (ferx-r #437), one per
 /// coordinate in the engine's packing order - θ, Ω, σ, Ω_IOV, the `[mixture]`
 /// Ω then Σ overrides, the `block_sigma` ρ's - so R no longer re-derives the
@@ -6171,20 +6286,56 @@ fn fit_result_to_list(
             model,
             &bindings.levels,
             &result.profiled_blocks,
-            &result.profiled_levels_at_bound,
+            &held_theta_indices(result),
             &result.theta_names,
             &result.theta,
             result.covariance_matrix.as_ref(),
             result.sir_resamples_packed.as_deref(),
         )?,
         covariate_stats: covariate_stats_to_r(&bindings.covariate_stats),
-        cov_fixed: cov_matrix_held(model, &result.theta_fixed, cov_matrix_dim),
+        cov_fixed: with_step_held(
+            cov_matrix_held(model, &result.theta_fixed, cov_matrix_dim),
+            &result.cov_fixed,
+        ),
         cov_labels: cov_matrix_labels(model, cov_matrix_dim),
         model_structure: model_structure_list(model),
         bundle,
         bundle_error,
     };
     fit_view_to_list(result, view)
+}
+
+/// Every θ the covariance step reports no standard error for: the θ entries of
+/// `FitResult::held_at_bound` (ferx-core #2797) whatever their reason, plus
+/// `profiled_levels_at_bound` (#2112), which a fit from before #2797 carries
+/// alone. `fit$theta_levels` gives each of them an NA `se` (#737 review,
+/// finding 2), as `fit$estimates` and `print()` do.
+fn held_theta_indices(result: &FitResult) -> Vec<usize> {
+    let mut held: Vec<usize> = result
+        .held_at_bound
+        .iter()
+        .filter(|h| h.kind == ferx_core::ParameterKind::Theta)
+        .map(|h| h.index)
+        .collect();
+    for &k in &result.profiled_levels_at_bound {
+        if !held.contains(&k) {
+            held.push(k);
+        }
+    }
+    held
+}
+
+/// `FitResult::held_at_bound` (ferx-core #2797) as R columns: the parameter's
+/// name, its family's `[parameters]` keyword, its 1-based index within the
+/// family, and the reason's token (`profiled_bound`, `collapsed_at_guard`, or
+/// `unknown` for one a later ferx added).
+fn held_at_bound_to_r(held: &[ferx_core::HeldAtBound]) -> List {
+    list!(
+        parameter = held.iter().map(|h| h.name.clone()).collect::<Vec<String>>(),
+        kind = held.iter().map(|h| h.kind.keyword().to_string()).collect::<Vec<String>>(),
+        index = held.iter().map(|h| h.index as i32 + 1).collect::<Vec<i32>>(),
+        reason = held.iter().map(|h| h.reason.as_str().to_string()).collect::<Vec<String>>()
+    )
 }
 
 /// The fit list, for a fresh fit and a loaded one alike.
@@ -6843,9 +6994,25 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
     // (#430) and its se and SIR interval (#528); zero rows for a model with no
     // level block.
     let theta_levels = view.theta_levels;
+    // ferx-core #2799: the usability verdict beside `converged`, computed by the
+    // engine from the result's own fields on every call - so a reloaded or
+    // re-covarianced fit gets it fresh, and R holds no rule of its own.
+    let status = result.status();
 
     Ok(list!(
         converged = result.converged,
+        // `converged`, `converged_with_issues` or `not_converged`.
+        status = status.token(),
+        // The console's spelling of it: `CONVERGED WITH ISSUES`.
+        status_label = status.label(),
+        // Each reason in the engine's fixed order (`budget_spent`,
+        // `condition_number`, `collapsed_at_guard: ETA_KA`); empty when none.
+        status_reasons = status.reasons().iter().map(|r| r.label()).collect::<Vec<String>>(),
+        // The two inputs to the verdict core does not derive from other fields
+        // (ferx-r #736): the outer optimizer spent its evaluation budget, and no
+        // stage estimated (`maxiter = 0`, or a standalone imp/agq eval-only chain).
+        eval_budget_spent = result.eval_budget_spent,
+        evaluation_only = result.evaluation_only,
         method = method_label,
         method_chain = method_chain,
         // The interaction flag the fit's objective ran under, which SAEM, IMP
@@ -6878,6 +7045,12 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         // (ferx-core #2112), by θ name: no standard error for them, the others
         // conditional on them. Empty for a fit with none.
         profiled_levels_at_bound = theta_names_at(&theta_names, &result.profiled_levels_at_bound),
+        // Every coordinate the covariance step reports no standard error for
+        // (ferx-core #2797): a profiled level on its declared bound, or a
+        // parameter collapsed onto the engine's internal guard. Columns
+        // `parameter`, `kind`, `index` (1-based, within its family) and
+        // `reason`; R makes it a data frame.
+        held_at_bound = held_at_bound_to_r(&result.held_at_bound),
         // The `[covariate_model]` statistics the fit was bound with (ferx-r
         // #412); empty for a model that states none symbolically.
         covariate_stats = view.covariate_stats,
