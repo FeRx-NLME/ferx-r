@@ -1611,7 +1611,7 @@ fn ferx_rust_simulate_with_uncertainty(
             )),
         };
 
-        let fit_result =
+        let mut fit_result =
             match build_fit_result_for_uncertainty(
                 &parsed.model,
                 &theta,
@@ -1633,6 +1633,15 @@ fn ferx_rust_simulate_with_uncertainty(
                 Ok(f) => f,
                 Err(e) => return Err(e),
             };
+        // What the fit's covariance step held (#737 review, finding 3): the
+        // asymptotic draws keep a profiled level on its bound (ferx-core #2418)
+        // and a guard collapse on its rail (#2797) from these two lists. A zero
+        // row in the matrix is not enough, since the regularised Cholesky adds
+        // 1e-8 to it, and the coordinate would scatter about 1e-4 around its value.
+        let template = &parsed.model.default_params;
+        fit_result.profiled_levels_at_bound =
+            profiled_levels_at_bound_from_r(&fit_bindings, &template.theta_names)?;
+        fit_result.held_at_bound = held_at_bound_from_r(&fit_bindings, template)?;
 
         let opts = ferx_core::SimulateUncertaintyOptions {
             n_uncertainty_draws: n_uncertainty_draws.max(0) as usize,
@@ -4017,6 +4026,84 @@ fn profiled_levels_at_bound_from_r(
     Ok(held)
 }
 
+/// The fit's `held_at_bound` (ferx-core #2797) from the `held_*` columns of the
+/// `fit_bindings` list, rebuilt as the engine's entries. R's table has no packed
+/// index, so it is found again: a θ's is its index, and any other's is the
+/// coordinate the engine names the same (`coordinate_names`, which named it in
+/// the first place). Empty when the columns are absent. A row that names no
+/// coordinate of the model is refused rather than dropped, since the draws would
+/// then scatter what the fit held.
+fn held_at_bound_from_r(
+    r: &List,
+    params: &ModelParameters,
+) -> std::result::Result<Vec<ferx_core::HeldAtBound>, String> {
+    let cols: HashMap<&str, Robj> = r.iter().collect();
+    let strings = |name: &str| -> std::result::Result<Vec<String>, String> {
+        match cols.get(name) {
+            None => Ok(Vec::new()),
+            Some(v) if v.is_null() => Ok(Vec::new()),
+            Some(v) => v.as_string_vector().ok_or_else(|| {
+                format!("internal: `fit_bindings${name}` is not a character vector")
+            }),
+        }
+    };
+    let names = strings("held_parameter")?;
+    let kinds = strings("held_kind")?;
+    let reasons = strings("held_reason")?;
+    let index: Vec<i32> = match cols.get("held_index") {
+        None => Vec::new(),
+        Some(v) if v.is_null() => Vec::new(),
+        Some(v) => v.as_integer_vector().ok_or_else(|| {
+            "internal: `fit_bindings$held_index` is not an integer vector".to_string()
+        })?,
+    };
+    let n = names.len();
+    if kinds.len() != n || reasons.len() != n || index.len() != n {
+        return Err("internal: the `fit_bindings$held_*` columns are not parallel".to_string());
+    }
+    let coords = ferx_core::estimation::parameterization::coordinate_names(params);
+    (0..n)
+        .map(|i| {
+            let refuse = |why: &str| {
+                format!("fit$held_at_bound row {} (`{}`): {why}", i + 1, names[i])
+            };
+            let kind = match kinds[i].as_str() {
+                "theta" => ParameterKind::Theta,
+                "omega" => ParameterKind::Omega,
+                "sigma" => ParameterKind::Sigma,
+                "kappa" => ParameterKind::Kappa,
+                other => return Err(refuse(&format!("`{other}` is not a parameter family"))),
+            };
+            let idx = usize::try_from(index[i] - 1)
+                .map_err(|_| refuse("its index is not a positive integer"))?;
+            let packed_index = if kind == ParameterKind::Theta {
+                (idx < params.theta.len())
+                    .then_some(idx)
+                    .ok_or_else(|| refuse("the model has no such theta"))?
+            } else {
+                let mut at = coords.iter().enumerate().filter(|(_, c)| **c == names[i]);
+                match (at.next(), at.next()) {
+                    (Some((p, _)), None) => p,
+                    _ => return Err(refuse("it names no single coordinate of the model")),
+                }
+            };
+            let reason = match reasons[i].as_str() {
+                "profiled_bound" => HeldReason::ProfiledBound,
+                "collapsed_at_guard" => HeldReason::CollapsedAtGuard,
+                // As core reads a reason it does not know (#2817): still held.
+                _ => HeldReason::Unknown,
+            };
+            Ok(ferx_core::HeldAtBound {
+                name: names[i].clone(),
+                kind,
+                index: idx,
+                packed_index,
+                reason,
+            })
+        })
+        .collect()
+}
+
 /// θ indices as the θ names R carries them by (`profiled_levels_at_bound`).
 fn theta_names_at(theta_names: &[String], idx: &[usize]) -> Vec<String> {
     idx.iter()
@@ -4908,15 +4995,10 @@ fn default_fit_result(
         // ferx-core #1065: the uncertainty draws do not read which blocks were
         // profiled; the fit's level values are already in `theta`.
         profiled_blocks: Vec::new(),
-        // ferx-core #2112: which levels the step held on a bound. Left empty
-        // for the reason given at `held_at_bound` below.
+        // ferx-core #2112 / #2797: which coordinates the fit's step held. The
+        // uncertainty draws read both lists, so `ferx_rust_simulate_with_uncertainty`
+        // sets them from the fit's bindings; no other skeleton step reads them.
         profiled_levels_at_bound: Vec::new(),
-        // ferx-core #2797: which coordinates the fit's step held at the guard.
-        // Left empty, although the uncertainty draws read it: `draw_asymptotic`
-        // clamps a held coordinate to its rail from this list (a zero row in
-        // the matrix is not enough, since the regularised Cholesky adds 1e-8),
-        // and so lets it scatter about 1e-4 around the rail instead. Passing
-        // it (and `profiled_levels_at_bound`) is tracked in its own issue.
         held_at_bound: Vec::new(),
         // ferx-core #2799 / #2785: no optimizer ran in this scaffold, so it
         // spent no budget, scored nothing by request, and has no stop or

@@ -254,3 +254,71 @@ test_that("a guard-collapsed level theta has no se in theta_levels either (#737 
   others <- fit$theta_levels$theta_name != lv & !is.na(fit$theta_levels$theta_name)
   expect_identical(fit$theta_levels$se[others], base$theta_levels$se[others])
 })
+
+# The real guard-collapse fit (ETA_KA held), with TVKA also held through `how`:
+# its covariance row and column zeroed, as the step leaves a held coordinate,
+# and listed in held_at_bound ("collapsed") or profiled_levels_at_bound
+# ("profiled").
+collapse_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      dir <- test_path("fixtures", "guard_collapse")
+      fit <<- quiet(ferx_fit(file.path(dir, "guard_collapse.ferx"),
+                             file.path(dir, "guard_collapse.csv"), verbose = FALSE))
+    }
+    fit
+  }
+})
+
+with_tvka_held <- function(fit, how) {
+  k <- match("TVKA", rownames(fit$cov_matrix))
+  stopifnot(!is.na(k))
+  fitrx_edit_fit(fit, function(w) {
+    n <- w$covariance_matrix$rows
+    cells <- expand.grid(i = seq_len(n), j = seq_len(n))
+    w$covariance_matrix$data[cells$i == k | cells$j == k] <- list(0)
+    if (how == "collapsed") {
+      w$held_at_bound <- c(w$held_at_bound, list(list(
+        name = "TVKA", kind = "Theta", index = k - 1L, packed_index = k - 1L,
+        reason = "collapsed_at_guard"
+      )))
+    } else if (how == "profiled") {
+      w$profiled_levels_at_bound <- list(k - 1L)
+    }
+    w
+  })
+}
+
+# TVKA as each simulated subject was drawn with: KA = TVKA * exp(ETA_KA).
+drawn_tvka <- function(fit) {
+  dir <- test_path("fixtures", "guard_collapse")
+  sims <- quiet(ferx_simulate_with_uncertainty(
+    file.path(dir, "guard_collapse.ferx"), file.path(dir, "guard_collapse.csv"),
+    fit, n_uncertainty_draws = 20L, seed = 3L
+  ))
+  p <- attr(sims, "parameters")
+  p$KA / exp(p$ETA_KA)
+}
+
+test_that("uncertainty draws keep a held coordinate on its value (#737 review, finding 3)", {
+  skip_on_cran()
+  base <- collapse_fit()
+  tvka <- unname(base$theta[["TVKA"]])
+  # Control: TVKA has a standard error, so its draws spread. Only what the fit
+  # holds is held (ETA_KA's hold landing on the wrong coordinate fails here).
+  free <- drawn_tvka(base)
+  expect_gt(max(abs(free / tvka - 1)), 1e-3)
+  # Held, it is drawn at its estimate every time, whichever list holds it. A
+  # zero covariance row alone lets it scatter about 1e-4 around it, since the
+  # regularised Cholesky adds 1e-8 to the diagonal.
+  for (how in c("collapsed", "profiled")) {
+    held <- drawn_tvka(with_tvka_held(base, how))
+    expect_lt(max(abs(held / tvka - 1)), 1e-12, label = how)
+  }
+  # The zero row alone, listed nowhere: the scatter the lists prevent. ETA_KA,
+  # omega index 3, is listed and must be held as itself, not as TVKA (theta
+  # index 3), whose row is now zero too.
+  zero_only <- drawn_tvka(with_tvka_held(base, "zero_row_only"))
+  expect_gt(max(abs(zero_only / tvka - 1)), 1e-6)
+})
