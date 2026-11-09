@@ -332,7 +332,13 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     sprintf("  OFV   = %.6g", fit$ofv %||% NA_real_),
     sprintf("  AIC   = %.6g", fit$aic %||% NA_real_),
     sprintf("  BIC   = %.6g", fit$bic %||% NA_real_),
-    sprintf("  Convergence: %s", if (isTRUE(fit$converged)) "YES" else "NO")
+    sprintf("  Convergence: %s", if (isTRUE(fit$converged)) "YES" else "NO"),
+    # The engine's verdict (ferx-core #2799) and its reasons.
+    local({
+      st <- .ferx_fit_status(fit)
+      sprintf("  Status:      %s%s", st$label,
+              if (length(st$reasons) > 0L) sprintf(" (%s)", paste(st$reasons, collapse = ", ")) else "")
+    })
   )
   lines <- c(lines, .blank())
 

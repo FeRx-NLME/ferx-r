@@ -513,6 +513,29 @@ test_that(".ferx_warning_guidance never recommends SDE process noise for positiv
   # longer reach. There is no longer a side of that toggle that shows it.
   expect_false("uses_sde" %in% names(formals(ferx:::.ferx_warning_guidance)))
 })
+test_that(".ferx_warning_guidance defers to the engine's ar1 advice on a compartment-free model (ferx-core #2815)", {
+  # The engine's Algebraic wording, both shapes (with and without a grouping).
+  grouped <- paste(
+    "Positive IWRES autocorrelation detected (Durbin-Watson = 1.21). Rows of one",
+    "`STUDY` group may share what the structural model leaves out. A",
+    "`correlation ar1(RHO) by STUDY` line in [error_model] lets them correlate."
+  )
+  ungrouped <- paste(
+    "Positive IWRES autocorrelation detected (Durbin-Watson = 1.21). Rows of one",
+    "subject may share what the structural model leaves out. A `correlation",
+    "ar1(RHO) by COL` line in [error_model] lets them correlate."
+  )
+  expect_null(ferx:::.ferx_warning_guidance("dw_autocorrelation", grouped))
+  expect_null(ferx:::.ferx_warning_guidance("dw_autocorrelation", ungrouped))
+  # The compartmental wording keeps the R hint.
+  pk <- paste(
+    "Positive IWRES autocorrelation detected (Durbin-Watson = 1.21). Structural",
+    "model may be missing dynamics. Consider a transit absorption model,",
+    "additional compartment, or IOV on ka/F."
+  )
+  expect_match(ferx:::.ferx_warning_guidance("dw_autocorrelation", pk),
+               "transit absorption", fixed = TRUE)
+})
 test_that(".ferx_warning_guidance returns negative-autocorrelation guidance", {
   neg <- ferx:::.ferx_warning_guidance("dw_autocorrelation", "Negative autocorrelation")
   expect_match(neg, "Negative IWRES autocorrelation")

@@ -1039,6 +1039,12 @@
 #'     \code{"covariance_failed"}, and \code{"collapsed_at_guard: ETA_KA"}
 #'     for a collapse the covariance step ran on but did not hold. Listed for a
 #'     not-converged fit too; \code{character(0)} when there are none.}
+#'   \item{eval_budget_spent}{Logical; the outer optimizer spent its
+#'     evaluation budget. \code{FALSE} on a bundle written before it existed.}
+#'   \item{evaluation_only}{Logical; no stage estimated - the run scored the
+#'     given values by request (\code{maxiter = 0}, or a standalone
+#'     \code{imp_eval_only} / \code{agq_eval_only} chain). \code{FALSE} on a
+#'     bundle written before it existed.}
 #'   \item{method}{Estimation method used}
 #'   \item{interaction}{Logical; the interaction flag the fitted objective
 #'     ran under. `TRUE` for FOCEI and `FALSE` for FOCE; SAEM, VI and
@@ -3812,6 +3818,8 @@ summary.ferx_fit <- function(object, ...) {
     method_chain = x$method_chain,
     converged = x$converged,
     ofv = x$ofv,
+    # The engine's verdict (ferx-core #2799), for the Status line.
+    status = .ferx_fit_status(x),
     # Parameter-prior split (ferx-core #254). Carried onto the summary object
     # so print.ferx_summary() can annotate its OFV line the same way
     # print.ferx_fit() does; both halves collapse to the unpriored values when
@@ -3869,6 +3877,13 @@ print.ferx_summary <- function(x, ...) {
   cat(sprintf("Model:     %s\n", x$model_name %||% "?"))
   cat(sprintf("Dataset:   %s\n", x$data_name %||% "?"))
   cat(sprintf("Converged: %s\n", if (isTRUE(x$converged)) "YES" else "NO"))
+  # The engine's verdict beside it (ferx-core #2799), as its own summary
+  # prints it: the label, and the reasons in parentheses when there are any.
+  st <- x$status
+  if (is.list(st) && !is.null(st$label)) {
+    cat(sprintf("Status:    %s%s\n", st$label,
+                if (length(st$reasons) > 0L) sprintf(" (%s)", paste(st$reasons, collapse = ", ")) else ""))
+  }
 
   sde_tag <- if (isTRUE(x$uses_sde)) " + SDE (EKF)" else ""
   if (!is.null(x$method_chain) && length(x$method_chain) > 1L) {

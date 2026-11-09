@@ -6901,6 +6901,11 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         // Each reason in the engine's fixed order (`budget_spent`,
         // `condition_number`, `collapsed_at_guard: ETA_KA`); empty when none.
         status_reasons = status.reasons().iter().map(|r| r.label()).collect::<Vec<String>>(),
+        // The two inputs to the verdict core does not derive from other fields
+        // (ferx-r #736): the outer optimizer spent its evaluation budget, and no
+        // stage estimated (`maxiter = 0`, or a standalone imp/agq eval-only chain).
+        eval_budget_spent = result.eval_budget_spent,
+        evaluation_only = result.evaluation_only,
         method = method_label,
         method_chain = method_chain,
         // The interaction flag the fit's objective ran under, which SAEM, IMP

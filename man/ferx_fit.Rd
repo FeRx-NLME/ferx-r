@@ -166,12 +166,15 @@ genuinely exclude them, use \code{ignore = "CENS == 1"}.}
 \item{threads}{Number of worker threads for the per-subject parallel loops
 in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
 uses the model file's \code{[fit_options] threads}; when the file does not
-set it, the engine's default: available cores minus one (floored at 1),
-capped at 8 -- most fits gain little from spreading across every core, and
-not all cores are equal on asymmetric platforms (e.g. Apple Silicon
-E-cores). \code{0} asks for the engine default by name and overrides a
-count pinned in the file. A positive integer pins the count and overrides
-the file. Either explicit value warns when it differs from the file's.
+set it, the engine's default: a positive \code{RAYON_NUM_THREADS}
+environment variable used as given (read once per R session), else
+available cores minus one (floored at 1), capped at 8 -- most fits gain
+little from spreading across every core, and not all cores are equal on
+asymmetric platforms (e.g. Apple Silicon E-cores). \code{0} asks for the
+engine default by name and overrides a count pinned in the file. A
+positive integer pins the count and overrides the file. Either explicit
+value warns when it differs from the file's, and a count above the
+available CPUs warns that the workers time-share the cores.
 The setting is per-call,
 so successive fits in the same R session can use different values.}
 
@@ -1061,7 +1064,35 @@ A named list. Where to find commonly-needed quantities:\tabular{llll}{
 
 
 Full slot descriptions:
-\item{converged}{Logical; did the optimizer converge}
+\item{converged}{Logical; did the optimizer converge. Its stop must
+also be a stationary point for FOCE, FOCEI, Laplace / AGQ and
+Gauss-Newton fits (ferx-core #2785). See \code{status} for whether the
+fit can be used as it stands.}
+\item{status}{The engine's verdict on whether the fit can be used as it
+stands (ferx-core #2799): \code{"converged"},
+\code{"converged_with_issues"} or \code{"not_converged"}. It reads
+\code{converged} together with the evaluation budget, the critical
+warnings, the covariance step and \code{held_at_bound}, and never
+changes \code{converged}. Recomputed by \code{ferx_covariance()} and
+on \code{ferx_load_fit()}, so a bundle written before it existed has
+one too. \code{print()} shows it on its \code{STATUS} line.}
+\item{status_label}{\code{status} as the console spells it:
+\code{"CONVERGED"}, \code{"CONVERGED WITH ISSUES"},
+\code{"NOT CONVERGED"}.}
+\item{status_reasons}{Character vector of what qualifies \code{status},
+in the engine's fixed order: \code{"evaluation_only"} (the run scored
+the given values, e.g. \code{maxiter = 0}), \code{"budget_spent"} (the
+optimizer ran out of evaluations), each critical warning's category
+(e.g. \code{"parameter_at_runaway_guard"}),
+\code{"covariance_failed"}, and \code{"collapsed_at_guard: ETA_KA"}
+for a collapse the covariance step ran on but did not hold. Listed for a
+not-converged fit too; \code{character(0)} when there are none.}
+\item{eval_budget_spent}{Logical; the outer optimizer spent its
+evaluation budget. \code{FALSE} on a bundle written before it existed.}
+\item{evaluation_only}{Logical; no stage estimated - the run scored the
+given values by request (\code{maxiter = 0}, or a standalone
+\code{imp_eval_only} / \code{agq_eval_only} chain). \code{FALSE} on a
+bundle written before it existed.}
 \item{method}{Estimation method used}
 \item{interaction}{Logical; the interaction flag the fitted objective
 ran under. \code{TRUE} for FOCEI and \code{FALSE} for FOCE; SAEM, VI and
@@ -1153,7 +1184,23 @@ as \code{N/A}, \code{fit$estimates} and \code{fit$theta_levels} give
 it an \code{NA} \code{se}, and every other standard error is computed
 with it held. \code{fit$se_theta} keeps the engine's \code{0} for it,
 as for a FIX theta. Survives \code{ferx_save_fit()} /
-\code{ferx_load_fit()}.}
+\code{ferx_load_fit()}. Deprecated in favour of \code{held_at_bound},
+which lists the same levels (reason \code{"profiled_bound"}).}
+\item{held_at_bound}{Data frame of every parameter the covariance step
+reports no standard error for (ferx-core #2797), one row each, with
+columns \code{parameter} (its name in the estimates), \code{kind}
+(\code{"theta"}, \code{"omega"}, \code{"sigma"} or \code{"kappa"}),
+\code{index} (1-based, within its family) and \code{reason}:
+\code{"profiled_bound"} for a profiled level on its declared bound,
+\code{"collapsed_at_guard"} for a variance or sigma collapsed onto the
+floor of its log packing, or a theta with no declared lower bound on
+the internal \code{1e-10} floor, and \code{"unknown"} for a reason a
+later ferx added. \code{print()}, \code{fit$estimates} and
+\code{ferx_runlog()} show each one's SE as \code{N/A} / \code{NA}.
+When the step's \code{R} matrix is clean, a collapsed parameter is held
+like a FIX one: its \code{fit$se_*} entry is the engine's \code{0},
+\code{cov_fixed} marks it, and every other SE is conditional on it at
+its estimate. Zero rows when nothing is held.}
 \item{covariate_stats}{Data frame of the statistics a
 \code{[covariate_model]} relation stated symbolically
 (\code{center = median}, \code{ref = mode}, \code{levels = auto}) was
@@ -1380,14 +1427,20 @@ Cholesky parameterisation before reading correlations off it.}
 \code{omega}.}
 \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
 fewer than 2 valid residuals.}
-\item{dw_statistic}{Pooled Durbin-Watson statistic for IWRES within
-subjects. 2.0 = no autocorrelation; < 1.5 = positive autocorrelation
+\item{dw_statistic}{Pooled Durbin-Watson statistic for IWRES over pairs
+of consecutive rows of one subject that share an occasion (an IOV
+column, or a nested model's innermost level cell) and, under a
+\code{correlation ... by} line, a residual block. The denominator is
+pair-normalised, so independent residuals give 2 however short the
+series (ferx-core #2798); values from earlier versions of ferx are
+not comparable. 2.0 = no autocorrelation; < 1.5 = positive autocorrelation
 (possible missing dynamics); > 2.5 = negative autocorrelation (possible
-over-parameterisation). \code{NA} when no subject has \eqn{\ge 2} valid
-IWRES values.}
-\item{iwres_lag1_r}{Pooled lag-1 Pearson correlation of IWRES within
-subjects. Positive values indicate under-fitting, negative values
-indicate over-fitting. \code{NA} when insufficient observations.}
+over-parameterisation). \code{NA} when no such pair has two valid IWRES
+values.}
+\item{iwres_lag1_r}{Pooled lag-1 Pearson correlation of IWRES over the
+same pairs as \code{dw_statistic}. Positive values indicate
+under-fitting, negative values indicate over-fitting. \code{NA} when
+insufficient observations.}
 \item{wall_time_secs}{Total wall-clock time for the fit in seconds.}
 \item{covariance_wall_time_secs}{Wall-clock seconds spent in the
 covariance step. On a fresh fit it is part of \code{wall_time_secs}.
@@ -1587,8 +1640,9 @@ correlation matrix.}
 \code{cov_matrix} and named like them: \code{TRUE} for a coordinate the
 engine held rather than estimated - a parameter declared \code{FIX}, a
 theta the engine held because it had no effect on the objective (see
-\code{theta_fixed}), or a structural-zero covariance of a mixed block
-omega. Such a row and
+\code{theta_fixed}), a structural-zero covariance of a mixed block
+omega, or a parameter collapsed onto the internal guard that the
+covariance step held (see \code{held_at_bound}). Such a row and
 column of \code{cov_matrix} are all zero; one that is not is reported
 with a warning. \code{NULL} when
 \code{cov_matrix} is \code{NULL}, and on a fit reloaded from a bundle
