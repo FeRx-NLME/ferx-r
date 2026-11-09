@@ -3182,16 +3182,6 @@ print.ferx_fit <- function(x, ...) {
     status_lbl <- if (isTRUE(x$converged)) "CONVERGED" else "NOT CONVERGED"
     status_style <- if (isTRUE(x$converged)) "green" else "red"
     status_tail <- character(0)
-    # Categories come from the engine; no R-side string parsing needed. Read
-    # through .ferx_fit_warnings() so a loaded fit's flat warnings count too.
-    ws <- .ferx_fit_warnings(x)
-    if (!is.null(ws) && is.data.frame(ws) && all(c("severity", "category") %in% names(ws))) {
-      crit_rows <- ws[ws$severity == "critical", , drop = FALSE]
-      if (nrow(crit_rows) > 0L) {
-        cats <- unique(crit_rows$category)
-        status_tail <- c(status_tail, sprintf("(%s)", paste(cats, collapse = ", ")))
-      }
-    }
   }
   if (!is.null(x$n_iterations)) status_tail <- c(status_tail, sprintf("%d iterations", x$n_iterations))
   if (!is.null(x$wall_time_secs)) status_tail <- c(status_tail, sprintf("%.1fs", x$wall_time_secs))

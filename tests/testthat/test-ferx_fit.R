@@ -3274,76 +3274,31 @@ test_that("print.ferx_fit handles missing omega_init_as_sd gracefully (old fit o
   out <- capture.output(print(fit))
   expect_false(any(grepl("\\[initial specified as SD\\]", out)))
 })
-test_that("print.ferx_fit appends critical category to STATUS when fit did not converge", {
+# The STATUS tail is ferx-core's `status_reasons` (#2799), never R's own reading
+# of the warnings: a critical warning core did not list prints nothing, with or
+# without a status on the list.
+crit_ws <- data.frame(
+  severity = "critical", category = "convergence",
+  message = "Outer optimization did not converge", source_method = "",
+  stringsAsFactors = FALSE
+)
+test_that("print.ferx_fit STATUS tail is core's status_reasons, not the warnings", {
   fit <- make_fake_fit(
-    omega     = matrix(0.10, 1, 1),
-    converged = FALSE,
-    warnings_structured = data.frame(
-      severity = c("critical", "info"),
-      category = c("convergence", "mu_referencing"),
-      message  = c("Outer optimization did not converge",
-                   "mu-ref: CL, V"),
-      source_method = c("", ""),
-      stringsAsFactors = FALSE
-    )
+    omega = matrix(0.10, 1, 1), converged = FALSE,
+    status = "not_converged", status_label = "NOT CONVERGED",
+    status_reasons = character(0), warnings_structured = crit_ws
   )
-  out <- capture.output(print(fit))
-  status_line <- out[grepl("STATUS", out)]
+  status_line <- grep("STATUS", capture.output(print(fit)), value = TRUE)
   expect_length(status_line, 1L)
-  expect_true(grepl("NOT CONVERGED", status_line))
-  # Inline category appears between the label and the iteration/time tail.
-  expect_true(grepl("\\(convergence\\)", status_line))
+  expect_match(status_line, "NOT CONVERGED", fixed = TRUE)
+  expect_false(grepl("(", status_line, fixed = TRUE))
 })
-test_that("print.ferx_fit deduplicates and joins multiple critical categories", {
-  fit <- make_fake_fit(
-    omega     = matrix(0.10, 1, 1),
-    converged = FALSE,
-    warnings_structured = data.frame(
-      severity = c("critical", "critical", "critical"),
-      category = c("convergence", "covariance_step", "convergence"),
-      message  = c("a", "b", "c"),
-      source_method = c("", "", ""),
-      stringsAsFactors = FALSE
-    )
-  )
-  out <- capture.output(print(fit))
-  status_line <- out[grepl("STATUS", out)]
-  expect_true(grepl("\\(convergence, covariance_step\\)", status_line))
-})
-test_that("print.ferx_fit STATUS has no inline category when there are no critical warnings", {
-  fit <- make_fake_fit(
-    omega     = matrix(0.10, 1, 1),
-    converged = TRUE,
-    warnings_structured = data.frame(
-      severity = "info",
-      category = "mu_referencing",
-      message  = "mu-ref: CL",
-      source_method = "",
-      stringsAsFactors = FALSE
-    )
-  )
-  out <- capture.output(print(fit))
-  status_line <- out[grepl("STATUS", out)]
-  expect_true(grepl("CONVERGED", status_line))
-  # No parenthesised category snippet because nothing is critical.
-  expect_false(grepl("\\(mu_referencing\\)|\\(convergence\\)", status_line))
-})
-test_that("print.ferx_fit STATUS has no inline category when non-converged fit has only info warnings", {
-  fit <- make_fake_fit(
-    omega     = matrix(0.10, 1, 1),
-    converged = FALSE,
-    warnings_structured = data.frame(
-      severity = "info",
-      category = "mu_referencing",
-      message  = "mu-ref: CL",
-      source_method = "",
-      stringsAsFactors = FALSE
-    )
-  )
-  out <- capture.output(print(fit))
-  status_line <- out[grepl("STATUS", out)]
-  expect_true(grepl("NOT CONVERGED", status_line))
-  expect_false(grepl("\\(", status_line))
+test_that("print.ferx_fit STATUS without a status reads `converged` alone", {
+  fit <- make_fake_fit(omega = matrix(0.10, 1, 1), converged = FALSE,
+                       warnings_structured = crit_ws)
+  status_line <- grep("STATUS", capture.output(print(fit)), value = TRUE)
+  expect_match(status_line, "STATUS: NOT CONVERGED", fixed = TRUE)
+  expect_false(grepl("(convergence)", status_line, fixed = TRUE))
 })
 
 # se_omega display (#143): print() shows "SE = ..." for omega diagonal and
