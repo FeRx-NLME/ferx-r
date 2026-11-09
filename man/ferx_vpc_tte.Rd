@@ -134,10 +134,11 @@ cumulative incidence; with \code{cmt} set, the curve is that cause's
 survival with the other causes as censoring); a \code{cmt} that is not a TTE
 endpoint; a repeated-events endpoint; left truncation (delayed entry); an
 interval-censored record; more than one record per subject on the endpoint;
-no record on it at all; band probabilities not strictly increasing inside
-(0, 1), or too few replicates for them; a grid time that is negative; and a
-stratification covariate a subject lacks, or with more than 10 values (bin
-it into a categorical covariate first).
+a subject id that appears in two separate runs of rows; no record on the
+endpoint at all; band probabilities not strictly increasing inside (0, 1),
+or too few replicates for them; a grid time that is not finite and
+non-negative; and a stratification covariate a subject lacks, or with more
+than 10 values (bin it into a categorical covariate first).
 }
 
 \examples{

@@ -62,6 +62,13 @@ test_that("ferx_vpc_tte returns the observed curve and the band per stratum", {
   expect_equal(unlist(v$band[1, c("obs", "lo", "med", "hi")]),
                c(obs = 1, lo = 1, med = 1, hi = 1))
   expect_true(all(v$band$n_used <= 50L))
+  # `obs` is the observed curve read at each grid time (right-continuous).
+  o <- v$observed
+  def <- !is.na(v$band$obs)
+  expect_gt(sum(def), 50L)
+  expect_gt(length(unique(v$band$obs[def])), 5L)
+  expect_equal(v$band$obs[def],
+               stats::stepfun(o$time, c(1, o$surv))(v$band$time[def]))
   # The automatic grid holds 101 evenly spaced points up to H.
   expect_true(all(vapply(v$horizon * (0:100) / 100, function(t)
     any(abs(v$band$time - t) < 1e-9), logical(1))))
@@ -177,6 +184,23 @@ test_that("each refusal comes back as E_VPC_TTE_INPUT", {
   expect_vpc_tte_refusal(ferx_vpc_tte(m, d, n_sim = 20L, grid = c(0, -1)),
                          "not a finite, non-negative")
 
+  # A model with no TTE endpoint.
+  w <- ferx_example("warfarin")
+  expect_vpc_tte_refusal(ferx_vpc_tte(w$model, w$data, n_sim = 20L),
+                         "declares no TTE endpoint")
+
+  # No subject has a record on the endpoint.
+  d1 <- d
+  d1$CMT <- 1L
+  expect_vpc_tte_refusal(ferx_vpc_tte(m, d1, n_sim = 20L),
+                         "no subject has a record on cmt 2")
+
+  # One subject id in two separate runs of rows.
+  dd <- d
+  dd$ID[30] <- 1L
+  expect_vpc_tte_refusal(ferx_vpc_tte(m, dd, n_sim = 20L),
+                         "subject id 1 appears more than once")
+
   # Repeated events.
   rtte <- vpc_tte_model("  type   = rtte")
   dr <- data.frame(ID = rep(1:3, each = 2), TIME = c(3, 30, 5, 30, 8, 30),
@@ -220,6 +244,24 @@ test_that("arguments are checked before the engine is called", {
   expect_error(ferx_vpc_tte(ex$model, ex$data, strata = c("A", "B")), "strata")
 })
 
+test_that("the plotted intervals stop at the horizon", {
+  ex <- ferx_example("tte_exponential")
+  # Grid times past H start no interval, and the last one ends at H.
+  v <- vpc_tte_quiet(ex$model, ex$data, n_sim = 20L, horizon = 25,
+                     grid = c(0, 10, 20, 50))
+  bins <- ferx:::.ferx_vpc_tte_bins(v$band, v$horizon)
+  expect_equal(bins$time, c(0, 10, 20))
+  expect_equal(bins$bin_max, c(10, 20, 25))
+  expect_true(all(bins$time < bins$bin_max))
+  grDevices::pdf(NULL)
+  on.exit(grDevices::dev.off(), add = TRUE)
+  expect_identical(plot(v, engine = "base"), v)
+  skip_if_not_installed("vpc")
+  db <- ferx:::.ferx_vpc_tte_vpcdb(v)
+  expect_equal(db$sim_km$bin_min, c(0, 10, 20))
+  expect_equal(db$sim_km$bin_max, c(10, 20, 25))
+})
+
 test_that("plot() draws with base graphics and with vpc", {
   ex <- ferx_example("tte_exponential")
   d <- utils::read.csv(ex$data)
@@ -236,11 +278,14 @@ test_that("plot() draws with base graphics and with vpc", {
   # One facet per stratum, labelled as the engine labels it.
   expect_identical(as.character(built$layout$layout$STRATUM),
                    c("ARM=0", "ARM=1"))
-  # The ribbon is the band: bin_min/bin_max are consecutive grid times.
+  # The ribbon is the band: bin_min/bin_max are consecutive grid times, the
+  # last interval ending at H (the grid point at H starts none).
   db <- ferx:::.ferx_vpc_tte_vpcdb(v)
   s0 <- db$sim_km[db$sim_km$strat == "ARM=0", ]
-  b0 <- v$band[v$band$STRATUM == "ARM=0" & !is.na(v$band$lo), ]
+  b0 <- v$band[v$band$STRATUM == "ARM=0" & !is.na(v$band$lo) &
+                 v$band$time < v$horizon, ]
   expect_equal(s0$bin_min, b0$time)
+  expect_equal(utils::tail(s0$bin_max, 1), v$horizon)
   expect_equal(s0$qmin, b0$lo)
   expect_equal(s0$qmed, b0$med)
   expect_equal(s0$qmax, b0$hi)

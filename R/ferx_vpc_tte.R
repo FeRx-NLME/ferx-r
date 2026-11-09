@@ -41,10 +41,11 @@
 #' survival with the other causes as censoring); a \code{cmt} that is not a TTE
 #' endpoint; a repeated-events endpoint; left truncation (delayed entry); an
 #' interval-censored record; more than one record per subject on the endpoint;
-#' no record on it at all; band probabilities not strictly increasing inside
-#' (0, 1), or too few replicates for them; a grid time that is negative; and a
-#' stratification covariate a subject lacks, or with more than 10 values (bin
-#' it into a categorical covariate first).
+#' a subject id that appears in two separate runs of rows; no record on the
+#' endpoint at all; band probabilities not strictly increasing inside (0, 1),
+#' or too few replicates for them; a grid time that is not finite and
+#' non-negative; and a stratification covariate a subject lacks, or with more
+#' than 10 values (bin it into a categorical covariate first).
 #'
 #' @param model Path to a .ferx model file with an \code{[event_model]}
 #'   endpoint.
@@ -299,19 +300,27 @@ plot.ferx_vpc_tte <- function(x, y = NULL, engine = c("auto", "vpc", "base"),
   .ferx_vpc_tte_plot_base(x, ...)
 }
 
+# The band's grid intervals [time, bin_max) that lie inside [0, H): a grid
+# time at or past the horizon starts no interval, and the last interval ends
+# at H, not at the next grid time beyond it. Rows where the band is undefined
+# (NA, which only trails) are dropped.
+.ferx_vpc_tte_bins <- function(b, horizon) {
+  b <- b[order(b$time), , drop = FALSE]
+  b$bin_max <- pmin(c(b$time[-1L], horizon), horizon)
+  b[b$time < horizon & !is.na(b$lo) & !is.na(b$med) & !is.na(b$hi), ,
+    drop = FALSE]
+}
+
 # The band and the observed curve in the vpcdb shape vpc::vpc_tte() builds
 # (vpc 1.2.x): `sim_km` has one row per grid interval [bin_min, bin_max) with
 # qmin / qmed / qmax, `obs_km` the observed steps.
 .ferx_vpc_tte_vpcdb <- function(x) {
   sim_km <- do.call(rbind, lapply(levels(x$band$STRATUM), function(s) {
-    b <- x$band[x$band$STRATUM == s, , drop = FALSE]
-    b <- b[order(b$time), , drop = FALSE]
-    nxt <- c(b$time[-1L], x$horizon)
-    keep <- !is.na(b$lo) & !is.na(b$med) & !is.na(b$hi)
-    data.frame(strat = rep(s, sum(keep)), bin = which(keep),
-               bin_min = b$time[keep], bin_max = nxt[keep],
-               bin_mid = b$time[keep],
-               qmin = b$lo[keep], qmed = b$med[keep], qmax = b$hi[keep],
+    b <- .ferx_vpc_tte_bins(x$band[x$band$STRATUM == s, , drop = FALSE],
+                            x$horizon)
+    data.frame(strat = rep(s, nrow(b)), bin = seq_len(nrow(b)),
+               bin_min = b$time, bin_max = b$bin_max, bin_mid = b$time,
+               qmin = b$lo, qmed = b$med, qmax = b$hi,
                stringsAsFactors = FALSE)
   }))
   # The observed curve starts at S(0) = 1, as survfit's plot does.
@@ -353,17 +362,15 @@ plot.ferx_vpc_tte <- function(x, y = NULL, engine = c("auto", "vpc", "base"),
   old <- graphics::par(mfrow = c(ceiling(n / nc), nc), mar = c(4, 4, 2.5, 1))
   on.exit(graphics::par(old), add = TRUE)
   for (s in panels) {
-    b <- x$band[x$band$STRATUM == s, , drop = FALSE]
-    b <- b[order(b$time), , drop = FALSE]
+    b <- .ferx_vpc_tte_bins(x$band[x$band$STRATUM == s, , drop = FALSE],
+                            x$horizon)
     o <- x$observed[x$observed$STRATUM == s, , drop = FALSE]
     graphics::plot(c(0, x$horizon), c(0, 1), type = "n", xlab = "Time",
                    ylab = "Survival", main = if (n > 1L) s else "", ...)
-    keep <- !is.na(b$lo) & !is.na(b$hi)
-    nxt <- c(b$time[-1L], x$horizon)
     # Opaque, so neighbouring rectangles leave no seam where they meet.
-    graphics::rect(b$time[keep], b$lo[keep], nxt[keep], b$hi[keep],
+    graphics::rect(b$time, b$lo, b$bin_max, b$hi,
                    col = "#C8D9EA", border = "#C8D9EA")
-    graphics::lines(b$time[keep], b$med[keep], type = "s", lty = 2,
+    graphics::lines(b$time, b$med, type = "s", lty = 2,
                     col = "steelblue", lwd = 2)
     graphics::lines(c(0, o$time), c(1, o$surv), type = "s", lwd = 2)
     cens <- o$n_censor > 0L
