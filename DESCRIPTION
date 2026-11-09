@@ -23,12 +23,15 @@ Imports:
     utils
 Suggests:
     cli,
+    ggplot2,
     mockery,
     knitr,
     pkgload,
     rmarkdown,
     rstudioapi,
+    survival,
     testthat (>= 3.1.5),
+    vpc,
     xpose,
     xpose4
 URL: https://ferx-nlme.org/reference/
