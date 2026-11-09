@@ -257,9 +257,13 @@ test_that("the plotted intervals stop at the horizon", {
   on.exit(grDevices::dev.off(), add = TRUE)
   expect_identical(plot(v, engine = "base"), v)
   skip_if_not_installed("vpc")
+  # The ribbon's intervals, then one closing row of zero width at H that
+  # carries the median's step to the end of the ribbon.
   db <- ferx:::.ferx_vpc_tte_vpcdb(v)
-  expect_equal(db$sim_km$bin_min, c(0, 10, 20))
-  expect_equal(db$sim_km$bin_max, c(10, 20, 25))
+  expect_equal(db$sim_km$bin_min, c(0, 10, 20, 25))
+  expect_equal(db$sim_km$bin_max, c(10, 20, 25, 25))
+  expect_equal(db$sim_km$bin_mid, c(0, 10, 20, 25))
+  expect_equal(db$sim_km$qmed[4], db$sim_km$qmed[3])
 })
 
 test_that("plot() draws with base graphics and with vpc", {
@@ -282,6 +286,9 @@ test_that("plot() draws with base graphics and with vpc", {
   # last interval ending at H (the grid point at H starts none).
   db <- ferx:::.ferx_vpc_tte_vpcdb(v)
   s0 <- db$sim_km[db$sim_km$strat == "ARM=0", ]
+  expect_equal(utils::tail(s0$bin_min, 1), v$horizon)
+  expect_equal(utils::tail(s0$bin_max, 1), v$horizon)
+  s0 <- utils::head(s0, -1)
   b0 <- v$band[v$band$STRATUM == "ARM=0" & !is.na(v$band$lo) &
                  v$band$time < v$horizon, ]
   expect_equal(s0$bin_min, b0$time)

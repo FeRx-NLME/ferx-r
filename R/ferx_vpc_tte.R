@@ -318,9 +318,13 @@ plot.ferx_vpc_tte <- function(x, y = NULL, engine = c("auto", "vpc", "base"),
   sim_km <- do.call(rbind, lapply(levels(x$band$STRATUM), function(s) {
     b <- .ferx_vpc_tte_bins(x$band[x$band$STRATUM == s, , drop = FALSE],
                             x$horizon)
-    data.frame(strat = rep(s, nrow(b)), bin = seq_len(nrow(b)),
-               bin_min = b$time, bin_max = b$bin_max, bin_mid = b$time,
-               qmin = b$lo, qmed = b$med, qmax = b$hi,
+    # A closing row of zero width at the last interval's end carries the
+    # median's step (vpc draws it through bin_mid) on to where the ribbon ends.
+    k <- c(seq_len(nrow(b)), utils::tail(seq_len(nrow(b)), 1L))
+    end <- c(b$time, utils::tail(b$bin_max, 1L))
+    data.frame(strat = rep(s, length(k)), bin = seq_along(k),
+               bin_min = end, bin_max = c(b$bin_max, utils::tail(b$bin_max, 1L)),
+               bin_mid = end, qmin = b$lo[k], qmed = b$med[k], qmax = b$hi[k],
                stringsAsFactors = FALSE)
   }))
   # The observed curve starts at S(0) = 1, as survfit's plot does.
@@ -370,7 +374,9 @@ plot.ferx_vpc_tte <- function(x, y = NULL, engine = c("auto", "vpc", "base"),
     # Opaque, so neighbouring rectangles leave no seam where they meet.
     graphics::rect(b$time, b$lo, b$bin_max, b$hi,
                    col = "#C8D9EA", border = "#C8D9EA")
-    graphics::lines(b$time, b$med, type = "s", lty = 2,
+    # The median's last step runs on to the end of the last interval.
+    graphics::lines(c(b$time, utils::tail(b$bin_max, 1L)),
+                    c(b$med, utils::tail(b$med, 1L)), type = "s", lty = 2,
                     col = "steelblue", lwd = 2)
     graphics::lines(c(0, o$time), c(1, o$surv), type = "s", lwd = 2)
     cens <- o$n_censor > 0L
