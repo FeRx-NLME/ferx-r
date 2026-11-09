@@ -2652,10 +2652,11 @@ fn level_contrast_from_token(token: &str) -> std::result::Result<LevelContrast, 
 /// `ref` reference level, for every level without a covariance (`se`) or
 /// without kept SIR draws (`sir_lo`, `sir_hi`). `profiled` is TRUE on every
 /// level of a block the fit solved for rather than searched (ferx-core #1065),
-/// read from the fit's `profiled_blocks`. `se` is also NA for a profiled level
-/// the covariance step held on its declared bound (`held`, the fit's
-/// `profiled_levels_at_bound`, ferx-core #2112): the engine reports `0.0` there,
-/// as for a FIX theta, which is not a standard error. Zero rows for a model with
+/// read from the fit's `profiled_blocks`. `se` is also NA for a level the
+/// covariance step held (`held`: a profiled level on its declared bound,
+/// ferx-core #2112, or a level θ collapsed onto the internal guard, #2797): the
+/// engine reports `0.0` there, as for a FIX theta, which is not a standard
+/// error. Zero rows for a model with
 /// no level block.
 #[allow(clippy::too_many_arguments)]
 fn level_bindings_to_r(
@@ -4907,11 +4908,15 @@ fn default_fit_result(
         // ferx-core #1065: the uncertainty draws do not read which blocks were
         // profiled; the fit's level values are already in `theta`.
         profiled_blocks: Vec::new(),
-        // ferx-core #2112: nor which levels a covariance step held on a bound;
-        // the matrix handed in already has their rows zero.
+        // ferx-core #2112: which levels the step held on a bound. Left empty
+        // for the reason given at `held_at_bound` below.
         profiled_levels_at_bound: Vec::new(),
-        // ferx-core #2797: nor which coordinates a step held at the guard, for
-        // the same reason.
+        // ferx-core #2797: which coordinates the fit's step held at the guard.
+        // Left empty, although the uncertainty draws read it: `draw_asymptotic`
+        // clamps a held coordinate to its rail from this list (a zero row in
+        // the matrix is not enough, since the regularised Cholesky adds 1e-8),
+        // and so lets it scatter about 1e-4 around the rail instead. Passing
+        // it (and `profiled_levels_at_bound`) is tracked in its own issue.
         held_at_bound: Vec::new(),
         // ferx-core #2799 / #2785: no optimizer ran in this scaffold, so it
         // spent no budget, scored nothing by request, and has no stop or
@@ -6199,7 +6204,7 @@ fn fit_result_to_list(
             model,
             &bindings.levels,
             &result.profiled_blocks,
-            &result.profiled_levels_at_bound,
+            &held_theta_indices(result),
             &result.theta_names,
             &result.theta,
             result.covariance_matrix.as_ref(),
@@ -6219,6 +6224,26 @@ fn fit_result_to_list(
 }
 
 /// The fit list, for a fresh fit and a loaded one alike.
+/// Every θ the covariance step reports no standard error for: the θ entries of
+/// `FitResult::held_at_bound` (ferx-core #2797) whatever their reason, plus
+/// `profiled_levels_at_bound` (#2112), which a fit from before #2797 carries
+/// alone. `fit$theta_levels` gives each of them an NA `se` (#737 review,
+/// finding 2), as `fit$estimates` and `print()` do.
+fn held_theta_indices(result: &FitResult) -> Vec<usize> {
+    let mut held: Vec<usize> = result
+        .held_at_bound
+        .iter()
+        .filter(|h| h.kind == ferx_core::ParameterKind::Theta)
+        .map(|h| h.index)
+        .collect();
+    for &k in &result.profiled_levels_at_bound {
+        if !held.contains(&k) {
+            held.push(k);
+        }
+    }
+    held
+}
+
 /// `FitResult::held_at_bound` (ferx-core #2797) as R columns: the parameter's
 /// name, its family's `[parameters]` keyword, its 1-based index within the
 /// family, and the reason's token (`profiled_bound`, `collapsed_at_guard`, or

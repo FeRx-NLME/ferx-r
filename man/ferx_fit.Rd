@@ -1075,7 +1075,12 @@ stands (ferx-core #2799): \code{"converged"},
 warnings, the covariance step and \code{held_at_bound}, and never
 changes \code{converged}. Recomputed by \code{ferx_covariance()} and
 on \code{ferx_load_fit()}, so a bundle written before it existed has
-one too. \code{print()} shows it on its \code{STATUS} line.}
+one too. \code{print()} shows it on its \code{STATUS} line. One fact
+comes from R rather than the engine: R's own critical
+\code{condition_number} warning (condition number above 1000), which
+ferx-core computes the number for but does not raise. It is added to
+\code{status_reasons} and turns \code{"converged"} into
+\code{"converged_with_issues"}.}
 \item{status_label}{\code{status} as the console spells it:
 \code{"CONVERGED"}, \code{"CONVERGED WITH ISSUES"},
 \code{"NOT CONVERGED"}.}

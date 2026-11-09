@@ -142,3 +142,50 @@ test_that("the STATUS line prints core's label and reasons as given", {
                "STATUS: CONVERGED WITH ISSUES   (condition_number, covariance_failed)",
                fixed = TRUE)
 })
+
+# R's own critical condition-number flag (#737 review, finding 1): ferx-core
+# computes the number but raises no warning for it, so its `status()` cannot see
+# the critical row R adds. The verdict counts it.
+cn_case <- function(status, reasons, cn) {
+  list(status = status, status_label = toupper(gsub("_", " ", status)),
+       status_reasons = reasons, condition_number = cn)
+}
+
+test_that("R's condition-number flag joins the verdict in core's order", {
+  f <- ferx:::.ferx_status_with_r_flags
+  r <- f(cn_case("converged", character(0), 1397.7))
+  expect_identical(r$status, "converged_with_issues")
+  expect_identical(r$status_label, "CONVERGED WITH ISSUES")
+  expect_identical(r$status_reasons, "condition_number")
+  # After evaluation_only / budget_spent, before covariance_failed / collapsed.
+  r <- f(cn_case("not_converged",
+                 c("budget_spent", "covariance_failed", "collapsed_at_guard: ETA_KA"), 2e4))
+  expect_identical(r$status, "not_converged")
+  expect_identical(r$status_reasons, c("budget_spent", "condition_number",
+                                       "covariance_failed", "collapsed_at_guard: ETA_KA"))
+  # At or below 1000, non-finite, missing, or already listed by core: unchanged.
+  for (case in list(cn_case("converged", character(0), 1000),
+                    cn_case("converged", character(0), NaN),
+                    cn_case("converged", character(0), NULL),
+                    cn_case("converged_with_issues", "condition_number", 5e3))) {
+    expect_identical(f(case), case)
+  }
+})
+
+test_that("a fit with a condition number above 1000 is CONVERGED WITH ISSUES", {
+  skip_on_cran()
+  ex <- ferx_example("bioavailability")
+  fit <- quiet(ferx_fit(ex$model, ex$data, verbose = FALSE, settings = list(maxiter = 50L)))
+  skip_if_not(isTRUE(fit$condition_number > 1000), "condition number not above 1000 here")
+  w <- ferx_get_warnings(fit, as_df = TRUE)
+  expect_true("condition_number" %in% w$category[w$severity == "critical"])
+  expect_true("condition_number" %in% fit$status_reasons)
+  expect_false(identical(fit$status, "converged"))
+  expect_match(status_line(fit), "condition_number", fixed = TRUE)
+  # The same verdict after a save / load round trip.
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  quiet(ferx_save_fit(fit, path))
+  back <- quiet(ferx_load_fit(path))
+  expect_identical(back$status, fit$status)
+  expect_identical(back$status_reasons, fit$status_reasons)
+})

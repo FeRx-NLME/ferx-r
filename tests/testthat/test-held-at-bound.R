@@ -29,6 +29,8 @@ with_collapse <- function(fit, eta, held, reason = "collapsed_at_guard",
 
 se_cell <- function(lines, label) {
   row <- grep(paste0("^  ", label, " "), lines, value = TRUE)
+  # Not a block's covariance row (`ETA_V ~ ETA_CL : cov = ...`).
+  row <- row[!grepl(" ~ ", row, fixed = TRUE)]
   expect_length(row, 1L)
   sub(".*SE = ([^ ]+).*", "\\1", row)
 }
@@ -139,4 +141,114 @@ test_that("a held reason or family a later ferx added still loads (ferx-core #28
   # A family this build does not know is dropped, not a load failure.
   alien <- with_collapse(base, eta, held = FALSE, kind = "Hyperprior")
   expect_identical(nrow(alien$held_at_bound), 0L)
+})
+
+# `fit` with parameter `name` (family `kind`, 1-based `index` within it) listed
+# in its bytes as collapsed at the guard and not held by the step.
+with_held <- function(fit, name, kind, index) {
+  packed <- match(name, rownames(fit$cov_matrix))
+  stopifnot(!is.na(packed))
+  fitrx_edit_fit(fit, function(w) {
+    w$held_at_bound <- list(list(
+      name = name, kind = kind, index = index - 1L, packed_index = packed - 1L,
+      reason = "collapsed_at_guard"
+    ))
+    w
+  })
+}
+
+# The SE column of `ferx_runlog()`'s row for `name`: its last two cells.
+runlog_se <- function(fit, name) {
+  rl <- utils::capture.output(quiet(ferx_runlog(fit)))
+  row <- rl[startsWith(rl, paste0("  ", name, " "))]
+  expect_length(row, 1L)
+  tail(strsplit(trimws(row), "[[:space:]]+")[[1]], 2L)
+}
+
+block_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex <- ferx_example("warfarin_block_omega")
+      fit <<- quiet(ferx_fit(ex$model, ex$data, method = "focei", verbose = FALSE,
+                             covariance = TRUE, settings = list(maxiter = 30L)))
+    }
+    fit
+  }
+})
+
+mbma_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex <- ferx_example("mbma_placebo")
+      fit <<- quiet(ferx_fit(ex$model, ex$data, verbose = FALSE))
+    }
+    fit
+  }
+})
+
+test_that("a held block-omega variance masks its own se_omega slot (#737 review, finding 4)", {
+  skip_on_cran()
+  base <- block_fit()
+  skip_if(is.null(base$cov_matrix), "no covariance on the block fit")
+  # The 2x2 block plus ETA_KA: se_omega is the lower triangle, so ETA_V's
+  # variance is slot 3, not 2 (slot 2 is the ETA_V ~ ETA_CL covariance).
+  expect_length(base$se_omega, 6L)
+  fit <- with_held(base, "ETA_V", "Omega", 2L)
+  out <- utils::capture.output(quiet(print(fit)))
+  expect_identical(se_cell(out, "ETA_V"), "N/A")
+  expect_false(identical(se_cell(out, "ETA_CL"), "N/A"))
+  expect_false(identical(se_cell(out, "ETA_KA"), "N/A"))
+  est <- fit$estimates
+  expect_true(is.na(est$se[est$param == "ETA_V"]))
+  expect_true(is.finite(est$se[est$param == "ETA_CL"]))
+  expect_identical(runlog_se(fit, "ETA_V"), c("N/A", "N/A"))
+})
+
+test_that("a held sigma prints N/A everywhere (#737 review, finding 4)", {
+  skip_on_cran()
+  base <- warfarin_fit_cov()
+  sg <- base$sigma_names[1]
+  row_of <- function(f) {
+    out <- utils::capture.output(quiet(print(f)))
+    out[startsWith(out, paste0("  ", sg, " "))]
+  }
+  fit <- with_held(base, sg, "Sigma", 1L)
+  expect_length(row_of(fit), 1L)
+  expect_match(row_of(fit), "SE = N/A", fixed = TRUE)
+  expect_false(grepl("SE = N/A", row_of(base), fixed = TRUE))
+  expect_true(is.na(fit$estimates$se[fit$estimates$param == sg]))
+  expect_identical(runlog_se(fit, sg), c("N/A", "N/A"))
+})
+
+test_that("a held kappa prints N/A in the KAPPA rows and estimates (#737 review, finding 4)", {
+  skip_on_cran()
+  base <- mbma_fit()
+  skip_if(is.null(base$cov_matrix), "no covariance on the MBMA fit")
+  kappa_row <- function(f) {
+    rows <- ferx:::.ferx_kappa_rows(f)
+    rows[grepl("KAPPA_ARM", rows, fixed = TRUE)][1]
+  }
+  fit <- with_held(base, "KAPPA_ARM", "Kappa", 1L)
+  expect_match(kappa_row(fit), "SE = N/A", fixed = TRUE)
+  expect_false(grepl("SE = N/A", kappa_row(base), fixed = TRUE))
+  expect_true(is.na(fit$estimates$se[fit$estimates$param == "KAPPA_ARM"]))
+})
+
+test_that("a guard-collapsed level theta has no se in theta_levels either (#737 review, finding 2)", {
+  skip_on_cran()
+  base <- mbma_fit()
+  skip_if(is.null(base$cov_matrix), "no covariance on the MBMA fit")
+  lv <- "PLACEBO[STUDY=1,TIME=0]"
+  i <- match(lv, names(base$theta))
+  skip_if(is.na(i), "no such level")
+  at <- function(f) which(f$theta_levels$theta_name == lv)
+  expect_true(is.finite(base$theta_levels$se[at(base)]))
+  fit <- with_held(base, lv, "Theta", i)
+  expect_true(is.na(fit$theta_levels$se[at(fit)]))
+  expect_true(is.na(fit$estimates$se[fit$estimates$param == lv]))
+  # The other levels keep theirs.
+  others <- fit$theta_levels$theta_name != lv & !is.na(fit$theta_levels$theta_name)
+  expect_identical(fit$theta_levels$se[others], base$theta_levels$se[others])
 })

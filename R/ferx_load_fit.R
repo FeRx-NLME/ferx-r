@@ -320,7 +320,10 @@ ferx_load_fit <- function(path) {
       cs$covariate, cs$median, cs$mean, cs$min, cs$max, cs$mode, cs$levels
     ),
     profiled_blocks = raw$profiled_blocks,
-    profiled_levels_at_bound = raw$profiled_levels_at_bound
+    # Every held theta gets no level `se` (#737 review, finding 2): the
+    # profiled levels on their bound, and any level theta in `held_at_bound`
+    # whatever its reason (a guard collapse, or one a later ferx added).
+    profiled_levels_at_bound = .ferx_held_theta_names(raw)
   ))
   has_cov <- (raw$cov_matrix_dim %||% 0L) > 0L
   # The layout call, returning the frame or the condition it failed with. The
