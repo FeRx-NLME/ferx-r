@@ -584,13 +584,26 @@
 # when its step held it (as for FIX) and as the unconditional value when it did
 # not; neither is a standard error, and ferx-core's console prints `N/A` for
 # both. A fit object made before the field existed falls back to
-# `profiled_levels_at_bound` for its thetas.
+# `profiled_levels_at_bound` for its thetas. A `[mixture]` per-class override
+# row (non-NA `class`, ferx-core #2809) names the base it overrides by kind and
+# index but is not that base, so it never marks the base's SE.
 .ferx_se_held <- function(fit, kind, i) {
   h <- fit$held_at_bound
   if (is.data.frame(h)) {
-    return(any(h$kind == kind & h$index == i))
+    return(any(.ferx_held_is_base(h) & h$kind == kind & h$index == i))
   }
   identical(kind, "theta") && isTRUE(names(fit$theta)[i] %in% fit$profiled_levels_at_bound)
+}
+
+# Which rows of `held_at_bound` (a list from the glue, or its data frame) are
+# base parameters rather than `[mixture]` per-class overrides (ferx-core #2809):
+# those with an NA `class`. A fit object made before the column existed has
+# only base rows.
+.ferx_held_is_base <- function(h) {
+  n <- length(h$kind)
+  cls <- h$class
+  if (is.null(cls)) return(rep(TRUE, n))
+  is.na(as.integer(cls))
 }
 
 # The names of every theta with no standard error: the entries of kind
@@ -600,7 +613,7 @@
 .ferx_held_theta_names <- function(fit) {
   h <- fit$held_at_bound
   from_held <- if (!is.null(h$kind)) {
-    as.character(h$parameter)[as.character(h$kind) == "theta"]
+    as.character(h$parameter)[.ferx_held_is_base(h) & as.character(h$kind) == "theta"]
   } else {
     character(0)
   }
@@ -908,13 +921,17 @@
   result$profiled_blocks <- as.character(result$profiled_blocks %||% character(0))
   result$profiled_levels_at_bound <- as.character(result$profiled_levels_at_bound %||% character(0))
   # The coordinates the covariance step reports no SE for (ferx-core #2797),
-  # one row each; zero rows for a fit that holds none.
+  # one row each; zero rows for a fit that holds none. `class` is the
+  # `[mixture]` class of a per-class override (ferx-core #2809), NA for a base
+  # parameter.
   h <- result$held_at_bound
+  parameter <- as.character(h$parameter %||% character(0))
   result$held_at_bound <- data.frame(
-    parameter = as.character(h$parameter %||% character(0)),
+    parameter = parameter,
     kind = as.character(h$kind %||% character(0)),
     index = as.integer(h$index %||% integer(0)),
     reason = as.character(h$reason %||% character(0)),
+    class = as.integer(h$class %||% rep(NA_integer_, length(parameter))),
     stringsAsFactors = FALSE
   )
   # The engine's verdict (ferx-core #2799): reasons as a character vector,

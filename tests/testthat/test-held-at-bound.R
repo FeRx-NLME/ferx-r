@@ -49,7 +49,8 @@ test_that("a real guard collapse prints N/A and is held quietly (ferx-core #2797
   expect_identical(
     fit$held_at_bound,
     data.frame(parameter = "ETA_KA", kind = "omega", index = 3L,
-               reason = "collapsed_at_guard", stringsAsFactors = FALSE)
+               reason = "collapsed_at_guard", class = NA_integer_,
+               stringsAsFactors = FALSE)
   )
   # Held by the step: a FIX-like row, so the engine's 0 stays in se_omega,
   # cov_fixed marks it, and cor_matrix does not warn about a zero variance
@@ -71,7 +72,7 @@ test_that("a fit that holds nothing has a zero-row held_at_bound", {
   fit <- warfarin_fit_cov()
   h <- fit$held_at_bound
   expect_s3_class(h, "data.frame")
-  expect_identical(names(h), c("parameter", "kind", "index", "reason"))
+  expect_identical(names(h), c("parameter", "kind", "index", "reason", "class"))
   expect_identical(nrow(h), 0L)
 })
 
@@ -83,7 +84,8 @@ test_that("a collapse the step held prints N/A and leaves the status clean", {
   expect_identical(
     fit$held_at_bound,
     data.frame(parameter = eta, kind = "omega", index = 2L,
-               reason = "collapsed_at_guard", stringsAsFactors = FALSE)
+               reason = "collapsed_at_guard", class = NA_integer_,
+               stringsAsFactors = FALSE)
   )
   # Held by the step: core lists no reason for it.
   expect_identical(fit$status, base$status)
@@ -321,4 +323,90 @@ test_that("uncertainty draws keep a held coordinate on its value (#737 review, f
   # index 3), whose row is now zero too.
   zero_only <- drawn_tvka(with_tvka_held(base, "zero_row_only"))
   expect_gt(max(abs(zero_only / tvka - 1)), 1e-6)
+})
+
+# ferx-core's tests/guard_hold.rs `mixture_source` case (#2809): two classes,
+# class 2 overrides ETA_CL with a variance on the internal guard, and
+# `maxiter = 0` keeps it there for the covariance step to hold.
+mix_override_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      dir <- test_path("fixtures", "mix_override_collapse")
+      fit <<- quiet(ferx_fit(file.path(dir, "mix_override_collapse.ferx"),
+                             file.path(dir, "mix_override_collapse.csv"),
+                             verbose = FALSE))
+    }
+    fit
+  }
+})
+
+test_that("a held mixture override is its own row, not its base's (ferx-core #2809)", {
+  skip_on_cran()
+  fit <- mix_override_fit()
+  expect_false(is.null(fit$cov_matrix))
+  expect_identical(
+    fit$held_at_bound,
+    data.frame(parameter = "ETA_CL (class 2)", kind = "omega", index = 1L,
+               reason = "collapsed_at_guard", class = 2L,
+               stringsAsFactors = FALSE)
+  )
+  # One name for the parameter across the fit: the label cov_matrix and
+  # cov_fixed give the override, and the one cov_fixed marks as held.
+  expect_true(fit$cov_fixed[["ETA_CL (class 2)"]])
+  expect_identical(names(fit$cov_fixed)[unlist(fit$cov_fixed)], "ETA_CL (class 2)")
+  # The row names ETA_CL by kind + index, but ETA_CL itself is not held: it
+  # keeps a standard error on every surface.
+  se <- fit$estimates$se[fit$estimates$param == "ETA_CL"]
+  expect_length(se, 1L)
+  expect_true(is.finite(se) && se > 0)
+  expect_false(identical(se_cell(utils::capture.output(quiet(print(fit))), "ETA_CL"), "N/A"))
+  expect_false(any(runlog_se(fit, "ETA_CL") == "N/A"))
+})
+
+test_that("a held mixture override keeps its class through save/load (ferx-core #2809)", {
+  skip_on_cran()
+  fit <- mix_override_fit()
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  quiet(ferx_save_fit(fit, path))
+  back <- quiet(ferx_load_fit(path))
+  expect_identical(back$held_at_bound, fit$held_at_bound)
+  expect_identical(back$held_at_bound$class, 2L)
+  expect_identical(back$estimates, fit$estimates)
+})
+
+test_that("uncertainty draws hold a held mixture override, found by its class (ferx-core #2809)", {
+  skip_on_cran()
+  fit <- mix_override_fit()
+  dir <- test_path("fixtures", "mix_override_collapse")
+  draws <- function(f) {
+    quiet(ferx_simulate_with_uncertainty(
+      file.path(dir, "mix_override_collapse.ferx"),
+      file.path(dir, "mix_override_collapse.csv"),
+      f, n_uncertainty_draws = 20L, seed = 3L
+    ))
+  }
+  held <- draws(fit)
+  expect_gt(nrow(held), 0L)
+  # The row reaches the engine: without it the override is drawn, not held.
+  free <- fit
+  free$held_at_bound <- free$held_at_bound[0, ]
+  expect_false(identical(draws(free), held))
+  # It is found by kind, index and class: the label alone names no coordinate,
+  # and a class the model does not override is refused rather than dropped.
+  for (cls in c(NA_integer_, 1L)) {
+    wrong <- fit
+    wrong$held_at_bound$class <- cls
+    expect_error(draws(wrong), "names no single coordinate", label = format(cls))
+  }
+})
+
+test_that("a fit object from before the class column reads every row as a base", {
+  skip_on_cran()
+  base <- warfarin_fit_cov()
+  eta <- base$eta_names[2]
+  fit <- quiet(with_collapse(base, eta, held = TRUE))
+  fit$held_at_bound$class <- NULL
+  expect_true(ferx:::.ferx_se_held(fit, "omega", 2L))
+  expect_false(ferx:::.ferx_se_held(fit, "omega", 1L))
 })

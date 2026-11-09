@@ -1157,7 +1157,13 @@
 #'     When the step's \code{R} matrix is clean, a collapsed parameter is held
 #'     like a FIX one: its \code{fit$se_*} entry is the engine's \code{0},
 #'     \code{cov_fixed} marks it, and every other SE is conditional on it at
-#'     its estimate. Zero rows when nothing is held.}
+#'     its estimate. A fifth column, \code{class}, is the 1-based class of a
+#'     \code{[mixture]} per-class override (\code{omega(k)} / \code{sigma(k)},
+#'     ferx-core #2809) and \code{NA} for a base parameter: such a row is
+#'     labelled \code{<base> (class <k>)}, as in \code{cov_matrix} and
+#'     \code{cov_fixed}, its \code{kind} and \code{index} name the base
+#'     parameter it overrides, and the base keeps its own SE. Zero rows when
+#'     nothing is held.}
 #'   \item{covariate_stats}{Data frame of the statistics a
 #'     \code{[covariate_model]} relation stated symbolically
 #'     (\code{center = median}, \code{ref = mode}, \code{levels = auto}) was

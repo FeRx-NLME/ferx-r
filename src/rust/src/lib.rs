@@ -4309,7 +4309,9 @@ fn profiled_levels_at_bound_from_r(
 /// `fit_bindings` list, rebuilt as the engine's entries. R's table has no packed
 /// index, so it is found again: a θ's is its index, and any other's is the
 /// coordinate the engine names the same (`coordinate_names`, which named it in
-/// the first place). Empty when the columns are absent. A row that names no
+/// the first place); for a `[mixture]` override (#2809), which R labels
+/// `ETA_CL (class 2)`, that name is rebuilt from its kind, index and class.
+/// Empty when the columns are absent. A row that names no
 /// coordinate of the model is refused rather than dropped, since the draws would
 /// then scatter what the fit held.
 fn held_at_bound_from_r(
@@ -4337,7 +4339,16 @@ fn held_at_bound_from_r(
         })?,
     };
     let n = names.len();
-    if kinds.len() != n || reasons.len() != n || index.len() != n {
+    // `held_class` (#2809): NA for a base parameter. A fit list from before the
+    // column existed has none, and every row is then a base parameter.
+    let class: Vec<i32> = match cols.get("held_class") {
+        None => vec![i32::MIN; n],
+        Some(v) if v.is_null() => vec![i32::MIN; n],
+        Some(v) => v.as_integer_vector().ok_or_else(|| {
+            "internal: `fit_bindings$held_class` is not an integer vector".to_string()
+        })?,
+    };
+    if kinds.len() != n || reasons.len() != n || index.len() != n || class.len() != n {
         return Err("internal: the `fit_bindings$held_*` columns are not parallel".to_string());
     }
     let coords = ferx_core::estimation::parameterization::coordinate_names(params);
@@ -4355,12 +4366,40 @@ fn held_at_bound_from_r(
             };
             let idx = usize::try_from(index[i] - 1)
                 .map_err(|_| refuse("its index is not a positive integer"))?;
+            // R's NA_integer_ arrives as i32::MIN: a base parameter.
+            let class = match class[i] {
+                i32::MIN => None,
+                c => Some(
+                    usize::try_from(c)
+                        .ok()
+                        .filter(|&c| c >= 1)
+                        .ok_or_else(|| refuse("its class is not a positive integer"))?,
+                ),
+            };
+            // The engine's name for the coordinate. R labels a `[mixture]`
+            // override `ETA_CL (class 2)`, as `cov_matrix` does; the engine
+            // names it `<base>_MIX<k>` after the base its kind + index name,
+            // with `coordinate_names`' fallbacks.
+            let name = match class {
+                None => names[i].clone(),
+                Some(c) => {
+                    let named = |v: &[String]| v.get(idx).filter(|s| !s.is_empty()).cloned();
+                    let base = match kind {
+                        ParameterKind::Omega => named(&params.omega.eta_names)
+                            .unwrap_or_else(|| format!("OMEGA({},{})", idx + 1, idx + 1)),
+                        ParameterKind::Sigma => named(&params.sigma.names)
+                            .unwrap_or_else(|| format!("SIGMA({})", idx + 1)),
+                        _ => return Err(refuse("only an omega or sigma has a class override")),
+                    };
+                    format!("{base}_MIX{c}")
+                }
+            };
             let packed_index = if kind == ParameterKind::Theta {
                 (idx < params.theta.len())
                     .then_some(idx)
                     .ok_or_else(|| refuse("the model has no such theta"))?
             } else {
-                let mut at = coords.iter().enumerate().filter(|(_, c)| **c == names[i]);
+                let mut at = coords.iter().enumerate().filter(|(_, c)| **c == name);
                 match (at.next(), at.next()) {
                     (Some((p, _)), None) => p,
                     _ => return Err(refuse("it names no single coordinate of the model")),
@@ -4373,11 +4412,12 @@ fn held_at_bound_from_r(
                 _ => HeldReason::Unknown,
             };
             Ok(ferx_core::HeldAtBound {
-                name: names[i].clone(),
+                name,
                 kind,
                 index: idx,
                 packed_index,
                 reason,
+                class,
             })
         })
         .collect()
@@ -6599,7 +6639,9 @@ fn held_theta_indices(result: &FitResult) -> Vec<usize> {
     let mut held: Vec<usize> = result
         .held_at_bound
         .iter()
-        .filter(|h| h.kind == ferx_core::ParameterKind::Theta)
+        // A `[mixture]` override entry (#2809) names its base by kind + index;
+        // it is not the base, so it never marks the base as held.
+        .filter(|h| h.class.is_none() && h.kind == ferx_core::ParameterKind::Theta)
         .map(|h| h.index)
         .collect();
     for &k in &result.profiled_levels_at_bound {
@@ -6612,14 +6654,30 @@ fn held_theta_indices(result: &FitResult) -> Vec<usize> {
 
 /// `FitResult::held_at_bound` (ferx-core #2797) as R columns: the parameter's
 /// name, its family's `[parameters]` keyword, its 1-based index within the
-/// family, and the reason's token (`profiled_bound`, `collapsed_at_guard`, or
-/// `unknown` for one a later ferx added).
+/// family, the reason's token (`profiled_bound`, `collapsed_at_guard`, or
+/// `unknown` for one a later ferx added), and the 1-based `[mixture]` class of a
+/// per-class override (#2809), NA for a base parameter. An override row's
+/// `kind`/`index` name the base it overrides; it is not that base's row. It is
+/// labelled as `cov_matrix_labels` labels it, `ETA_CL (class 2)` for the
+/// engine's `ETA_CL_MIX2`, so one parameter has one name across the fit.
 fn held_at_bound_to_r(held: &[ferx_core::HeldAtBound]) -> List {
+    let label = |h: &ferx_core::HeldAtBound| match h.class {
+        None => h.name.clone(),
+        Some(c) => {
+            let base = h.name.strip_suffix(&format!("_MIX{c}")).unwrap_or(&h.name);
+            format!("{base} (class {c})")
+        }
+    };
     list!(
-        parameter = held.iter().map(|h| h.name.clone()).collect::<Vec<String>>(),
+        parameter = held.iter().map(label).collect::<Vec<String>>(),
         kind = held.iter().map(|h| h.kind.keyword().to_string()).collect::<Vec<String>>(),
         index = held.iter().map(|h| h.index as i32 + 1).collect::<Vec<i32>>(),
-        reason = held.iter().map(|h| h.reason.as_str().to_string()).collect::<Vec<String>>()
+        reason = held.iter().map(|h| h.reason.as_str().to_string()).collect::<Vec<String>>(),
+        // NA_integer_ is i32::MIN in R.
+        class = held
+            .iter()
+            .map(|h| h.class.map_or(i32::MIN, |c| c as i32))
+            .collect::<Vec<i32>>()
     )
 }
 
