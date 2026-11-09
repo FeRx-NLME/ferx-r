@@ -24,6 +24,8 @@ reference:
       - ferx_sim_parameters
       - ferx_predict
       - ferx_predict_survival
+      - ferx_vpc_tte
+      - plot.ferx_vpc_tte
 
   - title: "Model editing"
     desc: "Create, inspect, and programmatically edit .ferx model files."
