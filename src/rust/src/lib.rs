@@ -1473,7 +1473,10 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
             .iter()
             .map(|e| e.auc_target_attainment)
             .collect::<Vec<Option<f64>>>(),
-        ETA_SUPPLIED = m.iter().map(|e| e.eta_supplied).collect::<Vec<bool>>()
+        ETA_SUPPLIED = m.iter().map(|e| e.eta_supplied).collect::<Vec<bool>>(),
+        // ferx-core #944: a drawn subject dosed from its drawn individual
+        // parameters under `dose_knowledge = oracle`.
+        DOSE_ORACLE = m.iter().map(|e| e.dose_oracle).collect::<Vec<bool>>()
     );
 
     list!(
@@ -4907,6 +4910,16 @@ fn default_fit_result(
         // ferx-core #2112: nor which levels a covariance step held on a bound;
         // the matrix handed in already has their rows zero.
         profiled_levels_at_bound: Vec::new(),
+        // ferx-core #2797: nor which coordinates a step held at the guard, for
+        // the same reason.
+        held_at_bound: Vec::new(),
+        // ferx-core #2799 / #2785: no optimizer ran in this scaffold, so it
+        // spent no budget, scored nothing by request, and has no stop or
+        // Newton decrement to report.
+        eval_budget_spent: false,
+        evaluation_only: false,
+        newton_decrement: None,
+        optimizer_stop: None,
         n_threads_used: 1,
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
@@ -5994,6 +6007,21 @@ fn cov_matrix_held(model: &CompiledModel, theta_fixed: &[bool], cov_matrix_dim: 
     }
 }
 
+/// The FIX mask [`cov_matrix_held`] builds, plus every row the fit's own
+/// covariance step held (`FitResult::cov_fixed`): since ferx-core #2797 a
+/// coordinate collapsed onto the internal guard is held like a FIX one when `R`
+/// is clean, with an all-zero row and column. Left out of the mask, that row
+/// would read as an estimated parameter with a zero variance, and `cor_matrix`
+/// would warn about it. A step mask of another length is ignored.
+fn with_step_held(mut mask: Vec<bool>, step: &[bool]) -> Vec<bool> {
+    if mask.len() == step.len() {
+        for (m, &s) in mask.iter_mut().zip(step) {
+            *m |= s;
+        }
+    }
+    mask
+}
+
 /// Row / column labels of the packed covariance matrix (ferx-r #437), one per
 /// coordinate in the engine's packing order - θ, Ω, σ, Ω_IOV, the `[mixture]`
 /// Ω then Σ overrides, the `block_sigma` ρ's - so R no longer re-derives the
@@ -6178,7 +6206,10 @@ fn fit_result_to_list(
             result.sir_resamples_packed.as_deref(),
         )?,
         covariate_stats: covariate_stats_to_r(&bindings.covariate_stats),
-        cov_fixed: cov_matrix_held(model, &result.theta_fixed, cov_matrix_dim),
+        cov_fixed: with_step_held(
+            cov_matrix_held(model, &result.theta_fixed, cov_matrix_dim),
+            &result.cov_fixed,
+        ),
         cov_labels: cov_matrix_labels(model, cov_matrix_dim),
         model_structure: model_structure_list(model),
         bundle,
@@ -6188,6 +6219,19 @@ fn fit_result_to_list(
 }
 
 /// The fit list, for a fresh fit and a loaded one alike.
+/// `FitResult::held_at_bound` (ferx-core #2797) as R columns: the parameter's
+/// name, its family's `[parameters]` keyword, its 1-based index within the
+/// family, and the reason's token (`profiled_bound`, `collapsed_at_guard`, or
+/// `unknown` for one a later ferx added).
+fn held_at_bound_to_r(held: &[ferx_core::HeldAtBound]) -> List {
+    list!(
+        parameter = held.iter().map(|h| h.name.clone()).collect::<Vec<String>>(),
+        kind = held.iter().map(|h| h.kind.keyword().to_string()).collect::<Vec<String>>(),
+        index = held.iter().map(|h| h.index as i32 + 1).collect::<Vec<i32>>(),
+        reason = held.iter().map(|h| h.reason.as_str().to_string()).collect::<Vec<String>>()
+    )
+}
+
 fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<List, String> {
     // Theta
     let theta_names: Vec<String> = result.theta_names.clone();
@@ -6843,9 +6887,20 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
     // (#430) and its se and SIR interval (#528); zero rows for a model with no
     // level block.
     let theta_levels = view.theta_levels;
+    // ferx-core #2799: the usability verdict beside `converged`, computed by the
+    // engine from the result's own fields on every call - so a reloaded or
+    // re-covarianced fit gets it fresh, and R holds no rule of its own.
+    let status = result.status();
 
     Ok(list!(
         converged = result.converged,
+        // `converged`, `converged_with_issues` or `not_converged`.
+        status = status.token(),
+        // The console's spelling of it: `CONVERGED WITH ISSUES`.
+        status_label = status.label(),
+        // Each reason in the engine's fixed order (`budget_spent`,
+        // `condition_number`, `collapsed_at_guard: ETA_KA`); empty when none.
+        status_reasons = status.reasons().iter().map(|r| r.label()).collect::<Vec<String>>(),
         method = method_label,
         method_chain = method_chain,
         // The interaction flag the fit's objective ran under, which SAEM, IMP
@@ -6878,6 +6933,12 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         // (ferx-core #2112), by θ name: no standard error for them, the others
         // conditional on them. Empty for a fit with none.
         profiled_levels_at_bound = theta_names_at(&theta_names, &result.profiled_levels_at_bound),
+        // Every coordinate the covariance step reports no standard error for
+        // (ferx-core #2797): a profiled level on its declared bound, or a
+        // parameter collapsed onto the engine's internal guard. Columns
+        // `parameter`, `kind`, `index` (1-based, within its family) and
+        // `reason`; R makes it a data frame.
+        held_at_bound = held_at_bound_to_r(&result.held_at_bound),
         // The `[covariate_model]` statistics the fit was bound with (ferx-r
         // #412); empty for a model that states none symbolically.
         covariate_stats = view.covariate_stats,

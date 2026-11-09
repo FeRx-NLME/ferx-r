@@ -125,7 +125,8 @@
     as.numeric(m), nrow(m),
     .ferx_kappa_labels(fit$kappa_names, nrow(m)),
     if (is.null(fit$kappa_fixed)) NULL else as.logical(fit$kappa_fixed),
-    if (is.null(fit$se_kappa)) NULL else as.numeric(fit$se_kappa),
+    # A kappa held at the guard (ferx-core #2797) prints `N/A`.
+    .ferx_se_masked(fit, "kappa", fit$se_kappa, nrow(m)),
     types,
     if (is.null(fit$kappa_weights)) NULL else as.character(fit$kappa_weights),
     if (is.null(fit$kappa_weight_typical)) NULL else as.numeric(fit$kappa_weight_typical),
@@ -167,7 +168,9 @@
     as.numeric(m), n,
     .ferx_eta_labels(fit$eta_names, n),
     if (is.null(fit$omega_fixed)) NULL else as.logical(fit$omega_fixed),
-    if (is.null(fit$se_omega)) NULL else as.numeric(fit$se_omega),
+    # An ETA variance held at the guard (ferx-core #2797) prints `N/A`.
+    .ferx_se_masked(fit, "omega", fit$se_omega, n,
+                    function(i) .omega_se_slot(fit$se_omega, n, i)),
     types,
     if (is.null(fit$omega_init_as_sd)) NULL else as.logical(fit$omega_init_as_sd),
     ifelse(is.na(idx), NA_character_, linked),
@@ -518,6 +521,68 @@
   .ferx_is_fixed(omega_fixed, i) || .ferx_is_fixed(omega_fixed, j)
 }
 
+# The engine's usability verdict on a fit (ferx-core #2799): `token`
+# (`converged`, `converged_with_issues`, `not_converged`), `label` (the
+# console's `CONVERGED WITH ISSUES`) and `reasons` (character, in the engine's
+# order). Every fit the glue builds or loads carries all three; a fit object
+# made before they existed falls back to `converged` alone, with no reasons.
+.ferx_fit_status <- function(fit) {
+  token <- fit$status
+  label <- fit$status_label
+  if (is.character(token) && length(token) == 1L &&
+      is.character(label) && length(label) == 1L) {
+    return(list(token = token, label = label,
+                reasons = as.character(fit$status_reasons %||% character(0))))
+  }
+  ok <- isTRUE(fit$converged)
+  list(token = if (ok) "converged" else "not_converged",
+       label = if (ok) "CONVERGED" else "NOT CONVERGED",
+       reasons = character(0))
+}
+
+# Whether parameter `i` of the family `kind` ("theta", "omega", "sigma" or
+# "kappa") has no standard error to report: it is in `fit$held_at_bound`
+# (ferx-core #2797), a profiled level on its declared bound or a coordinate
+# collapsed onto the engine's internal guard. The engine keeps such an SE as 0
+# when its step held it (as for FIX) and as the unconditional value when it did
+# not; neither is a standard error, and ferx-core's console prints `N/A` for
+# both. A fit object made before the field existed falls back to
+# `profiled_levels_at_bound` for its thetas.
+.ferx_se_held <- function(fit, kind, i) {
+  h <- fit$held_at_bound
+  if (is.data.frame(h)) {
+    return(any(h$kind == kind & h$index == i))
+  }
+  identical(kind, "theta") && isTRUE(names(fit$theta)[i] %in% fit$profiled_levels_at_bound)
+}
+
+# `se` with NA at each entry of family `kind` that `.ferx_se_held()` marks,
+# for a formatter that prints a missing SE as `N/A`. `slot(i)` maps the
+# family's i-th parameter to its entry of `se` (the identity, except for a block
+# omega's lower triangle).
+.ferx_se_masked <- function(fit, kind, se, n, slot = function(i) i) {
+  if (is.null(se)) return(NULL)
+  se <- as.numeric(se)
+  for (i in seq_len(n)) {
+    k <- slot(i)
+    if (!is.na(k) && k <= length(se) && .ferx_se_held(fit, kind, i)) se[k] <- NA_real_
+  }
+  se
+}
+
+# The entry of `se_omega` that holds the variance of ETA `i`: its diagonal
+# entry, or its slot in a block omega's column-major lower triangle (the
+# layout `.omega_se_at()` reads).
+.omega_se_slot <- function(se_omega, n_eta, i) {
+  n_lt <- n_eta * (n_eta + 1L) / 2L
+  if (length(se_omega) == n_lt && n_lt != n_eta) {
+    col_offset <- if (i == 1L) 0L else (i - 1L) * n_eta - (i - 1L) * (i - 2L) / 2L
+    as.integer(col_offset + 1L)
+  } else {
+    i
+  }
+}
+
 # Internal: look up SE for omega element (i, j) from se_omega vector.
 # se_omega may be diagonal-only (length n_eta) or full lower-triangle
 # (length n_eta*(n_eta+1)/2, column-major).
@@ -791,6 +856,19 @@
   )
   result$profiled_blocks <- as.character(result$profiled_blocks %||% character(0))
   result$profiled_levels_at_bound <- as.character(result$profiled_levels_at_bound %||% character(0))
+  # The coordinates the covariance step reports no SE for (ferx-core #2797),
+  # one row each; zero rows for a fit that holds none.
+  h <- result$held_at_bound
+  result$held_at_bound <- data.frame(
+    parameter = as.character(h$parameter %||% character(0)),
+    kind = as.character(h$kind %||% character(0)),
+    index = as.integer(h$index %||% integer(0)),
+    reason = as.character(h$reason %||% character(0)),
+    stringsAsFactors = FALSE
+  )
+  # The engine's verdict (ferx-core #2799): reasons as a character vector,
+  # empty for a clean fit.
+  result$status_reasons <- as.character(unlist(result$status_reasons, use.names = FALSE) %||% character(0))
   # `[covariate_model]` statistics (#412), through the constructor
   # `ferx_load_fit()` uses. Zero rows for a model with no symbolic centre.
   cs <- result$covariate_stats
