@@ -40,9 +40,11 @@ test_that("a real guard collapse prints N/A and is held quietly (ferx-core #2797
   # ferx-core's tests/guard_hold.rs "stationary" case: ETA_KA sits on the floor
   # of its log packing at the start, `maxiter = 0` keeps it there, and the
   # covariance step holds it.
-  dir <- test_path("fixtures", "guard_hold")
-  fit <- expect_no_warning(ferx_fit(file.path(dir, "guard_hold.ferx"),
-                                    file.path(dir, "guard_hold.csv"),
+  # Not `fixtures/guard_hold`: R CMD build drops every directory whose name
+  # ends in "old" (`([Oo]ld|\.Rcheck)$`), so the test failed only on CI.
+  dir <- test_path("fixtures", "guard_collapse")
+  fit <- expect_no_warning(ferx_fit(file.path(dir, "guard_collapse.ferx"),
+                                    file.path(dir, "guard_collapse.csv"),
                                     verbose = FALSE))
   expect_identical(
     fit$held_at_bound,
