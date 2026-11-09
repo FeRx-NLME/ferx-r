@@ -95,6 +95,10 @@ validate_fit_for_params <- function(fit) {
     held_kind = as.character(fit$held_at_bound$kind),
     held_index = as.integer(fit$held_at_bound$index),
     held_reason = as.character(fit$held_at_bound$reason),
+    # A `[mixture]` per-class override's class (ferx-core #2809), NA for a
+    # base parameter; a fit object made before the column has only base rows.
+    held_class = as.integer(fit$held_at_bound$class %||%
+      rep(NA_integer_, length(fit$held_at_bound$parameter))),
     stat_covariate = as.character(cs$covariate),
     stat_median = as.numeric(cs$median),
     stat_mean = as.numeric(cs$mean),

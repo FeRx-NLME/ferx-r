@@ -4058,7 +4058,16 @@ fn held_at_bound_from_r(
         })?,
     };
     let n = names.len();
-    if kinds.len() != n || reasons.len() != n || index.len() != n {
+    // `held_class` (#2809): NA for a base parameter. A fit list from before the
+    // column existed has none, and every row is then a base parameter.
+    let class: Vec<i32> = match cols.get("held_class") {
+        None => vec![i32::MIN; n],
+        Some(v) if v.is_null() => vec![i32::MIN; n],
+        Some(v) => v.as_integer_vector().ok_or_else(|| {
+            "internal: `fit_bindings$held_class` is not an integer vector".to_string()
+        })?,
+    };
+    if kinds.len() != n || reasons.len() != n || index.len() != n || class.len() != n {
         return Err("internal: the `fit_bindings$held_*` columns are not parallel".to_string());
     }
     let coords = ferx_core::estimation::parameterization::coordinate_names(params);
@@ -4087,6 +4096,16 @@ fn held_at_bound_from_r(
                     _ => return Err(refuse("it names no single coordinate of the model")),
                 }
             };
+            // R's NA_integer_ arrives as i32::MIN: a base parameter.
+            let class = match class[i] {
+                i32::MIN => None,
+                c => Some(
+                    usize::try_from(c)
+                        .ok()
+                        .filter(|&c| c >= 1)
+                        .ok_or_else(|| refuse("its class is not a positive integer"))?,
+                ),
+            };
             let reason = match reasons[i].as_str() {
                 "profiled_bound" => HeldReason::ProfiledBound,
                 "collapsed_at_guard" => HeldReason::CollapsedAtGuard,
@@ -4099,6 +4118,7 @@ fn held_at_bound_from_r(
                 index: idx,
                 packed_index,
                 reason,
+                class,
             })
         })
         .collect()
@@ -6314,7 +6334,9 @@ fn held_theta_indices(result: &FitResult) -> Vec<usize> {
     let mut held: Vec<usize> = result
         .held_at_bound
         .iter()
-        .filter(|h| h.kind == ferx_core::ParameterKind::Theta)
+        // A `[mixture]` override entry (#2809) names its base by kind + index;
+        // it is not the base, so it never marks the base as held.
+        .filter(|h| h.class.is_none() && h.kind == ferx_core::ParameterKind::Theta)
         .map(|h| h.index)
         .collect();
     for &k in &result.profiled_levels_at_bound {
@@ -6327,14 +6349,21 @@ fn held_theta_indices(result: &FitResult) -> Vec<usize> {
 
 /// `FitResult::held_at_bound` (ferx-core #2797) as R columns: the parameter's
 /// name, its family's `[parameters]` keyword, its 1-based index within the
-/// family, and the reason's token (`profiled_bound`, `collapsed_at_guard`, or
-/// `unknown` for one a later ferx added).
+/// family, the reason's token (`profiled_bound`, `collapsed_at_guard`, or
+/// `unknown` for one a later ferx added), and the 1-based `[mixture]` class of a
+/// per-class override (#2809), NA for a base parameter. An override row's
+/// `kind`/`index` name the base it overrides; it is not that base's row.
 fn held_at_bound_to_r(held: &[ferx_core::HeldAtBound]) -> List {
     list!(
         parameter = held.iter().map(|h| h.name.clone()).collect::<Vec<String>>(),
         kind = held.iter().map(|h| h.kind.keyword().to_string()).collect::<Vec<String>>(),
         index = held.iter().map(|h| h.index as i32 + 1).collect::<Vec<i32>>(),
-        reason = held.iter().map(|h| h.reason.as_str().to_string()).collect::<Vec<String>>()
+        reason = held.iter().map(|h| h.reason.as_str().to_string()).collect::<Vec<String>>(),
+        // NA_integer_ is i32::MIN in R.
+        class = held
+            .iter()
+            .map(|h| h.class.map_or(i32::MIN, |c| c as i32))
+            .collect::<Vec<i32>>()
     )
 }
 
