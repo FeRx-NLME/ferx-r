@@ -344,13 +344,17 @@ mix_override_fit <- local({
 test_that("a held mixture override is its own row, not its base's (ferx-core #2809)", {
   skip_on_cran()
   fit <- mix_override_fit()
-  skip_if(is.null(fit$cov_matrix), "no covariance on the mixture fit")
+  expect_false(is.null(fit$cov_matrix))
   expect_identical(
     fit$held_at_bound,
-    data.frame(parameter = "ETA_CL_MIX2", kind = "omega", index = 1L,
+    data.frame(parameter = "ETA_CL (class 2)", kind = "omega", index = 1L,
                reason = "collapsed_at_guard", class = 2L,
                stringsAsFactors = FALSE)
   )
+  # One name for the parameter across the fit: the label cov_matrix and
+  # cov_fixed give the override, and the one cov_fixed marks as held.
+  expect_true(fit$cov_fixed[["ETA_CL (class 2)"]])
+  expect_identical(names(fit$cov_fixed)[unlist(fit$cov_fixed)], "ETA_CL (class 2)")
   # The row names ETA_CL by kind + index, but ETA_CL itself is not held: it
   # keeps a standard error on every surface.
   se <- fit$estimates$se[fit$estimates$param == "ETA_CL"]
@@ -369,6 +373,32 @@ test_that("a held mixture override keeps its class through save/load (ferx-core 
   expect_identical(back$held_at_bound, fit$held_at_bound)
   expect_identical(back$held_at_bound$class, 2L)
   expect_identical(back$estimates, fit$estimates)
+})
+
+test_that("uncertainty draws hold a held mixture override, found by its class (ferx-core #2809)", {
+  skip_on_cran()
+  fit <- mix_override_fit()
+  dir <- test_path("fixtures", "mix_override_collapse")
+  draws <- function(f) {
+    quiet(ferx_simulate_with_uncertainty(
+      file.path(dir, "mix_override_collapse.ferx"),
+      file.path(dir, "mix_override_collapse.csv"),
+      f, n_uncertainty_draws = 20L, seed = 3L
+    ))
+  }
+  held <- draws(fit)
+  expect_gt(nrow(held), 0L)
+  # The row reaches the engine: without it the override is drawn, not held.
+  free <- fit
+  free$held_at_bound <- free$held_at_bound[0, ]
+  expect_false(identical(draws(free), held))
+  # It is found by kind, index and class: the label alone names no coordinate,
+  # and a class the model does not override is refused rather than dropped.
+  for (cls in c(NA_integer_, 1L)) {
+    wrong <- fit
+    wrong$held_at_bound$class <- cls
+    expect_error(draws(wrong), "names no single coordinate", label = format(cls))
+  }
 })
 
 test_that("a fit object from before the class column reads every row as a base", {

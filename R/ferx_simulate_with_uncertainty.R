@@ -83,7 +83,8 @@
 #' \code{$SIM} does under \code{$MIX}, and is simulated under that class's
 #' Omega and Sigma, drawn with the rest of the parameters: a per-class override
 #' (\code{omega(k)} / \code{sigma(k)} in \code{[mixture]}) is drawn around its
-#' fitted value in \code{fit$mixture_overrides}, and a FIX one is held there.
+#' fitted value in \code{fit$mixture_overrides}, and a FIX one, or one collapsed
+#' onto the internal guard and listed in \code{fit$held_at_bound}, is held there.
 #' \code{MIXNUM} reports the class drawn.
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
