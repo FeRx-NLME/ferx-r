@@ -31,6 +31,10 @@ se_cell <- function(lines, label) {
   row <- grep(paste0("^  ", label, " "), lines, value = TRUE)
   # Not a block's covariance row (`ETA_V ~ ETA_CL : cov = ...`).
   row <- row[!grepl(" ~ ", row, fixed = TRUE)]
+  # Nor a [mixture] override of it (`ETA_CL (class 2)`), unless asked for.
+  if (!grepl("(class ", label, fixed = TRUE)) {
+    row <- row[!grepl(paste0("^  ", label, " \\(class "), row)]
+  }
   expect_length(row, 1L)
   sub(".*SE = ([^ ]+).*", "\\1", row)
 }
@@ -360,8 +364,17 @@ test_that("a held mixture override is its own row, not its base's (ferx-core #28
   se <- fit$estimates$se[fit$estimates$param == "ETA_CL"]
   expect_length(se, 1L)
   expect_true(is.finite(se) && se > 0)
-  expect_false(identical(se_cell(utils::capture.output(quiet(print(fit))), "ETA_CL"), "N/A"))
+  out <- utils::capture.output(quiet(print(fit)))
+  expect_false(identical(se_cell(out, "ETA_CL"), "N/A"))
   expect_false(any(runlog_se(fit, "ETA_CL") == "N/A"))
+  # The override has its own row (ferx-core #2833), free but with no standard
+  # error: the engine's 0 for it is not one.
+  expect_identical(fit$se_mixture_overrides[["ETA_CL (class 2)"]], 0)
+  row <- fit$estimates["ETA_CL (class 2)", ]
+  expect_identical(row$class, 2L)
+  expect_false(row$fixed)
+  expect_true(is.na(row$se))
+  expect_identical(se_cell(out, "ETA_CL \\(class 2\\)"), "N/A")
 })
 
 test_that("a held mixture override keeps its class through save/load (ferx-core #2809)", {

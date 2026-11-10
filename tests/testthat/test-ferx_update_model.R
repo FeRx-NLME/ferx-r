@@ -370,11 +370,11 @@ test_that("a [mixture] fit's per-class overrides take their fitted values (#678)
   cl <- grep("^omega\\(2\\) ETA_CL", lines, value = TRUE)
   expect_match(cl, "   # class-2 IIV$")
   expect_equal(as.numeric(sub("^omega\\(2\\) ETA_CL ~ (\\S+).*$", "\\1", cl)),
-               ov[1], tolerance = 1e-12)
+               ov[["ETA_CL (class 2)"]], tolerance = 1e-12)
   expect_true("omega(2) ETA_V ~ 0.03 FIX" %in% lines)
   sg <- grep("^sigma\\(2\\) PROP_ERR", lines, value = TRUE)
   expect_equal(as.numeric(sub("^sigma\\(2\\) PROP_ERR ~ (\\S+) \\(sd\\)$", "\\1", sg)),
-               ov[3], tolerance = 1e-12)
+               ov[["PROP_ERR (class 2)"]], tolerance = 1e-12)
 
   refit <- suppressWarnings(ferx_fit(out, ferx_example("warfarin")$data,
                                      method = "foce", verbose = FALSE,

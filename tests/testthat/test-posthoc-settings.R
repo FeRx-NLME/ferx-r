@@ -436,7 +436,10 @@ test_that("S9: a [mixture] per-class override fit is scored in memory and after 
   expect_length(fit$mixture_overrides, 1L)
   no_packed <- ps_without(fit, "packed_estimate")
   expect_identical(ferx_covariance(no_packed)$cov_matrix, fit$cov_matrix)
-  neither <- ps_without(no_packed, "mixture_overrides")
+  # The descriptors and SEs go with the values: the loader refuses them alone
+  # (ferx-core #2833).
+  neither <- ps_without(no_packed, "mixture_overrides", "mixture_override_params",
+                        "se_mixture_overrides")
   expect_error(ferx_covariance(neither), "records neither their fitted values",
                fixed = TRUE)
 

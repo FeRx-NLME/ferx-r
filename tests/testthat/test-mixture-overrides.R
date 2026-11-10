@@ -1,0 +1,161 @@
+# A [mixture] fit's per-class overrides (`omega(k)` / `sigma(k)`) with their
+# estimate, standard error and name (ferx-core #2833): the fit fields, the rows
+# of `fit$estimates` and the section print() adds. The fit is
+# fixtures/mixture_override.ferx, whose class 2 overrides ETA_CL.
+
+quiet <- function(x) suppressWarnings(suppressMessages(x))
+
+label <- "ETA_CL (class 2)"
+
+# The print() rows of the override section: from its header to the next blank
+# line.
+override_section <- function(fit) {
+  out <- utils::capture.output(quiet(print(fit)))
+  at <- grep("MIXTURE  (per-class overrides)", out, fixed = TRUE)
+  if (length(at) == 0L) return(character())
+  expect_length(at, 1L)
+  rest <- out[seq(at + 2L, length(out))]
+  rest[seq_len(which(c(rest, "") == "")[1L] - 1L)]
+}
+
+test_that("an override is named, with its SE, on the fit (ferx-core #2833)", {
+  skip_on_cran()
+  fit <- mixture_override_fit()
+  expect_false(is.null(fit$cov_matrix))
+  expect_identical(
+    fit$mixture_override_params,
+    data.frame(parameter = label, kind = "omega", index = 1L, class = 2L,
+               fixed = FALSE, stringsAsFactors = FALSE)
+  )
+  expect_named(fit$mixture_overrides, label)
+  expect_named(fit$se_mixture_overrides, label)
+  # The override is its own coordinate of the covariance step, under the same
+  # label; its SE is not its base's.
+  expect_true(label %in% rownames(fit$cov_matrix))
+  se <- fit$se_mixture_overrides[[label]]
+  expect_true(is.finite(se) && se > 0)
+  base_se <- fit$estimates$se[fit$estimates$param == "ETA_CL"]
+  expect_false(isTRUE(all.equal(se, base_se)))
+  expect_identical(summary(fit)$se_mixture_overrides, fit$se_mixture_overrides)
+  expect_identical(summary(fit)$mixture_overrides, fit$mixture_overrides)
+})
+
+test_that("fit$estimates has one row per override, last (ferx-core #2833)", {
+  skip_on_cran()
+  fit <- mixture_override_fit()
+  est <- fit$estimates
+  row <- est[nrow(est), ]
+  expect_identical(rownames(row), label)
+  expect_identical(row$param, label)
+  expect_identical(row$class, 2L)
+  expect_identical(row$transform, "variance")
+  expect_false(row$fixed)
+  expect_identical(row$estimate, fit$mixture_overrides[[label]])
+  expect_identical(row$se, fit$se_mixture_overrides[[label]])
+  expect_equal(row$rse_pct, 100 * row$se / row$estimate)
+  # On its base ETA's scale, and no other row has a class.
+  expect_identical(row$scale, est$scale[est$param == "ETA_CL"])
+  expect_true(all(is.na(est$class[-nrow(est)])))
+  expect_identical(sum(est$param == "ETA_CL"), 1L)
+  # Addressable by name, like any other row.
+  expect_identical(unname(ferx_coef(fit, label)), row$estimate)
+  expect_identical(unname(ferx_se(fit, label)), row$se)
+})
+
+test_that("print() lists the override under its own heading (ferx-core #2833)", {
+  skip_on_cran()
+  fit <- mixture_override_fit()
+  rows <- override_section(fit)
+  expect_length(rows, 1L)
+  expect_true(startsWith(rows, paste0("  ", label, " ")))
+  expect_match(rows, sprintf("= %.6f", fit$mixture_overrides[[label]]), fixed = TRUE)
+  expect_match(rows, sprintf("SE = %.6f", fit$se_mixture_overrides[[label]]), fixed = TRUE)
+  # The engine's OMEGA row: a log-normal ETA's class variance reads as a CV%.
+  expect_match(rows, "CV% = ", fixed = TRUE)
+})
+
+test_that("the override rows survive save / load (ferx-core #2833)", {
+  skip_on_cran()
+  fit <- mixture_override_fit()
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  quiet(ferx_save_fit(fit, path))
+  back <- quiet(ferx_load_fit(path))
+  expect_identical(back$mixture_override_params, fit$mixture_override_params)
+  expect_identical(back$mixture_overrides, fit$mixture_overrides)
+  expect_identical(back$se_mixture_overrides, fit$se_mixture_overrides)
+  expect_identical(back$estimates, fit$estimates)
+  expect_identical(override_section(back), override_section(fit))
+})
+
+test_that("a FIX override has no SE: `[FIX]` and `---` (ferx-core #2833)", {
+  skip_on_cran()
+  fit <- quiet(fitrx_edit_fit(mixture_override_fit(), function(w) {
+    w$mixture_override_params[[1L]]$fixed <- TRUE
+    w
+  }))
+  expect_true(fit$mixture_override_params$fixed)
+  row <- fit$estimates[label, ]
+  expect_true(row$fixed)
+  expect_true(is.na(row$se))
+  expect_true(is.na(row$rse_pct))
+  expect_identical(row$estimate, fit$mixture_overrides[[label]])
+  rows <- override_section(fit)
+  expect_true(startsWith(rows, paste0("  ", label, " [FIX]")))
+  expect_match(rows, "SE = ---", fixed = TRUE)
+})
+
+test_that("a sigma override reads like its base sigma (ferx-core #2833)", {
+  skip_on_cran()
+  # The fixture's one override, relabelled on the wire as a class-2 override
+  # of EPS: what a `sigma(2) EPS ~ ...` line records.
+  fit <- quiet(fitrx_edit_fit(mixture_override_fit(), function(w) {
+    w$mixture_override_params[[1L]]$kind <- "Sigma"
+    w$mixture_override_params[[1L]]$name <- "EPS_MIX2"
+    w
+  }))
+  expect_identical(fit$mixture_override_params$parameter, "EPS (class 2)")
+  expect_identical(fit$mixture_override_params$kind, "sigma")
+  row <- fit$estimates["EPS (class 2)", ]
+  expect_identical(row$transform, fit$estimates["EPS", "transform"])
+  expect_true(is.na(row$scale))
+  expect_identical(row$class, 2L)
+  rows <- override_section(fit)
+  expect_length(rows, 1L)
+  s <- fit$mixture_overrides[["EPS (class 2)"]]
+  expect_identical(
+    rows,
+    sprintf("  %-16s %-14s = %.6f  (var = %.6f, CV%% = %.1f)  SE = %.6f",
+            "EPS (class 2)", "[proportional]", s, s * s, s * 100,
+            fit$se_mixture_overrides[["EPS (class 2)"]])
+  )
+})
+
+test_that("a bundle from before the descriptors names no override row", {
+  skip_on_cran()
+  full <- mixture_override_fit()
+  old <- quiet(fitrx_edit_fit(full, function(w) {
+    w$mixture_override_params <- NULL
+    w$se_mixture_overrides <- NULL
+    w
+  }))
+  # The values stay, for the from-fit paths; nothing names them.
+  expect_identical(unname(old$mixture_overrides), unname(full$mixture_overrides))
+  expect_null(names(old$mixture_overrides))
+  expect_null(old$se_mixture_overrides)
+  expect_identical(nrow(old$mixture_override_params), 0L)
+  expect_named(old$mixture_override_params,
+               c("parameter", "kind", "index", "class", "fixed"))
+  expect_false(label %in% old$estimates$param)
+  expect_identical(old$estimates$param, full$estimates$param[-nrow(full$estimates)])
+  expect_length(override_section(old), 0L)
+})
+
+test_that("a model without overrides has no override surface", {
+  skip_on_cran()
+  fit <- warfarin_fit_cov()
+  expect_null(fit$mixture_overrides)
+  expect_null(fit$se_mixture_overrides)
+  expect_identical(nrow(fit$mixture_override_params), 0L)
+  expect_true(all(is.na(fit$estimates$class)))
+  expect_length(override_section(fit), 0L)
+})

@@ -5338,6 +5338,12 @@ fn default_fit_result(
         // one part of its parameters theta/omega/sigma do not rebuild; without
         // them `simulate_with_uncertainty` refuses such a fit.
         mixture_overrides,
+        // ferx-core #2833: the overrides' descriptors and standard errors. No
+        // skeleton step reads either: the uncertainty draws take each override
+        // from the values above and the covariance matrix, and the rows R
+        // prints come from a fit's own bytes, never from this scaffold.
+        mixture_override_params: Vec::new(),
+        se_mixture_overrides: None,
         // No outer optimizer ran in this scaffold, so there is no init-escape
         // verdict, and no packed tally to classify: `model_selection::bic()`
         // reports NaN on the default `BicInputs` rather than a wrong penalty
@@ -6483,10 +6489,10 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
     if let Some(ref mix) = p.mixture {
         for &(class, k) in &mix.omega_override_addr {
             let nm = eta(k).unwrap_or_else(|| format!("OMEGA({},{})", k + 1, k + 1));
-            labels.push(format!("{nm} (class {})", class + 1));
+            labels.push(mixture_override_label(&nm, class + 1));
         }
         for &(class, k) in &mix.sigma_override_addr {
-            labels.push(format!("{} (class {})", sigma(k), class + 1));
+            labels.push(mixture_override_label(&sigma(k), class + 1));
         }
     }
     // Same `A ~ B` spelling as `residual_correlation_names`.
@@ -6499,6 +6505,52 @@ fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> 
     } else {
         Vec::new()
     }
+}
+
+/// The label of a `[mixture]` per-class override of the parameter labelled
+/// `base`, for the 1-based `class`: `ETA_CL (class 2)` for the engine's
+/// `ETA_CL_MIX2`. The one spelling of an override, read by `cov_matrix`'s rows
+/// ([`cov_matrix_labels`]), `fit$held_at_bound` ([`held_at_bound_to_r`]) and
+/// `fit$mixture_override_params` ([`mixture_override_params_to_r`]), so one
+/// parameter has one name across the fit.
+fn mixture_override_label(base: &str, class: usize) -> String {
+    format!("{base} (class {class})")
+}
+
+/// `FitResult::mixture_override_params` (ferx-core #2833) as R columns, one row
+/// per entry of `fit$mixture_overrides` and in its order: the override's label
+/// ([`mixture_override_label`] over its base's label, with the `OMEGA(i,i)` /
+/// `SIGMA(i)` fallbacks of the output-label convention), its family's
+/// `[parameters]` keyword, the 1-based index of the base it overrides within
+/// that family, its 1-based class, and whether the model holds it (`FIX`, or a
+/// sigma override SAEM held at its initial value). No rows when the fit records
+/// no descriptor per value (a bundle from before #2833): such a value cannot be
+/// named, and the engine prints no row for it either.
+fn mixture_override_params_to_r(result: &FitResult) -> List {
+    let n_values = result.mixture_overrides.as_ref().map_or(0, Vec::len);
+    let params: &[ferx_core::MixtureOverrideParam] =
+        if result.mixture_override_params.len() == n_values {
+            &result.mixture_override_params
+        } else {
+            &[]
+        };
+    let named = |names: &[String], k: usize| names.get(k).filter(|n| !n.is_empty()).cloned();
+    let label = |p: &ferx_core::MixtureOverrideParam| {
+        let base = match p.kind {
+            ferx_core::ParameterKind::Omega => named(&result.eta_names, p.index)
+                .unwrap_or_else(|| format!("OMEGA({},{})", p.index + 1, p.index + 1)),
+            _ => named(&result.sigma_names, p.index)
+                .unwrap_or_else(|| format!("SIGMA({})", p.index + 1)),
+        };
+        mixture_override_label(&base, p.class)
+    };
+    list!(
+        parameter = params.iter().map(label).collect::<Vec<String>>(),
+        kind = params.iter().map(|p| p.kind.keyword().to_string()).collect::<Vec<String>>(),
+        index = params.iter().map(|p| p.index as i32 + 1).collect::<Vec<i32>>(),
+        class = params.iter().map(|p| p.class as i32).collect::<Vec<i32>>(),
+        fixed = params.iter().map(|p| p.fixed).collect::<Vec<bool>>()
+    )
 }
 
 /// Column-major lower triangle of an `n`-square matrix, `row >= col`, as
@@ -6665,7 +6717,7 @@ fn held_at_bound_to_r(held: &[ferx_core::HeldAtBound]) -> List {
         None => h.name.clone(),
         Some(c) => {
             let base = h.name.strip_suffix(&format!("_MIX{c}")).unwrap_or(&h.name);
-            format!("{base} (class {c})")
+            mixture_override_label(base, c)
         }
     };
     list!(
@@ -7332,6 +7384,14 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         .clone()
         .map(Robj::from)
         .unwrap_or_else(null);
+    // ferx-core #2833: each override's standard error, on the scale of its value
+    // (a class variance, a class sigma), and what names its row.
+    let se_mixture_overrides = result
+        .se_mixture_overrides
+        .clone()
+        .map(Robj::from)
+        .unwrap_or_else(null);
+    let mixture_override_params = mixture_override_params_to_r(result);
 
     // One row per theta level-block level (ferx-r #370), with its fitted value
     // (#430) and its se and SIR interval (#528); zero rows for a model with no
@@ -7544,6 +7604,8 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         // A [mixture] fit's fitted per-class Omega/Sigma override values, in
         // the engine's order (ferx-core #1765); NULL for any other fit.
         mixture_overrides = mixture_overrides,
+        se_mixture_overrides = se_mixture_overrides,
+        mixture_override_params = mixture_override_params,
         uses_sde = result.uses_sde,
         // Whether the fit integrated an `[odes]` system, and whether that system
         // was instead solved exactly by the matrix exponential at the final

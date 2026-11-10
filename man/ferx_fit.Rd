@@ -1441,9 +1441,14 @@ Cholesky parameterisation before reading correlations off it.}
 \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
 fewer than 2 valid residuals.}
 \item{dw_statistic}{Pooled Durbin-Watson statistic for IWRES over pairs
-of consecutive rows of one subject that share an occasion (an IOV
-column, or a nested model's innermost level cell) and, under a
-\code{correlation ... by} line, a residual block. The denominator is
+of consecutive rows of one subject that share, under a
+\code{correlation ... by} line, a residual block. A subject's occasions
+(an IOV column, an \code{iov_occasion} rule, or a nested model's
+innermost level cell) split its series further only when they are
+parallel, such as study arms or level cells, which restart the clock;
+occasions that follow one another in time (dosing intervals, study
+periods) are one series, so a design with one observation per occasion
+has a statistic (ferx-core #2829). The denominator is
 pair-normalised, so independent residuals give 2 however short the
 series (ferx-core #2798); values from earlier versions of ferx are
 not comparable. 2.0 = no autocorrelation; < 1.5 = positive autocorrelation
@@ -1607,11 +1612,32 @@ loaded from a bundle saved before it was recorded.}
 per-class overrides, one class variance per \code{omega(k)} override
 and then one class sigma per \code{sigma(k)} override, in declaration
 order (every estimator, SAEM included); \code{NULL} for a model without
-overrides. \code{\link{ferx_sir}} and \code{\link{ferx_covariance}}
+overrides. Named \code{<base> (class <k>)}, as
+\code{mixture_override_params} labels each one.
+\code{\link{ferx_sir}} and \code{\link{ferx_covariance}}
 rebuild the per-class matrices from it. \code{\link{ferx_save_fit}}
 keeps it bit for bit;
 \code{NULL} on a fit loaded from a bundle saved before it was
 recorded.}
+\item{se_mixture_overrides}{Numeric vector: the standard errors of
+\code{mixture_overrides}, parallel to it, named like it and on its
+scales (a class variance, a class sigma; ferx-core #2833). The engine's
+\code{0} for an override that is \code{FIX} or held at a bound (see
+\code{held_at_bound}); \code{fit$estimates} and \code{print()} show
+those as \code{NA} / \code{---} / \code{N/A}. \code{NULL} without an
+override or a covariance matrix, and on a fit loaded from a bundle
+saved before it was recorded.}
+\item{mixture_override_params}{Data frame naming each entry of
+\code{mixture_overrides}, one row each and in its order (ferx-core
+#2833): \code{parameter} (\code{<base> (class <k>)}, the label
+\code{cov_matrix} and \code{held_at_bound} use), \code{kind}
+(\code{"omega"} or \code{"sigma"}), \code{index} (1-based, of the base
+parameter it overrides within its family), \code{class} (1-based) and
+\code{fixed} (\code{TRUE} for a \code{FIX} override, or a sigma
+override SAEM held at its initial value). Zero rows for a model
+without overrides and on a fit loaded from a bundle saved before it
+was recorded, whose overrides then have no rows in
+\code{fit$estimates} or \code{print()}.}
 \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 sampling seed. \code{NULL} when IS was not run.}
 \item{bloq_method_label}{Character string describing the LOQ-censoring
@@ -1668,12 +1694,21 @@ column of a held coordinate (see \code{cov_fixed}) are
 an estimated parameter gives \code{NA} too, with a warning naming it.
 \code{NULL} when \code{cov_matrix} is \code{NULL}.}
 \item{estimates}{Tidy data frame of all estimated parameters (theta,
-omega diagonal, sigma, and - for IOV models - kappa diagonal), with
+omega diagonal, sigma, - for IOV models - kappa diagonal, and - for a
+\code{[mixture]} model with \code{omega(k)} / \code{sigma(k)}
+overrides - one row per override), with
 columns \code{param}, \code{transform}, \code{estimate}, \code{fixed},
 \code{se}, \code{rse_pct}, \code{lower_95}, \code{upper_95},
 \code{estimate_natural}, \code{lower_95_natural},
 \code{upper_95_natural}, \code{init_as_sd}, \code{weight},
-\code{scale}, \code{level}. \code{fixed} is \code{TRUE} for a parameter the fit held
+\code{scale}, \code{level}, \code{class}. An override row comes last,
+is named \code{<base> (class <k>)} (\code{"ETA_CL (class 2)"}) and
+carries its 1-based class in \code{class}, which is \code{NA} on
+every other row; an omega override reports the class variance on its
+base ETA's \code{scale}, a sigma override the class sigma under its
+base's \code{transform}, and its \code{se} is \code{NA} when it is
+\code{FIX} or held at a bound (see \code{held_at_bound}), while the
+base parameter keeps its own (ferx-core #2833). \code{fixed} is \code{TRUE} for a parameter the fit held
 (from \code{theta_fixed} / \code{omega_fixed} / \code{sigma_fixed} /
 \code{kappa_fixed}); its \code{se}, \code{rse_pct} and intervals are
 \code{NA}, since a held parameter has no standard error, and
