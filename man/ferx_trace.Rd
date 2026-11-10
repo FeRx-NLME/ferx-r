@@ -25,7 +25,10 @@ node) or "agq" (\code{n_agq > 1})}
 \item{step_norm}{L2 norm of the parameter step (\code{NA} when unavailable)}
 \item{inner_iter_count}{\code{NA} (reserved for future inner-loop counts)}
 \item{optimizer}{Optimizer name string, e.g. "slsqp", "bobyqa", "bfgs"}
-\item{lm_lambda}{Levenberg-Marquardt damping factor (Gauss-Newton only)}
+\item{lm_lambda}{Trust radius (Gauss-Newton only): the radius a rejected
+step was tried with, or the radius after the update on an accepted
+one. The name is kept from the Levenberg-Marquardt loop Gauss-Newton
+ran before ferx 0.1.0.}
 \item{ofv_delta}{OFV change from the previous accepted step (Gauss-Newton only)}
 \item{step_accepted}{1 if the GN step was accepted, 0 if rejected (\code{NA} otherwise)}
 \item{cond_nll}{Conditional negative log-likelihood (SAEM only)}

@@ -40,7 +40,7 @@ Produces a two-panel diagnostic plot from the per-iteration trace written
 when \code{optimizer_trace = TRUE} was passed to \code{\link{ferx_fit}}.
 The top panel shows OFV over iterations; the bottom panel shows a
 method-specific convergence metric (gradient norm for gradient-based
-methods, MH accept rate for SAEM, LM lambda for Gauss-Newton). Phase
+methods, MH accept rate for SAEM, trust radius for Gauss-Newton). Phase
 boundaries are drawn as vertical dashed lines.
 }
 \details{

@@ -423,11 +423,11 @@ test_that(".runlog_iter_table: FOCE/FOCEI header has GRAD_NORM and STEP_NORM", {
   tbl <- .iter_table(tr, truncate = FALSE)
   expect_match(tbl[1], "GRAD_NORM", fixed = TRUE)
   expect_match(tbl[1], "STEP_NORM", fixed = TRUE)
-  expect_no_match(tbl[1], "LM_LAMBDA",  fixed = TRUE)
+  expect_no_match(tbl[1], "TR_RADIUS",  fixed = TRUE)
   expect_no_match(tbl[1], "MH_ACCEPT",  fixed = TRUE)
   expect_match(tbl[1], "dOFV",      fixed = TRUE)
 })
-test_that(".runlog_iter_table: GN header has LM_LAMBDA and ACC, not GRAD_NORM", {
+test_that(".runlog_iter_table: GN header has TR_RADIUS and ACC, not GRAD_NORM", {
   path <- write_fake_trace(n = 5, method = "gn")
   on.exit(unlink(path))
   tr <- read.csv(path, stringsAsFactors = FALSE)
@@ -437,7 +437,7 @@ test_that(".runlog_iter_table: GN header has LM_LAMBDA and ACC, not GRAD_NORM", 
   tr$grad_norm     <- NA_real_
   tr$step_norm     <- NA_real_
   tbl <- .iter_table(tr, truncate = FALSE)
-  expect_match(tbl[1], "LM_LAMBDA", fixed = TRUE)
+  expect_match(tbl[1], "TR_RADIUS", fixed = TRUE)
   expect_match(tbl[1], "ACC",       fixed = TRUE)
   expect_no_match(tbl[1], "GRAD_NORM", fixed = TRUE)
   # YES/NO in data rows

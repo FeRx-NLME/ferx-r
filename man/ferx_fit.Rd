@@ -841,9 +841,11 @@ monotone slopes free.}
 
 \strong{Gauss-Newton (\code{"gn"} / \code{"gn_hybrid"})}
 \describe{
-\item{\code{gn_lambda}}{Levenberg-Marquardt damping factor (default
-\code{0.01}). Larger values make steps more conservative. Accepted
-by both \code{"gn"} and \code{"gn_hybrid"}.}
+\item{\code{gn_lambda}}{Deprecated: has no effect. Gauss-Newton has
+used a trust region, not Levenberg-Marquardt damping, since ferx
+0.1.0, so there is no damping factor to set. Setting it draws a
+warning on every method; the key is rejected from the next minor
+release. Remove it from your settings.}
 }
 
 \strong{Importance Sampling (\code{"imp"})}

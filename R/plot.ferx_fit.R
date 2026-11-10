@@ -4,7 +4,7 @@
 #' when \code{optimizer_trace = TRUE} was passed to \code{\link{ferx_fit}}.
 #' The top panel shows OFV over iterations; the bottom panel shows a
 #' method-specific convergence metric (gradient norm for gradient-based
-#' methods, MH accept rate for SAEM, LM lambda for Gauss-Newton). Phase
+#' methods, MH accept rate for SAEM, trust radius for Gauss-Newton). Phase
 #' boundaries are drawn as vertical dashed lines.
 #'
 #' \code{plot.ferx_job} dispatches on the handle returned by
@@ -97,7 +97,7 @@ plot.ferx_job <- function(x, y = NULL, log_ofv = FALSE, monotonic = TRUE, ...) {
     m_color  <- "darkorange"
   } else if (is_gn) {
     metric   <- tr$lm_lambda
-    m_label  <- "LM lambda"
+    m_label  <- "Trust radius"
     m_color  <- "darkgreen"
   } else {
     metric   <- tr$grad_norm
