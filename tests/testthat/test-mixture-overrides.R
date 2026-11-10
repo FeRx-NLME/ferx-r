@@ -34,6 +34,10 @@ test_that("an override is named, with its SE, on the fit (ferx-core #2833)", {
   expect_true(label %in% rownames(fit$cov_matrix))
   se <- fit$se_mixture_overrides[[label]]
   expect_true(is.finite(se) && se > 0)
+  # The coordinate packs the log of the class SD, so by the delta method the
+  # variance's SE is 2 * variance * the packed SE.
+  expect_equal(se, 2 * fit$mixture_overrides[[label]] * sqrt(fit$cov_matrix[label, label]),
+               tolerance = 1e-8)
   base_se <- fit$estimates$se[fit$estimates$param == "ETA_CL"]
   expect_false(isTRUE(all.equal(se, base_se)))
   expect_identical(summary(fit)$se_mixture_overrides, fit$se_mixture_overrides)
@@ -102,6 +106,27 @@ test_that("a FIX override has no SE: `[FIX]` and `---` (ferx-core #2833)", {
   rows <- override_section(fit)
   expect_true(startsWith(rows, paste0("  ", label, " [FIX]")))
   expect_match(rows, "SE = ---", fixed = TRUE)
+})
+
+test_that("a held base does not hold its override (ferx-core #2833)", {
+  skip_on_cran()
+  # ETA_CL itself listed as held, with no class: the override names the same
+  # kind and index, and only its class tells the two apart.
+  full <- mixture_override_fit()
+  fit <- quiet(fitrx_edit_fit(full, function(w) {
+    w$held_at_bound <- list(list(
+      name = "ETA_CL", kind = "Omega", index = 0L,
+      packed_index = match("ETA_CL", rownames(full$cov_matrix)) - 1L,
+      reason = "collapsed_at_guard"
+    ))
+    w
+  }))
+  expect_identical(fit$held_at_bound$parameter, "ETA_CL")
+  expect_true(is.na(fit$held_at_bound$class))
+  expect_true(is.na(fit$estimates["ETA_CL", "se"]))
+  expect_identical(fit$estimates[label, "se"], full$se_mixture_overrides[[label]])
+  expect_match(override_section(fit),
+               sprintf("SE = %.6f", full$se_mixture_overrides[[label]]), fixed = TRUE)
 })
 
 test_that("a sigma override reads like its base sigma (ferx-core #2833)", {

@@ -1626,7 +1626,9 @@ scales (a class variance, a class sigma; ferx-core #2833). The engine's
 \code{held_at_bound}); \code{fit$estimates} and \code{print()} show
 those as \code{NA} / \code{---} / \code{N/A}. \code{NULL} without an
 override or a covariance matrix, and on a fit loaded from a bundle
-saved before it was recorded.}
+saved before it was recorded. \code{\link{ferx_covariance}} on such a
+fit fills it, unnamed: the bundle still names no override (see
+\code{mixture_override_params}).}
 \item{mixture_override_params}{Data frame naming each entry of
 \code{mixture_overrides}, one row each and in its order (ferx-core
 #2833): \code{parameter} (\code{<base> (class <k>)}, the label
@@ -1637,7 +1639,9 @@ parameter it overrides within its family), \code{class} (1-based) and
 override SAEM held at its initial value). Zero rows for a model
 without overrides and on a fit loaded from a bundle saved before it
 was recorded, whose overrides then have no rows in
-\code{fit$estimates} or \code{print()}.}
+\code{fit$estimates} or \code{print()}, also after
+\code{\link{ferx_covariance}} or \code{\link{ferx_sir}}; refit to get
+them.}
 \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 sampling seed. \code{NULL} when IS was not run.}
 \item{bloq_method_label}{Character string describing the LOQ-censoring
