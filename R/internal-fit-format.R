@@ -771,7 +771,7 @@
     list(
       if (show_grad) list("GRAD_NORM", 11L),
       if (show_step) list("STEP_NORM", 11L),
-      if (show_lm)   list("LM_LAMBDA", 11L),
+      if (show_lm)   list("TR_RADIUS", 11L),
       if (show_acc)  list("ACC",        5L)
     )
   } else {

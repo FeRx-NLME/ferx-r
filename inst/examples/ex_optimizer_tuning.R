@@ -64,14 +64,6 @@ fit_reconv <- ferx_fit(
   settings = list(optimizer = "slsqp", reconverge_gradient_interval = 1L)
 )
 
-# --- Gauss-Newton damping ---------------------------------------------------
-# gn_lambda is the Levenberg-Marquardt damping factor for method = "gn".
-fit_gn <- ferx_fit(
-  ex$model, ex$data,
-  method   = "gn",
-  settings = list(gn_lambda = 1e-3)
-)
-
 # --- Multi-start (covered in detail by ex9_mm_multistart.R) -----------------
 # Runs n_starts independent fits from perturbed initial values in parallel
 # (rayon) and returns the converged result with the lowest OFV.

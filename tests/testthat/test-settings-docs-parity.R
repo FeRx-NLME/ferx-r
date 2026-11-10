@@ -16,6 +16,14 @@ sd_exempt <- c(
   ignore_subjects = "what the ignore_ids argument sends"
 )
 
+# Keys ?ferx_fit still documents as deprecated, each with the reason. The
+# engine keeps these out of `ferx_rust_fit_option_keys()` (ferx-core's
+# `deprecated_keys()`, which R cannot read), accepting them with a warning
+# until the next minor release rejects them. Remove an entry with its Rd item.
+sd_deprecated <- c(
+  gn_lambda = "no effect, warns; rejected at the next minor (ferx-core #2842)"
+)
+
 sd_rd <- function() {
   src <- testthat::test_path("..", "..", "man", "ferx_fit.Rd")
   if (file.exists(src)) tools::parse_Rd(src) else tools::Rd_db("ferx")[["ferx_fit.Rd"]]
@@ -93,7 +101,17 @@ test_that("a deleted settings entry fails the parity check (#509)", {
 test_that("?ferx_fit's settings entries name only keys the engine accepts (#509)", {
   args <- sd_arguments(sd_rd())
   documented <- sd_item_keys(args[["settings"]])
-  expect_identical(setdiff(documented, ferx:::ferx_rust_fit_option_keys()), character(0))
+  expect_identical(
+    setdiff(documented, c(ferx:::ferx_rust_fit_option_keys(), names(sd_deprecated))),
+    character(0)
+  )
+})
+
+test_that("the deprecated keys are documented and not engine keys (#740)", {
+  args <- sd_arguments(sd_rd())
+  # Once the engine accepts or drops a key again, its entry here is stale.
+  expect_identical(intersect(names(sd_deprecated), ferx:::ferx_rust_fit_option_keys()), character(0))
+  expect_true(all(names(sd_deprecated) %in% sd_item_keys(args[["settings"]])))
 })
 
 test_that("the exemptions are engine keys with no settings entry (#509)", {
