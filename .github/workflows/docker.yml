@@ -4,7 +4,9 @@ name: docker
 # for linux/amd64 and linux/arm64 and publishes it to ghcr.io/ferx-nlme/ferx-r.
 #
 #   push to main  -> :<full sha>, :<short sha>, :latest
-#   tag vX.Y.Z    -> :vX.Y.Z, :X.Y.Z (the commit's :sha tags come from main)
+#   tag vX.Y.Z    -> :vX.Y.Z, :X.Y.Z (permanent: never replaced), and :release
+#                    when it is the newest final release (the commit's :sha
+#                    tags come from main)
 #   pull request  -> build + smoke test only, nothing is pushed
 #   manual run    -> build + smoke test only, nothing is pushed (from any branch)
 #
@@ -278,6 +280,47 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Release tags (:vX.Y.Z, :X.Y.Z) are permanent: validated work cites
+      # them, so a release image is published once and never replaced. A
+      # re-pushed git tag, or a re-run of this job, would otherwise rebuild
+      # (not byte-identical: apt and CRAN move) and silently repoint the tag.
+      # Fails when either tag already exists, and when the registry cannot say
+      # (anything but "not found" is "could not check", never "free").
+      #
+      # :release floats to the newest final release: set only when this tag is
+      # a plain vX.Y.Z (no -rc1 etc.) and the highest such tag in the repo, so
+      # a later patch of an older line (v0.4.1 after v0.5.0) leaves it alone.
+      - name: Release tags
+        id: rel
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          for t in "$TAG" "${TAG#v}"; do
+            if out="$(docker buildx imagetools inspect "${{ env.IMAGE }}:$t" 2>&1)"; then
+              echo "::error title=Release image exists::${{ env.IMAGE }}:$t is already published. Release images are never replaced; tag a new version instead."
+              exit 1
+            fi
+            case "$out" in
+              *"not found"*|*"manifest unknown"*|*NOT_FOUND*|*MANIFEST_UNKNOWN*) ;;
+              *) echo "::error title=Cannot check release tag::could not tell whether ${{ env.IMAGE }}:$t exists: $out"; exit 1 ;;
+            esac
+          done
+          newest="$(git ls-remote --tags --refs "https://github.com/${{ github.repository }}" 'v*' \
+            | sed 's|.*refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+          echo "this tag: $TAG; newest final release tag: ${newest:-none}"
+          if [ -n "$newest" ] && [ "$TAG" = "$newest" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Tags
         id: meta
         uses: docker/metadata-action@v5
@@ -286,18 +329,14 @@ jobs:
           flavor: latest=false
           # SHA tags come from main pushes only: a release tag's commit is also
           # built by main's run, and two builds must not race for one :sha.
+          # :latest = newest main build; :release = newest final release.
           tags: |
             type=sha,format=long,prefix=,enable=${{ github.ref_type == 'branch' }}
             type=sha,prefix=,enable=${{ github.ref_type == 'branch' }}
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+            type=raw,value=release,enable=${{ steps.rel.outputs.release == 'true' }}
 
       - name: Create multi-arch manifest
         working-directory: ${{ runner.temp }}/digests

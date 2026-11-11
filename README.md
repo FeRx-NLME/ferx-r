@@ -105,16 +105,24 @@ and `linux/arm64`, so you skip the Rust build:
 docker pull ghcr.io/ferx-nlme/ferx-r:latest
 ```
 
-Tags: `latest` (current `main`), the ferx-r commit SHA of each published `main`
-build (full or 7-character short: `ghcr.io/ferx-nlme/ferx-r:<sha>`), and each
-release (`v0.4.0` and `0.4.0`, from the next release on). Pin a SHA or release
-tag in pipelines; `latest` moves with every merge. Not every `main` commit has
-an image: merges that only touch docs, tests or CI publish nothing, and when
-several PRs merge in quick succession the commits in between may be skipped.
-Pick a SHA from the package's tag list. Release tags and `latest` are kept for
-good, SHA tags for the 30 most recent published commits (a weekly cleanup
-deletes older ones), so pipelines that must stay reproducible for longer should
-pin a release.
+Pick the tag that fits:
+
+| Tag | What it is | Moves? |
+|---|---|---|
+| `latest` | the newest `main` build (development) | with every merge that changes the image |
+| `release` | the newest release | when a newer version is released |
+| `0.5.0` / `v0.5.0` | exactly that release (from the first release after 0.4.0 on) | never |
+| `<sha>` | one `main` build, by ferx-r commit (full or 7-character short) | never |
+
+Release tags are published once and never replaced: the workflow refuses to
+overwrite an existing one, and the weekly cleanup never deletes them, `latest`
+or `release`. SHA tags are kept for the 30 most recent published commits, so
+pipelines that must stay reproducible for longer (validated work) should pin a
+release, and record the image digest (`docker buildx imagetools inspect
+ghcr.io/ferx-nlme/ferx-r:0.5.0`; pull by `ferx-r@sha256:<digest>`), which
+names the exact bytes. Not every `main` commit has an image: merges that only
+touch docs, tests or CI publish nothing, and when several PRs merge in quick
+succession the commits in between may be skipped.
 
 The image carries ferx's hard dependencies only (no Suggests such as testthat
 or xpose), and the default user cannot write to the site library. Add packages

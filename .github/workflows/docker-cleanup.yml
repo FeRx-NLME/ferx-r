@@ -3,7 +3,7 @@ name: docker-cleanup
 # Retention for ghcr.io/ferx-nlme/ferx-r (published by docker.yml). Without it
 # every published main commit keeps a ~400 MB-per-arch image forever.
 #
-# Kept: `latest`, every release tag (vX.Y.Z and X.Y.Z), and the newest
+# Kept: `latest`, `release`, every release tag (vX.Y.Z and X.Y.Z), and the newest
 # KEEP_N_TAGGED commit (:sha) images. Deleted: older :sha images and untagged
 # images (left behind when :latest moves on). The action is multi-arch aware:
 # it deletes an image together with its platform manifests, never a platform
@@ -52,7 +52,7 @@ jobs:
         uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
           package: ferx-r
-          exclude-tags: latest,v*,*.*.*
+          exclude-tags: latest,release,v*,*.*.*
           keep-n-tagged: ${{ env.KEEP_N_TAGGED }}
           delete-untagged: true
           validate: true
@@ -64,7 +64,7 @@ jobs:
         with:
           package: ferx-r
           delete-tags: ${{ inputs.delete_tags }}
-          exclude-tags: latest,v*,*.*.*
+          exclude-tags: latest,release,v*,*.*.*
           delete-ghost-images: true
           delete-partial-images: true
           validate: true
