@@ -118,11 +118,16 @@ Release tags are published once and never replaced: the workflow refuses to
 overwrite an existing one, and the weekly cleanup never deletes them, `latest`
 or `release`. SHA tags are kept for the 30 most recent published commits, so
 pipelines that must stay reproducible for longer (validated work) should pin a
-release, and record the image digest (`docker buildx imagetools inspect
-ghcr.io/ferx-nlme/ferx-r:0.5.0`; pull by `ferx-r@sha256:<digest>`), which
-names the exact bytes. Not every `main` commit has an image: merges that only
-touch docs, tests or CI publish nothing, and when several PRs merge in quick
-succession the commits in between may be skipped.
+release, and record the image digest, which names the exact bytes:
+
+```bash
+docker buildx imagetools inspect ghcr.io/ferx-nlme/ferx-r:0.5.0   # "Digest: sha256:..."
+docker pull ghcr.io/ferx-nlme/ferx-r@sha256:<digest>
+```
+
+ Not every `main` commit has an image: merges that only touch docs, tests or CI
+publish nothing, and when several PRs merge in quick succession the commits in
+between may be skipped.
 
 The image carries ferx's hard dependencies only (no Suggests such as testthat
 or xpose), and the default user cannot write to the site library. Add packages
