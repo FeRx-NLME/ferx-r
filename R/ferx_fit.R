@@ -2311,10 +2311,10 @@
 #'
 #' The starts are not free. They run on the same thread pool as the
 #' per-subject loops inside each fit, and a single fit already spreads its
-#' subjects over that pool, so the starts compete for the same cores: wall
-#' time grows with \code{n_starts} unless a single fit leaves cores idle.
-#' Only where one fit takes well under a second (a few hundred rows, e.g. an
-#' arm-level MBMA) do eight starts cost next to nothing. See
+#' subjects over that pool, so the starts compete for the same workers: wall
+#' time grows with \code{n_starts} unless a single fit leaves part of that
+#' pool idle. Where one fit takes well under a second (a few hundred rows,
+#' e.g. an arm-level MBMA), eight starts cost next to nothing either way. See
 #' \url{https://ferx-nlme.org/ferx-core/examples/multistart.html#when-to-use-multi-start}
 #' for when multi-start is worth it and how many starts to use.
 #'
