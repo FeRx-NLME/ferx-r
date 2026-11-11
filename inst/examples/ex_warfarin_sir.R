@@ -8,7 +8,9 @@ library(ferx)
 # more reliable than the standard +/- 1.96 * SE intervals when the surface
 # is skewed.
 #
-# Requires covariance = TRUE; SIR is enabled via sir = TRUE.
+# SIR needs the covariance step: its proposal is that step's matrix. The
+# warfarin_iov model file sets `covariance = false`, so the call asks for it;
+# sir = TRUE then enables SIR.
 #
 # We use the warfarin_iov example here because its FOCE covariance step
 # converges cleanly on this small finite-difference-gradient fit. The same
@@ -18,6 +20,7 @@ ex <- ferx_example("warfarin_iov")
 fit <- ferx_fit(
   ex$model,
   ex$data,
+  covariance = TRUE,
   sir      = TRUE,
   settings = list(
     sir_samples   = 2000L,   # candidate draws from the asymptotic proposal

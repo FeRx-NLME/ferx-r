@@ -382,7 +382,16 @@ test_that("omega, FIX and sigma overrides each get a row (ferx-core #2833)", {
   expect_true(startsWith(rows[1L], "  ETA_CL (class 2) "))
   expect_true(startsWith(rows[2L], "  ETA_V (class 2) [FIX] "))
   expect_match(rows[2L], "SE = ---", fixed = TRUE)
-  expect_true(startsWith(rows[3L], "  PROP_ERR (class 2) [proportional] = "))
+  # Padded to the omega rows' 20, so the section lines up.
+  expect_true(startsWith(rows[3L], "  PROP_ERR (class 2)   [proportional] = "))
+  expect_identical(regexpr("[", rows[1L], fixed = TRUE)[[1L]],
+                   regexpr("[", rows[3L], fixed = TRUE)[[1L]])
+  # The run log lists the same three rows, and its gradient section has a
+  # scale for every packed coordinate.
+  rl <- strsplit(suppressWarnings(ferx_runlog(fit, verbose = FALSE)), "\n", fixed = TRUE)[[1L]]
+  for (nm in labels) expect_length(rl[startsWith(rl, paste0("  ", nm, " "))], 1L)
+  expect_match(rl[startsWith(rl, "  ETA_V (class 2) ")], "(FIX)", fixed = TRUE)
+  expect_false(any(grepl("parameter count mismatch", rl, fixed = TRUE)))
   expect_match(rows[3L], sprintf("CV%% = %.1f", 100 * est$estimate[3L]), fixed = TRUE)
   expect_identical(out[at + 5L], "")
 })

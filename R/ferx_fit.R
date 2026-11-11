@@ -3207,8 +3207,9 @@ ferx_fit <- function(model, data = NULL,
 # itself in observation units for an additive one, variance = sigma^2 for both
 # (ferx-core #57). FIX is `NAME [FIX]` with `SE = ---`, as ferx-core's console
 # and the OMEGA / KAPPA rows spell it (#563); an NA `se` (none computed, or the
-# parameter is held at a bound) is `N/A`.
-.ferx_sigma_row <- function(nm, s, typ, fixed, se, init_as_sd = FALSE) {
+# parameter is held at a bound) is `N/A`. `width` pads the name: 16 for a base
+# sigma, 20 for an override, the pad of the engine's OMEGA rows it sits under.
+.ferx_sigma_row <- function(nm, s, typ, fixed, se, init_as_sd = FALSE, width = 16L) {
   if (fixed) nm <- paste(nm, "[FIX]")
   se_str <- if (fixed) "---" else if (is.na(se)) "N/A" else sprintf("%.6f", se)
   var_str  <- sprintf("var = %.6f", s * s)
@@ -3219,14 +3220,14 @@ ferx_fit <- function(model, data = NULL,
   )
   sd_note <- if (init_as_sd) "  [initial specified as SD]" else ""
   if (identical(typ, "proportional")) {
-    sprintf("  %-16s %-14s = %.6f  (%s, CV%% = %.1f)  SE = %s%s\n",
-            nm, type_tag, s, var_str, s * 100, se_str, sd_note)
+    sprintf("  %-*s %-14s = %.6f  (%s, CV%% = %.1f)  SE = %s%s\n",
+            width, nm, type_tag, s, var_str, s * 100, se_str, sd_note)
   } else if (identical(typ, "additive")) {
-    sprintf("  %-16s %-14s = %.6f  (SD = %.4f, %s)  SE = %s%s\n",
-            nm, type_tag, s, s, var_str, se_str, sd_note)
+    sprintf("  %-*s %-14s = %.6f  (SD = %.4f, %s)  SE = %s%s\n",
+            width, nm, type_tag, s, s, var_str, se_str, sd_note)
   } else {
-    sprintf("  %-16s = %.6f  (%s)  SE = %s%s\n",
-            nm, s, var_str, se_str, sd_note)
+    sprintf("  %-*s = %.6f  (%s)  SE = %s%s\n",
+            width, nm, s, var_str, se_str, sd_note)
   }
 }
 
@@ -3624,7 +3625,7 @@ print.ferx_fit <- function(x, ...) {
       cat(.ferx_sigma_row(
         override_rows$parameter[k], override_rows$estimate[k],
         typ = if (length(x$sigma_types) >= i) x$sigma_types[[i]] else NA_character_,
-        fixed = override_rows$fixed[k], se = override_rows$se[k]
+        fixed = override_rows$fixed[k], se = override_rows$se[k], width = 20L
       ))
     }
   }

@@ -149,9 +149,87 @@ test_that("a sigma override reads like its base sigma (ferx-core #2833)", {
   s <- fit$mixture_overrides[["EPS (class 2)"]]
   expect_identical(
     rows,
-    sprintf("  %-16s %-14s = %.6f  (var = %.6f, CV%% = %.1f)  SE = %.6f",
+    sprintf("  %-20s %-14s = %.6f  (var = %.6f, CV%% = %.1f)  SE = %.6f",
             "EPS (class 2)", "[proportional]", s, s * s, s * 100,
             fit$se_mixture_overrides[["EPS (class 2)"]])
+  )
+})
+
+# An additive ETA_CL with a class-2 override, and a class-2 override of the
+# second sigma: the override rows must read their base's scale, linked theta
+# and sigma type by the base's index, not by position.
+additive_override_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      mod <- tempfile(fileext = ".ferx")
+      writeLines(c(
+        "[parameters]",
+        "  theta TVCL(0.13, 0.001, 10)",
+        "  theta TVV(8, 0.1, 100)",
+        "  theta TVKA(1, 0.01, 50)",
+        "  theta P1(0.5, 0.01, 0.99)",
+        "  omega ETA_CL ~ 0.0004",
+        "  omega ETA_V ~ 0.02",
+        "  sigma PROP_ERR ~ 0.1 (sd)",
+        "  sigma ADD_ERR ~ 0.2 (sd)",
+        "[mixture]",
+        "  nsub = 2",
+        "  p(1) = P1",
+        "  omega(2) ETA_CL ~ 0.002",
+        "  sigma(2) ADD_ERR ~ 0.5 (sd)",
+        "[individual_parameters]",
+        "  CL = TVCL + ETA_CL",
+        "  V  = TVV * exp(ETA_V)",
+        "  KA = TVKA",
+        "[structural_model]",
+        "  pk one_cpt_oral(cl=CL, v=V, ka=KA)",
+        "[error_model]",
+        "  DV ~ combined(PROP_ERR, ADD_ERR)"
+      ), mod)
+      fit <<- quiet(ferx_fit(mod, ferx_example("warfarin")$data, method = "foce",
+                             verbose = FALSE, covariance = TRUE,
+                             settings = list(maxiter = 20L)))
+    }
+    fit
+  }
+})
+
+test_that("an override row reads its base's scale, linked theta and sigma type", {
+  skip_on_cran()
+  fit <- additive_override_fit()
+  expect_false(is.null(fit$cov_matrix))
+  om <- "ETA_CL (class 2)"
+  sg <- "ADD_ERR (class 2)"
+  expect_identical(fit$mixture_override_params[, c("parameter", "kind", "index")],
+                   data.frame(parameter = c(om, sg), kind = c("omega", "sigma"),
+                              index = c(1L, 2L), stringsAsFactors = FALSE))
+  # The premise: the two ETAs and the two sigmas differ, so reading the wrong
+  # base shows.
+  expect_identical(unname(fit$eta_param_types), c("additive", "log_normal"))
+  expect_identical(unname(fit$sigma_types), c("proportional", "additive"))
+
+  est <- fit$estimates
+  expect_identical(est[om, "scale"], "additive")
+  expect_identical(est[sg, "transform"], "additive")
+  # A sigma override packs the log of the class sigma: SE = sigma * packed SE.
+  expect_equal(fit$se_mixture_overrides[[sg]],
+               fit$mixture_overrides[[sg]] * sqrt(fit$cov_matrix[sg, sg]),
+               tolerance = 1e-8)
+  expect_identical(est[sg, "se"], fit$se_mixture_overrides[[sg]])
+
+  rows <- override_section(fit)
+  expect_length(rows, 2L)
+  # The omega override, on the additive scale of ETA_CL, against ETA_CL's theta.
+  expect_true(startsWith(rows[1L], paste0("  ", om, " ")))
+  expect_match(rows[1L], "[additive]", fixed = TRUE)
+  expect_match(rows[1L], sprintf("at TVCL = %.4f", fit$theta[["TVCL"]]), fixed = TRUE)
+  # The sigma override, as the additive ADD_ERR is printed.
+  s <- fit$mixture_overrides[[sg]]
+  expect_identical(
+    rows[2L],
+    sprintf("  %-20s %-14s = %.6f  (SD = %.4f, var = %.6f)  SE = %.6f",
+            sg, "[additive]", s, s, s * s, fit$se_mixture_overrides[[sg]])
   )
 })
 

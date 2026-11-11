@@ -169,6 +169,8 @@ with_held <- function(fit, name, kind, index) {
 runlog_se <- function(fit, name) {
   rl <- utils::capture.output(quiet(ferx_runlog(fit)))
   row <- rl[startsWith(rl, paste0("  ", name, " "))]
+  # Not a [mixture] override of it (`ETA_CL (class 2)`).
+  row <- row[!startsWith(row, paste0("  ", name, " (class "))]
   expect_length(row, 1L)
   tail(strsplit(trimws(row), "[[:space:]]+")[[1]], 2L)
 }
@@ -375,6 +377,7 @@ test_that("a held mixture override is its own row, not its base's (ferx-core #28
   expect_false(row$fixed)
   expect_true(is.na(row$se))
   expect_identical(se_cell(out, "ETA_CL \\(class 2\\)"), "N/A")
+  expect_identical(runlog_se(fit, "ETA_CL (class 2)"), c("N/A", "N/A"))
 })
 
 test_that("a held mixture override keeps its class through save/load (ferx-core #2809)", {
