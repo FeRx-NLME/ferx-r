@@ -168,7 +168,8 @@ in the Rust backend (inner EBE search, SAEM, SIR). \code{NULL} (default)
 uses the model file's \code{[fit_options] threads}; when the file does not
 set it, the engine's default: a positive \code{RAYON_NUM_THREADS}
 environment variable used as given (read once per R session), else
-available cores minus one (floored at 1), capped at 8 -- most fits gain
+available cores minus one, but at least 2 when there are two or more
+cores (1 on a single core), capped at 8 -- most fits gain
 little from spreading across every core, and not all cores are equal on
 asymmetric platforms (e.g. Apple Silicon E-cores). \code{0} asks for the
 engine default by name and overrides a count pinned in the file. A
