@@ -155,9 +155,10 @@ test_that("a sigma override reads like its base sigma (ferx-core #2833)", {
   )
 })
 
-# An additive ETA_CL with a class-2 override, and a class-2 override of the
-# second sigma: the override rows must read their base's scale, linked theta
-# and sigma type by the base's index, not by position.
+# An additive ETA_CL, declared second, with a class-2 override, and a class-2
+# override of the second sigma: the override rows must read their base's
+# scale, linked theta and sigma type by the base's index. Both overrides sit
+# on index 2, so the first row of each family is the wrong one to read.
 additive_override_fit <- local({
   fit <- NULL
   function() {
@@ -169,8 +170,8 @@ additive_override_fit <- local({
         "  theta TVV(8, 0.1, 100)",
         "  theta TVKA(1, 0.01, 50)",
         "  theta P1(0.5, 0.01, 0.99)",
-        "  omega ETA_CL ~ 0.0004",
         "  omega ETA_V ~ 0.02",
+        "  omega ETA_CL ~ 0.0004",
         "  sigma PROP_ERR ~ 0.1 (sd)",
         "  sigma ADD_ERR ~ 0.2 (sd)",
         "[mixture]",
@@ -203,10 +204,11 @@ test_that("an override row reads its base's scale, linked theta and sigma type",
   sg <- "ADD_ERR (class 2)"
   expect_identical(fit$mixture_override_params[, c("parameter", "kind", "index")],
                    data.frame(parameter = c(om, sg), kind = c("omega", "sigma"),
-                              index = c(1L, 2L), stringsAsFactors = FALSE))
+                              index = c(2L, 2L), stringsAsFactors = FALSE))
   # The premise: the two ETAs and the two sigmas differ, so reading the wrong
   # base shows.
-  expect_identical(unname(fit$eta_param_types), c("additive", "log_normal"))
+  expect_identical(unname(fit$eta_param_types), c("log_normal", "additive"))
+  expect_identical(unname(fit$eta_linked_theta), c("TVV", "TVCL"))
   expect_identical(unname(fit$sigma_types), c("proportional", "additive"))
 
   est <- fit$estimates

@@ -526,9 +526,6 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
   invisible(out)
 }
 
-# Internal: one INITIAL / FINAL cell of the parameter table. A held parameter
-# shows its value, marked `(FIX)` as print()'s `[FIX]` marks it, so the value
-# it was held at appears in the log (#450). The SE / %RSE cells keep `FIXED`.
 # One parameter-table row for a parameter the fit records no initial value
 # for (an IOV kappa, a [mixture] per-class override), in the columns the table
 # has: INITIAL reads N/A, a FIX parameter FIXED, and an NA `se` (held at a
@@ -548,6 +545,9 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
   paste(cols, collapse = "  ")
 }
 
+# Internal: one INITIAL / FINAL cell of the parameter table. A held parameter
+# shows its value, marked `(FIX)` as print()'s `[FIX]` marks it, so the value
+# it was held at appears in the log (#450). The SE / %RSE cells keep `FIXED`.
 .runlog_value <- function(x, fixed) {
   if (fixed) sprintf("%14s", paste(sprintf("%.6g", x), "(FIX)")) else sprintf("%14.6g", x)
 }
