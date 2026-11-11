@@ -4,7 +4,9 @@ name: docker
 # for linux/amd64 and linux/arm64 and publishes it to ghcr.io/ferx-nlme/ferx-r.
 #
 #   push to main  -> :<full sha>, :<short sha>, :latest
-#   tag vX.Y.Z    -> :vX.Y.Z, :X.Y.Z (the commit's :sha tags come from main)
+#   tag vX.Y.Z    -> :vX.Y.Z, :X.Y.Z (permanent: never replaced), and :release
+#                    when it is the newest final release (the commit's :sha
+#                    tags come from main)
 #   pull request  -> build + smoke test only, nothing is pushed
 #   manual run    -> build + smoke test only, nothing is pushed (from any branch)
 #
@@ -92,6 +94,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # A release tag that is already published is never replaced (see the
+      # publish job). Refuse here, before an hour of builds and before anything
+      # is pushed. "Re-run failed jobs" after a publish that stopped part-way
+      # does not re-run this job, so that resume is still possible.
+      - name: Release tag not yet published
+        if: github.ref_type == 'tag'
+        run: tools/docker-release-tags.sh guard "$IMAGE" "${{ github.ref_name }}"
 
       # Build once into the local daemon so the image can be smoke-tested
       # before anything is published.
@@ -270,6 +280,11 @@ jobs:
       contents: read
       packages: write
     steps:
+      # For tools/docker-release-tags.sh; not a build context here.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           path: ${{ runner.temp }}/digests
@@ -277,6 +292,36 @@ jobs:
           merge-multiple: true
 
       - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Release tags (:vX.Y.Z, :X.Y.Z) are permanent: validated work cites
+      # them, so a release image is published once and never replaced
+      # (tools/docker-release-tags.sh; the build job already refused a tag
+      # that exists). Checked again here against this run's digests: a tag
+      # pointing at exactly these images is an earlier publish of the same
+      # bytes that stopped part-way ("Re-run failed jobs" reuses the digests),
+      # and may be completed; anything else is refused, and a registry answer
+      # other than "not found" is "could not check", never "free".
+      #
+      # :release floats to the newest final release: only a plain vX.Y.Z that
+      # is the highest such tag in the repo moves it, so a later patch of an
+      # older line (v0.4.1 after v0.5.0) or a pre-release leaves it alone. A
+      # failed tag lookup fails the step rather than quietly skipping it.
+      - name: Release tags
+        id: rel
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          tools/docker-release-tags.sh guard "$IMAGE" "$TAG" "$RUNNER_TEMP/digests"
+          release="$(tools/docker-release-tags.sh is-newest "https://github.com/${{ github.repository }}" "$TAG")"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
 
       - name: Tags
         id: meta
@@ -286,18 +331,14 @@ jobs:
           flavor: latest=false
           # SHA tags come from main pushes only: a release tag's commit is also
           # built by main's run, and two builds must not race for one :sha.
+          # :latest = newest main build; :release = newest final release.
           tags: |
             type=sha,format=long,prefix=,enable=${{ github.ref_type == 'branch' }}
             type=sha,prefix=,enable=${{ github.ref_type == 'branch' }}
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=raw,value=latest,enable={{is_default_branch}}
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+            type=raw,value=release,enable=${{ steps.rel.outputs.release == 'true' }}
 
       - name: Create multi-arch manifest
         working-directory: ${{ runner.temp }}/digests
