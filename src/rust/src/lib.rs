@@ -475,8 +475,9 @@ const POLL_MS: u64 = 100;
 /// @param bloq_method BLOQ handling: "drop", "m3", or "" to use the model default
 /// @param threads Number of worker threads for the per-subject parallel
 ///   loops. `< 0`: not given, keep the model file's [fit_options] threads
-///   (#505). `0`: the engine default (cores - 1, capped at 8), requested
-///   explicitly, so it overrides a pinned file value. `> 0`: pin the count.
+///   (#505). `0`: the engine default (cores - 1, at least 2 on two or more
+///   cores, capped at 8), requested explicitly, so it overrides a pinned
+///   file value. `> 0`: pin the count.
 /// @param mu_referencing Use mu-referencing for ETA initialisation:
 ///   "true"/"false", or "" to keep the model default
 /// @param sir Run SIR uncertainty estimation as a post-fit step: "true"/"false",
