@@ -6,8 +6,8 @@
 # values (TVVMAX=12 vs true≈3.5, TVKM=20 vs true≈5.5).
 #
 # n_starts = 8 runs 8 parallel fits from perturbed starting points and
-# returns the converged result with the lowest OFV. On an 8-core machine
-# wall-clock time is approximately the same as a single run.
+# returns the converged result with the lowest OFV. The starts share one
+# thread pool with the per-subject loops, so wall time grows with n_starts.
 
 library(ferx)
 
