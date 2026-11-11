@@ -95,6 +95,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # A release tag that is already published is never replaced (see the
+      # publish job). Refuse here, before an hour of builds and before anything
+      # is pushed. "Re-run failed jobs" after a publish that stopped part-way
+      # does not re-run this job, so that resume is still possible.
+      - name: Release tag not yet published
+        if: github.ref_type == 'tag'
+        run: tools/docker-release-tags.sh guard "$IMAGE" "${{ github.ref_name }}"
+
       # Build once into the local daemon so the image can be smoke-tested
       # before anything is published.
       - name: Build
@@ -272,6 +280,11 @@ jobs:
       contents: read
       packages: write
     steps:
+      # For tools/docker-release-tags.sh; not a build context here.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           path: ${{ runner.temp }}/digests
@@ -287,39 +300,28 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Release tags (:vX.Y.Z, :X.Y.Z) are permanent: validated work cites
-      # them, so a release image is published once and never replaced. A
-      # re-pushed git tag, or a re-run of this job, would otherwise rebuild
-      # (not byte-identical: apt and CRAN move) and silently repoint the tag.
-      # Fails when either tag already exists, and when the registry cannot say
-      # (anything but "not found" is "could not check", never "free").
+      # them, so a release image is published once and never replaced
+      # (tools/docker-release-tags.sh; the build job already refused a tag
+      # that exists). Checked again here against this run's digests: a tag
+      # pointing at exactly these images is an earlier publish of the same
+      # bytes that stopped part-way ("Re-run failed jobs" reuses the digests),
+      # and may be completed; anything else is refused, and a registry answer
+      # other than "not found" is "could not check", never "free".
       #
-      # :release floats to the newest final release: set only when this tag is
-      # a plain vX.Y.Z (no -rc1 etc.) and the highest such tag in the repo, so
-      # a later patch of an older line (v0.4.1 after v0.5.0) leaves it alone.
+      # :release floats to the newest final release: only a plain vX.Y.Z that
+      # is the highest such tag in the repo moves it, so a later patch of an
+      # older line (v0.4.1 after v0.5.0) or a pre-release leaves it alone. A
+      # failed tag lookup fails the step rather than quietly skipping it.
       - name: Release tags
         id: rel
         if: github.ref_type == 'tag'
+        shell: bash
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          for t in "$TAG" "${TAG#v}"; do
-            if out="$(docker buildx imagetools inspect "${{ env.IMAGE }}:$t" 2>&1)"; then
-              echo "::error title=Release image exists::${{ env.IMAGE }}:$t is already published. Release images are never replaced; tag a new version instead."
-              exit 1
-            fi
-            case "$out" in
-              *"not found"*|*"manifest unknown"*|*NOT_FOUND*|*MANIFEST_UNKNOWN*) ;;
-              *) echo "::error title=Cannot check release tag::could not tell whether ${{ env.IMAGE }}:$t exists: $out"; exit 1 ;;
-            esac
-          done
-          newest="$(git ls-remote --tags --refs "https://github.com/${{ github.repository }}" 'v*' \
-            | sed 's|.*refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
-          echo "this tag: $TAG; newest final release tag: ${newest:-none}"
-          if [ -n "$newest" ] && [ "$TAG" = "$newest" ]; then
-            echo "release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "release=false" >> "$GITHUB_OUTPUT"
-          fi
+          tools/docker-release-tags.sh guard "$IMAGE" "$TAG" "$RUNNER_TEMP/digests"
+          release="$(tools/docker-release-tags.sh is-newest "https://github.com/${{ github.repository }}" "$TAG")"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
 
       - name: Tags
         id: meta

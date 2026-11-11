@@ -115,6 +115,13 @@ jobs:
       - name: Test the AGENTS.md guard against stub repositories
         run: bash tools/test-check-agents-md.sh
 
+      # The Docker release-tag rules (tools/docker-release-tags.sh: a release
+      # image is never replaced, :release moves only to the newest final
+      # release) run for real only on a v* tag push. Drive them with a stub
+      # docker and git instead, under every POSIX shell on the runner.
+      - name: Test the Docker release-tag rules with stub docker and git
+        run: bash tools/test-docker-release-tags.sh
+
       # NEWS entries are fragments under changelog.d/, assembled into NEWS.md at
       # release time, so concurrent PRs never conflict on NEWS.md (#600). This
       # checks each fragment's name and shape and that nothing was written under
