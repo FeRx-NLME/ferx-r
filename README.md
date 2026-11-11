@@ -156,8 +156,9 @@ docker run --rm -it -v "$PWD:/work" ghcr.io/ferx-nlme/ferx-r:latest   # R consol
 The container runs as an unprivileged user `ferx` (uid 1000). If your host uid
 differs and the outputs must be yours, add `--user "$(id -u):$(id -g)"`.
 
-**Threads.** By default the engine uses the available cores minus one, capped
-at 8. Inside a container "available" honours a CPU quota (`docker run
+**Threads.** By default the engine uses the available cores minus one, but at
+least 2 when there are two or more cores, and at most 8 (`--cpus 1`, `2`, `3`,
+`5`, `16` give 1, 2, 2, 4, 8 threads). Inside a container "available" honours a CPU quota (`docker run
 --cpus 4`, a Kubernetes CPU *limit*) and CPU pinning (`--cpuset-cpus`), but not
 a Kubernetes CPU *request* without a limit, or a Slurm allocation that is not
 enforced through cgroups: there the engine sees every core of the node. When
