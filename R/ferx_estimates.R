@@ -1,5 +1,5 @@
-# Tidy parameter estimates table: theta, omega diagonal, sigma, and (for IOV
-# models) kappa diagonal, with percent relative standard error (%RSE), 95%
+# Tidy parameter estimates table: theta, omega diagonal, sigma, (for IOV
+# models) kappa diagonal, and a [mixture] model's per-class overrides, with percent relative standard error (%RSE), 95%
 # confidence intervals, and (for `log`- and `logit`-transformed thetas)
 # natural-scale back-transformed estimates and CIs. `logit_probability` is not
 # one of them: that theta is already on (0, 1) when the engine reports it. Omega is reported on the variance scale
@@ -107,6 +107,26 @@
     }
   }
 
+  # [mixture] per-class overrides (ferx-core #2833), last, as in `cov_matrix`:
+  # one row per `omega(k)` / `sigma(k)` override, labelled `<base> (class <k>)`
+  # with its class in `class`. An omega override is a class variance on its
+  # base ETA's scale; a sigma override is read like its base sigma.
+  mo <- .ferx_mixture_override_rows(fit)
+  for (k in seq_len(NROW(mo))) {
+    i <- mo$index[k]
+    if (identical(mo$kind[k], "omega")) {
+      transform <- "variance"
+      scale <- if (length(fit$eta_param_types) >= i) fit$eta_param_types[[i]] else NA_character_
+    } else {
+      transform <- if (length(fit$sigma_types) >= i) fit$sigma_types[[i]] else "proportional"
+      scale <- NA_character_
+    }
+    rows[[length(rows) + 1L]] <- .ferx_est_row(mo$parameter[k], mo$estimate[k], mo$se[k],
+                                               transform, FALSE, scale = scale,
+                                               fixed = mo$fixed[k], class = mo$class[k])
+    blocks <- c(blocks, "mixture")
+  }
+
   result <- do.call(rbind, rows)
   # Row names as well as the `param` column (#299): `est["TVCL", ]` on a frame
   # with the default 1..n row names returns a row of NA rather than erroring,
@@ -138,7 +158,8 @@
 
 .ferx_est_row <- function(param, estimate, se, transform = "identity", init_as_sd = FALSE,
                           weight = NA_character_, scale = NA_character_,
-                          fixed = FALSE, level = NA_character_) {
+                          fixed = FALSE, level = NA_character_,
+                          class = NA_integer_) {
   # A FIX parameter was not estimated, so it has no standard error: the
   # engine's 0 would read as a perfectly determined estimate, with RSE 0% and
   # a zero-width interval. NA, with `fixed` saying why (#451). The point
@@ -218,5 +239,6 @@
              weight           = weight,
              scale            = scale,
              level            = level,
+             class            = as.integer(class),
              stringsAsFactors = FALSE)
 }

@@ -1538,7 +1538,7 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "model_file_settings", "sir_ess", "importance_sampling", "bayes",
     "warnings",
     "uses_sde", "ode_linear_exact", "dw_statistic", "iwres_lag1_r",
-    "saem_n_subjects_hmc"
+    "saem_n_subjects_hmc", "mixture_overrides", "se_mixture_overrides"
   ), ignore.order = TRUE)
 })
 test_that("summary.ferx_fit passes through call_settings", {

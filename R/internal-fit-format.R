@@ -606,6 +606,83 @@
   is.na(as.integer(cls))
 }
 
+# `fit$mixture_override_params` as its data frame (ferx-core #2833), from the
+# glue's parallel columns or a frame already built: one row per entry of
+# `fit$mixture_overrides`, labelled `<base> (class <k>)` as `cov_matrix` and
+# `held_at_bound` label it. `mixture_overrides` and `se_mixture_overrides` take
+# those labels as names. Zero rows, and both vectors left as they are, for a
+# model without overrides and for a bundle written before the descriptors
+# existed, whose values cannot be named.
+.ferx_name_mixture_overrides <- function(result) {
+  p <- result$mixture_override_params
+  parameter <- as.character(p$parameter %||% character(0))
+  n <- length(parameter)
+  result$mixture_override_params <- data.frame(
+    parameter = parameter,
+    kind = as.character(p$kind %||% character(0)),
+    index = as.integer(p$index %||% integer(0)),
+    class = as.integer(p$class %||% integer(0)),
+    fixed = as.logical(p$fixed %||% logical(0)),
+    stringsAsFactors = FALSE
+  )
+  if (n > 0L) {
+    for (field in c("mixture_overrides", "se_mixture_overrides")) {
+      if (length(result[[field]]) == n) names(result[[field]]) <- parameter
+    }
+  }
+  result
+}
+
+# The `[mixture]` per-class override rows every R surface shows (ferx-core
+# #2833), in `fit$mixture_overrides` order: `fit$mixture_override_params` with
+# each override's `estimate` (a class variance for an omega override, a class
+# sigma for a sigma one), its `se` and `held`. `held` is TRUE for an override
+# in `fit$held_at_bound` under its own class, kind and base index; matching on
+# kind and index alone would name the base parameter (`.ferx_se_held()`). `se`
+# is NA for a held or FIX override - the engine's 0 there is not a standard
+# error - and when the covariance step gave none. NULL when the fit has no
+# override, or records values without one descriptor each.
+.ferx_mixture_override_rows <- function(fit) {
+  p <- fit$mixture_override_params
+  v <- as.numeric(fit$mixture_overrides %||% numeric())
+  if (!is.data.frame(p) || nrow(p) == 0L || nrow(p) != length(v)) return(NULL)
+  se <- as.numeric(fit$se_mixture_overrides %||% numeric())
+  if (length(se) != length(v)) se <- rep(NA_real_, length(v))
+  h <- fit$held_at_bound
+  held <- vapply(seq_len(nrow(p)), function(k) {
+    is.data.frame(h) && !is.null(h$class) &&
+      any(!is.na(h$class) & h$class == p$class[k] &
+            h$kind == p$kind[k] & h$index == p$index[k])
+  }, NA)
+  se[held | p$fixed] <- NA_real_
+  cbind(p, estimate = v, se = se, held = held, stringsAsFactors = FALSE)
+}
+
+# The omega rows of print.ferx_fit()'s per-class override section: the engine's
+# OMEGA row formatter (.ferx_omega_rows()) over the class variances, each read
+# on its base ETA's scale and against its base's linked theta, so an override
+# row carries the same CV% / SD note, `[FIX]` and `N/A` as a base row. `rows`
+# is .ferx_mixture_override_rows(); a character vector, one element per omega
+# override.
+.ferx_override_omega_rows <- function(fit, rows) {
+  o <- rows[rows$kind == "omega", , drop = FALSE]
+  if (nrow(o) == 0L) return(character())
+  n_eta <- NROW(fit$omega)
+  of_base <- function(v) if (length(v) == n_eta) v[o$index] else NULL
+  .ferx_omega_rows(list(
+    omega = diag(o$estimate, nrow(o)),
+    eta_names = o$parameter,
+    omega_fixed = o$fixed,
+    # NULL when the covariance step gave no SE at all, as `se_omega` is.
+    se_omega = if (is.null(fit$se_mixture_overrides)) NULL else o$se,
+    eta_param_types = of_base(fit$eta_param_types),
+    eta_linked_theta = of_base(fit$eta_linked_theta),
+    theta = fit$theta,
+    theta_transforms = fit$theta_transforms,
+    covariance_status = fit$covariance_status
+  ))
+}
+
 # The names of every theta with no standard error: the entries of kind
 # "theta" in `held_at_bound` (a list from the glue, or its data frame), and
 # `profiled_levels_at_bound` for a fit object made before `held_at_bound`
@@ -934,6 +1011,9 @@
     class = as.integer(h$class %||% rep(NA_integer_, length(parameter))),
     stringsAsFactors = FALSE
   )
+  # The `[mixture]` per-class overrides (ferx-core #2833): one descriptor row
+  # per value, which names the values and their standard errors.
+  result <- .ferx_name_mixture_overrides(result)
   # The engine's verdict (ferx-core #2799): reasons as a character vector,
   # empty for a clean fit.
   result$status_reasons <- as.character(unlist(result$status_reasons, use.names = FALSE) %||% character(0))

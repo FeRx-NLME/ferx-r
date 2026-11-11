@@ -282,6 +282,29 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
       lines <- c(lines, sprintf("  %-28s  %s", nm, final_str))
     }
   }
+
+  # IOV kappa rows (diagonal), then a [mixture] model's per-class overrides
+  # (ferx-core #2833), labelled as print() and fit$estimates label them. The
+  # fit records no initial value for either, so INITIAL reads N/A.
+  if (!is.null(fit$omega_iov)) {
+    m_iov <- fit$omega_iov
+    if (is.null(dim(m_iov))) m_iov <- matrix(m_iov, 1L, 1L)
+    kap_nms <- .ferx_kappa_labels(fit$kappa_names, nrow(m_iov))
+    for (i in seq_len(nrow(m_iov))) {
+      se_val <- if (length(fit$se_kappa) >= i) fit$se_kappa[[i]] else NA_real_
+      if (.ferx_se_held(fit, "kappa", i)) se_val <- NA_real_
+      lines <- c(lines, .runlog_row_no_init(
+        kap_nms[i], m_iov[i, i], .ferx_is_fixed(fit$kappa_fixed, i), se_val,
+        has_inits, has_se
+      ))
+    }
+  }
+  mo <- .ferx_mixture_override_rows(fit)
+  for (k in seq_len(NROW(mo))) {
+    lines <- c(lines, .runlog_row_no_init(
+      mo$parameter[k], mo$estimate[k], mo$fixed[k], mo$se[k], has_inits, has_se
+    ))
+  }
   lines <- c(lines, .blank())
 
   # -- Estimation settings ----------------------------------------------------
@@ -430,11 +453,16 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     lines <- c(lines, .sec("Final gradient"))
 
     # Relative gradient: grad[i] * |param[i]| - scale-free, same units across
-    # all parameter types. Packed order: thetas, omega diagonal, sigma.
+    # all parameter types. Packed order: thetas, omega diagonal, sigma, IOV
+    # kappa diagonal, [mixture] per-class overrides. A block omega or kappa
+    # (or a block_sigma correlation) packs more coordinates than these, and
+    # falls to the raw gradient below.
     th_vals  <- abs(fit$theta  %||% numeric(0))
     om_diag  <- if (!is.null(fit$omega) && length(fit$omega) > 0L) abs(diag(fit$omega)) else numeric(0)
     sig_vals <- abs(fit$sigma  %||% numeric(0))
-    param_scale <- c(th_vals, om_diag, sig_vals)
+    kap_diag <- if (!is.null(fit$omega_iov)) abs(diag(as.matrix(fit$omega_iov))) else numeric(0)
+    ov_vals  <- abs(as.numeric(fit$mixture_overrides %||% numeric(0)))
+    param_scale <- c(th_vals, om_diag, sig_vals, kap_diag, ov_vals)
 
     if (length(param_scale) == length(grad)) {
       grad_rel <- grad * param_scale
@@ -496,6 +524,25 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
   out <- paste(lines, collapse = "\n")
   if (isTRUE(verbose)) cat(out, "\n")
   invisible(out)
+}
+
+# One parameter-table row for a parameter the fit records no initial value
+# for (an IOV kappa, a [mixture] per-class override), in the columns the table
+# has: INITIAL reads N/A, a FIX parameter FIXED, and an NA `se` (held at a
+# bound, or none computed) N/A.
+.runlog_row_no_init <- function(nm, value, fixed, se, has_inits, has_se) {
+  cols <- sprintf("  %-28s", nm)
+  if (has_inits) cols <- c(cols, sprintf("%14s", "N/A"))
+  cols <- c(cols, .runlog_value(value, fixed))
+  if (has_se && fixed) {
+    cols <- c(cols, sprintf("%8s", "FIXED"), sprintf("%7s", "FIXED"))
+  } else if (has_se) {
+    rse <- if (is.finite(se) && value != 0) abs(se / value) * 100 else NA_real_
+    cols <- c(cols,
+              if (is.finite(se)) sprintf("%8.4g", se) else sprintf("%8s", "N/A"),
+              if (is.finite(rse)) sprintf("%6.1f%%", rse) else sprintf("%7s", "N/A"))
+  }
+  paste(cols, collapse = "  ")
 }
 
 # Internal: one INITIAL / FINAL cell of the parameter table. A held parameter

@@ -357,6 +357,45 @@ mixture_update_fit <- function() {
                             settings = list(maxiter = 30L)))
 }
 
+test_that("omega, FIX and sigma overrides each get a row (ferx-core #2833)", {
+  fit <- mixture_update_fit()
+  on.exit(unlink(fit$model_path), add = TRUE)
+  labels <- c("ETA_CL (class 2)", "ETA_V (class 2)", "PROP_ERR (class 2)")
+  expect_identical(
+    fit$mixture_override_params,
+    data.frame(parameter = labels, kind = c("omega", "omega", "sigma"),
+               index = c(1L, 2L, 1L), class = 2L, fixed = c(FALSE, TRUE, FALSE),
+               stringsAsFactors = FALSE)
+  )
+  expect_named(fit$mixture_overrides, labels)
+  est <- fit$estimates[labels, ]
+  expect_identical(est$estimate, unname(fit$mixture_overrides))
+  expect_identical(est$transform, c("variance", "variance", "proportional"))
+  expect_identical(est$fixed, c(FALSE, TRUE, FALSE))
+  expect_identical(est$class, rep(2L, 3L))
+  # The FIX override keeps its declared variance; no covariance step ran.
+  expect_equal(est$estimate[2L], 0.03)
+  expect_true(all(is.na(est$se)))
+  out <- utils::capture.output(suppressWarnings(print(fit)))
+  at <- grep("MIXTURE  (per-class overrides)", out, fixed = TRUE)
+  rows <- out[at + 2:4]
+  expect_true(startsWith(rows[1L], "  ETA_CL (class 2) "))
+  expect_true(startsWith(rows[2L], "  ETA_V (class 2) [FIX] "))
+  expect_match(rows[2L], "SE = ---", fixed = TRUE)
+  # Padded to the omega rows' 20, so the section lines up.
+  expect_true(startsWith(rows[3L], "  PROP_ERR (class 2)   [proportional] = "))
+  expect_identical(regexpr("[", rows[1L], fixed = TRUE)[[1L]],
+                   regexpr("[", rows[3L], fixed = TRUE)[[1L]])
+  # The run log lists the same three rows, and its gradient section has a
+  # scale for every packed coordinate.
+  rl <- strsplit(suppressWarnings(ferx_runlog(fit, verbose = FALSE)), "\n", fixed = TRUE)[[1L]]
+  for (nm in labels) expect_length(rl[startsWith(rl, paste0("  ", nm, " "))], 1L)
+  expect_match(rl[startsWith(rl, "  ETA_V (class 2) ")], "(FIX)", fixed = TRUE)
+  expect_false(any(grepl("parameter count mismatch", rl, fixed = TRUE)))
+  expect_match(rows[3L], sprintf("CV%% = %.1f", 100 * est$estimate[3L]), fixed = TRUE)
+  expect_identical(out[at + 5L], "")
+})
+
 test_that("a [mixture] fit's per-class overrides take their fitted values (#678)", {
   fit <- mixture_update_fit()
   on.exit(unlink(fit$model_path), add = TRUE)
@@ -370,11 +409,11 @@ test_that("a [mixture] fit's per-class overrides take their fitted values (#678)
   cl <- grep("^omega\\(2\\) ETA_CL", lines, value = TRUE)
   expect_match(cl, "   # class-2 IIV$")
   expect_equal(as.numeric(sub("^omega\\(2\\) ETA_CL ~ (\\S+).*$", "\\1", cl)),
-               ov[1], tolerance = 1e-12)
+               ov[["ETA_CL (class 2)"]], tolerance = 1e-12)
   expect_true("omega(2) ETA_V ~ 0.03 FIX" %in% lines)
   sg <- grep("^sigma\\(2\\) PROP_ERR", lines, value = TRUE)
   expect_equal(as.numeric(sub("^sigma\\(2\\) PROP_ERR ~ (\\S+) \\(sd\\)$", "\\1", sg)),
-               ov[3], tolerance = 1e-12)
+               ov[["PROP_ERR (class 2)"]], tolerance = 1e-12)
 
   refit <- suppressWarnings(ferx_fit(out, ferx_example("warfarin")$data,
                                      method = "foce", verbose = FALSE,
