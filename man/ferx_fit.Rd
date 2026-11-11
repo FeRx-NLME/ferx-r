@@ -2371,15 +2371,23 @@ Runs \code{n_starts} independent fits from perturbed initial values in
 parallel (via rayon) and returns the converged result with the lowest OFV.
 Default \code{n_starts = 1} disables multi-start (single run, no overhead).
 Useful for models prone to local minima: Michaelis-Menten elimination,
-full-block omega, or many covariate parameters. On an 8-core machine
-\code{n_starts = 8} costs approximately the same wall-clock time as a single run.
+full-block omega, or many covariate parameters.
+
+The starts are not free. They run on the same thread pool as the
+per-subject loops inside each fit, and a single fit already spreads its
+subjects over that pool, so the starts compete for the same workers: wall
+time grows with \code{n_starts} unless a single fit leaves part of that
+pool idle. Where one fit takes well under a second (a few hundred rows,
+e.g. an arm-level MBMA), eight starts cost next to nothing either way. See
+\url{https://ferx-nlme.org/ferx-core/examples/multistart.html#when-to-use-multi-start}
+for when multi-start is worth it and how many starts to use.
 
 Start 0 always uses the exact initial values from the model file.
 Starts 1..n apply a log-space perturbation of size \code{start_sigma}
 (default 0.3) to each theta.
 
 \preformatted{
-# 8 parallel starts (approx. same wall time as one run on 8 cores)
+# 8 starts sharing one thread pool (wall time grows with n_starts)
 ferx_fit(m, d, settings = list(n_starts = 8L))
 
 # Wider perturbation for ridge-shaped surfaces (e.g. Michaelis-Menten):
