@@ -330,3 +330,59 @@ test_that("ferx_calc_npde on a [mixture] fit draws its reference at the fitted c
   expect_lt(wide_sd, 0.85 * base_sd,
             label = paste(signif(wide_sd, 3), "vs", signif(base_sd, 3)))
 })
+
+# --- EPRED / PWRES / EWRES (ferx-core #2871) ---------------------------------
+
+test_that(".ferx_attach_npde carries EPRED/EWRES/PWRES, and only the columns the table has", {
+  sd <- data.frame(ID = c(1, 1, 2), TIME = c(1, 2, 1), DV = c(5, 4, 6))
+  np <- data.frame(ID = c(1, 1, 2), TIME = c(1, 2, 1),
+                   NPDE = c(0.1, 0.2, 0.3), NPD = c(0.4, 0.5, 0.6),
+                   EPRED = c(5.5, 4.5, 5.0), EWRES = c(0.7, NA, -0.2),
+                   PWRES = c(0.7, NA, -0.2))
+  out <- .attach(sd, np)
+  expect_identical(out$EPRED, c(5.5, 4.5, 5.0))
+  expect_identical(out$PWRES, c(0.7, NA, -0.2))
+  expect_identical(out$EWRES, out$PWRES)
+  # A table from an engine without them attaches NPDE/NPD and invents nothing.
+  old <- .attach(sd, np[, c("ID", "TIME", "NPDE", "NPD")])
+  expect_false(any(c("EPRED", "EWRES", "PWRES") %in% names(old)))
+  expect_identical(old$NPD, c(0.4, 0.5, 0.6))
+  # The TTE-row split carries every column, NA on the TTE rows.
+  sd4 <- data.frame(ID = c(1, 1, 2, 2), TIME = c(1, 2, 1, 2))
+  np3 <- np[, setdiff(names(np), "DV")]
+  np3$TIME <- c(1, 2, 2)
+  np3$ID <- c(1, 1, 2)
+  out4 <- .attach(sd4, np3, tte_rows = 3L)
+  expect_identical(out4$EPRED, c(5.5, 4.5, NA, 5.0))
+  expect_identical(out4$PWRES, c(0.7, NA, NA, -0.2))
+})
+
+test_that("ferx_calc_npde adds EPRED and PWRES/EWRES from the same simulation", {
+  fit <- ferx_calc_npde(warfarin_fit(), nsim = 500L, seed = 1L)
+  sd <- fit$sdtab
+  expect_true(all(c("EPRED", "EWRES", "PWRES") %in% names(sd)))
+  # nsim exceeds every subject's observation count, so nothing is masked.
+  expect_true(all(is.finite(sd$EPRED)))
+  expect_true(all(is.finite(sd$PWRES)))
+  # One residual under two names.
+  expect_identical(sd$EWRES, sd$PWRES)
+  # EPRED is the Monte-Carlo mean, not the eta = 0 PRED: under exp() IIV the two
+  # differ, and both are concentrations on the same scale.
+  expect_false(isTRUE(all.equal(sd$EPRED, sd$PRED)))
+  expect_lt(abs(stats::median(sd$EPRED / sd$PRED) - 1), 0.5)
+  expect_lt(abs(mean(sd$PWRES)), 0.5)
+})
+
+test_that("a fit with npde_nsim carries EPRED/PWRES that ferx_calc_npde reproduces", {
+  ex  <- ferx_example("warfarin")
+  # The call-time overrides of the example's [fit_options] warn; they are the point.
+  fit <- suppressWarnings(
+    ferx_fit(ex$model, ex$data, method = "focei", verbose = FALSE,
+             covariance = FALSE,
+             settings = list(maxiter = 30L, npde_nsim = 200L, npde_seed = 7L))
+  )
+  expect_true(all(c("EPRED", "EWRES", "PWRES") %in% names(fit$sdtab)))
+  post <- ferx_calc_npde(fit, nsim = 200L, seed = 7L)
+  expect_equal(post$sdtab$EPRED, fit$sdtab$EPRED)
+  expect_equal(post$sdtab$PWRES, fit$sdtab$PWRES)
+})

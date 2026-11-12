@@ -2377,7 +2377,7 @@ fn vpc_tte_to_list(vpc: &ferx_core::TteVpc) -> Robj {
 ///   kappa reference draw needs (ferx-core #1980).
 /// @param nsim Number of Monte-Carlo replicates per subject
 /// @param seed RNG seed; pass -1 for the engine default
-/// @return Data frame with ID, TIME, NPDE, NPD columns, and an
+/// @return Data frame with ID, TIME, NPDE, NPD, EPRED, EWRES, PWRES columns, and an
 ///   `npde_notes` character attribute (the fingerprint check's notes)
 /// @export
 #[extendr]
@@ -2516,6 +2516,10 @@ fn ferx_rust_npde_from_fit(
         let mut time: Vec<f64> = Vec::new();
         let mut npde: Vec<f64> = Vec::new();
         let mut npd: Vec<f64> = Vec::new();
+        // The same simulation's replicate mean and population-weighted residual
+        // (ferx-core #2871): EPRED, and PWRES under its NONMEM name EWRES too.
+        let mut epred: Vec<f64> = Vec::new();
+        let mut pwres: Vec<f64> = Vec::new();
         for (si, (subj, sn)) in population.subjects.iter().zip(per_subject.iter()).enumerate() {
             let id_num = subj.id.parse::<f64>().unwrap_or(si as f64 + 1.0);
             for j in 0..subj.observations.len() {
@@ -2528,10 +2532,22 @@ fn ferx_rust_npde_from_fit(
                 );
                 npde.push(sn.npde.get(j).copied().unwrap_or(f64::NAN));
                 npd.push(sn.npd.get(j).copied().unwrap_or(f64::NAN));
+                epred.push(sn.epred.get(j).copied().unwrap_or(f64::NAN));
+                pwres.push(sn.pwres.get(j).copied().unwrap_or(f64::NAN));
             }
         }
 
-        let mut df: Robj = data_frame!(ID = id, TIME = time, NPDE = npde, NPD = npd).into();
+        let ewres = pwres.clone();
+        let mut df: Robj = data_frame!(
+            ID = id,
+            TIME = time,
+            NPDE = npde,
+            NPD = npd,
+            EPRED = epred,
+            EWRES = ewres,
+            PWRES = pwres
+        )
+        .into();
         df.set_attrib("npde_notes", notes)
             .map_err(|e| format!("internal: {e}"))?;
         Ok(df)
