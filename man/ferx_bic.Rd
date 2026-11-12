@@ -20,6 +20,11 @@ existed, a tally that disagrees with \code{n_parameters}, or a zero
 subject / record count under a convention that needs its logarithm.
 (ferx-core's \code{bic()} reports \code{NaN} in exactly those cases.) A
 fit with no free parameter returns its OFV under every convention.
+A variational-inference fit with no OFV (\code{method = "vi"} under the
+default \code{vi_final_ofv = "none"}, whose \code{fit$ofv} is \code{NaN})
+gives \code{NA_real_} with a warning that points at
+\code{vi_final_ofv = "laplace"} or a \code{c("vi", "laplace")} chain with
+\code{agq_eval_only = TRUE}.
 }
 \description{
 The four BIC conventions an automated model search ranks candidates on, as

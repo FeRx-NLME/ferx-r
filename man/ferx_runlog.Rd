@@ -28,7 +28,11 @@ single character string.}
 }
 \value{
 A single character string containing the full log (invisibly when
-\code{verbose = TRUE}).
+\code{verbose = TRUE}). For a variational-inference fit the objective
+section adds the VI result (\code{fit$vi}); when that fit has no OFV
+(\code{vi_final_ofv = "none"}, the default) OFV, AIC and BIC read
+\code{NA}, with a note pointing at \code{vi_final_ofv = "laplace"} or a
+\code{c("vi", "laplace")} chain with \code{agq_eval_only = TRUE}.
 }
 \description{
 Produces a plain-text summary modelled on the information content of a

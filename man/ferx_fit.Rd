@@ -1115,7 +1115,10 @@ objective (AIC and BIC follow it); after a trailing
 \code{imp_eval_only} stage it is the previous estimator's objective.
 Compare NONMEM \code{METHOD=IMP} objectives with the
 importance-sampling marginal,
-\code{importance_sampling$minus2_log_likelihood}, not with \code{ofv}.}
+\code{importance_sampling$minus2_log_likelihood}, not with \code{ofv}.
+\code{NaN} after a \code{method = "vi"} fit under the default
+\code{vi_final_ofv = "none"} (as are \code{aic} and \code{bic}): VI
+reports a bound, \code{vi$neg_two_elbo}, not an objective value.}
 \item{ofv_data}{The data half of \code{ofv} - the -2 log-likelihood the
 AIC and BIC are computed from, and the value to compare against an
 unpriored fit of the same model. Equal to \code{ofv} when no prior is
@@ -1857,10 +1860,19 @@ eta names as dimnames; \code{kappa_means}, a list named by subject of
 occasion-by-kappa matrices of the IOV posterior means (no rows without
 IOV); \code{n_fd_subjects}; \code{elbo_tightness_ratio}; and
 \code{superseded_by}, the later estimating stage that moved the
-estimates after VI, or \code{NA}. Under VI, \code{ebe_etas} holds the
-posterior means. \code{ferx_save_fit()} / \code{ferx_load_fit()} carry
-it in the bundle's \code{vi} section, the layout ferx-core itself
-uses.}
+estimates after VI, or \code{NA}. \code{elbo_tightness_ratio} measures
+how loose the bound is (1 is ideal, single digits are unremarkable);
+above 25 the engine reports the fit unconverged in a bad basin.
+Unless \code{superseded_by} is set, \code{ebe_etas}, the sdtab ETA
+columns and \code{shrinkage_eta} are computed from the posterior means
+\code{eta_means}, not from conditional modes (a trailing
+\code{agq_eval_only} / \code{imp_eval_only} readout keeps them).
+\code{print()} and \code{summary()} show a VI block with
+\code{neg_two_elbo}, convergence, the family and the tightness ratio,
+and say why \code{ofv} is \code{NaN}; \code{ferx_bic()} gives
+\code{NA} for such a fit. \code{ferx_save_fit()} /
+\code{ferx_load_fit()} carry it in the bundle's \code{vi} section, the
+layout ferx-core itself uses.}
 \item{omega_param_corr}{Parameter-level correlation matrix for block omega.
 Uses the bivariate lognormal formula for lognormal pairs and falls back
 to the eta-level formula for additive or unknown parameterisations.
