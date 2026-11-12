@@ -406,12 +406,14 @@ test_that("uncertainty draws hold a held mixture override, found by its class (f
   expect_gt(nrow(held), 0L)
   # The row reaches the engine: without it the override is drawn, not held.
   free <- fit
+  free <- unsealed_fit(free)
   free$held_at_bound <- free$held_at_bound[0, ]
   expect_false(identical(draws(free), held))
   # It is found by kind, index and class: the label alone names no coordinate,
   # and a class the model does not override is refused rather than dropped.
   for (cls in c(NA_integer_, 1L)) {
     wrong <- fit
+    wrong <- unsealed_fit(wrong)
     wrong$held_at_bound$class <- cls
     expect_error(draws(wrong), "names no single coordinate", label = format(cls))
   }
@@ -422,6 +424,7 @@ test_that("a fit object from before the class column reads every row as a base",
   base <- warfarin_fit_cov()
   eta <- base$eta_names[2]
   fit <- quiet(with_collapse(base, eta, held = TRUE))
+  fit <- unsealed_fit(fit)
   fit$held_at_bound$class <- NULL
   expect_true(ferx:::.ferx_se_held(fit, "omega", 2L))
   expect_false(ferx:::.ferx_se_held(fit, "omega", 1L))

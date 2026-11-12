@@ -467,6 +467,7 @@ test_that("ferx_sir reports the in-fit kappa interval, and print() shows it (#17
   fit <- warfarin_iov_sir_fit()
   skip_if(is.null(fit$cov_matrix) || is.null(fit$sir_ess), sir_cov_skip)
   bare <- fit
+  bare <- unsealed_fit(bare)
   bare$sir_ci_kappa <- NULL
   # Mutation: drop `sir_ci_kappa` from ferx_rust_sir()'s list, or from
   # ferx_sir()'s reshape -> NULL, not identical().

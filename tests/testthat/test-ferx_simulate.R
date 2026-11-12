@@ -285,8 +285,8 @@ test_that("the simulated spread follows the fit's omega_iov, not the model's ini
   fit <- ferx_fit(ex$model, ex$data, covariance = FALSE,
                   settings = list(maxiter = 3L))
 
-  narrow <- fit; narrow$omega_iov[] <- 1e-8
-  wide   <- fit; wide$omega_iov[]   <- 0.5
+  narrow <- unsealed_fit(fit); narrow$omega_iov[] <- 1e-8
+  wide   <- unsealed_fit(fit); wide$omega_iov[]   <- 0.5
 
   sim_narrow <- ferx_simulate(ex$model, ex$data, n_sim = 5L, seed = 3L, fit = narrow)
   sim_wide   <- ferx_simulate(ex$model, ex$data, n_sim = 5L, seed = 3L, fit = wide)
@@ -302,6 +302,7 @@ test_that("simulating a kappa model from a fit stripped of omega_iov is an error
   ex <- ferx_example("warfarin_iov")
   fit <- ferx_fit(ex$model, ex$data, covariance = FALSE,
                   settings = list(maxiter = 3L))
+  fit <- unsealed_fit(fit)
   fit$omega_iov <- NULL
 
   expect_error(
@@ -410,6 +411,7 @@ test_that("ferx_simulate(fit = ) on a [mixture] fit draws each class at its fitt
   # The override is read from the fit, not from the model file: doubling it
   # doubles class 2's spread and leaves class 1's.
   wide <- fit
+  wide <- unsealed_fit(wide)
   wide$mixture_overrides <- 2 * omega2
   sim <- muffle_mixl_lint(ferx_simulate(mod, dat, n_sim = 200L, seed = 5L, fit = wide))
   early <- sim[sim$TIME == 0.25, ]
@@ -423,6 +425,7 @@ test_that("ferx_simulate(fit = ) on a [mixture] fit draws each class at its fitt
   # fitted sigma (about 0.21) is too close to the model file's (0.2) to tell
   # apart, so the check doubles it: the file's classes would stay at 0.04.
   loud <- fit
+  loud <- unsealed_fit(loud)
   loud$sigma <- 2 * fit$sigma
   sim <- muffle_mixl_lint(ferx_simulate(mod, dat, n_sim = 200L, seed = 5L, fit = loud))
   obs <- sim[sim$TIME > 0, ]
@@ -436,6 +439,7 @@ test_that("ferx_simulate(fit = ) on a [mixture] fit draws each class at its fitt
 
 test_that("ferx_simulate(fit = ) refuses a [mixture] fit that lost its override values (#672)", {
   fit <- mixture_override_fit()
+  fit <- unsealed_fit(fit)
   fit$mixture_overrides <- NULL
   probe <- engine_error_probe(muffle_mixl_lint(ferx_simulate(
     test_path("fixtures", "mixture_override.ferx"),
@@ -454,6 +458,7 @@ test_that("ferx_predict(fit = ) on a [mixture] fit without override values still
   # PRED reads no class Omega/Sigma, so a fit that lost its override values
   # (a .fitrx saved before #655) predicts as the full fit does, not refused.
   legacy <- fit
+  legacy <- unsealed_fit(legacy)
   legacy$mixture_overrides <- NULL
   full <- muffle_mixl_lint(ferx_predict(mod, dat, fit = fit))
   expect_true(is.data.frame(full))

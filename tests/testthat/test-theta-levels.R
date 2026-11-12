@@ -159,7 +159,7 @@ tl_step_errors <- function(fit) {
 tl_expect_refused <- function(fit, edit, engine, loaded = engine) {
   bad <- tl_loaded_bad(fit, edit)
   # The caller's list saying otherwise changes nothing: the step reads the bytes.
-  good_list <- fit
+  good_list <- unsealed_fit(fit)
   good_list$bundle <- bad$bundle
   for (x in list(bad, good_list)) {
     errs <- tl_step_errors(x)
@@ -315,6 +315,7 @@ test_that("T3c: the block binds to the data after ignore =", {
 test_that("T4: a subset design reads the fit's theta, checked in closed form", {
   b <- tl_base()
   fit <- b$fit
+  fit <- unsealed_fit(fit)
   fit$theta[] <- c(2, 0.1, 0.2, 0.3, 0.4, 0.5, 10)
   # Study 2 only: its levels are the fit's 4, 5 and 6.
   rows <- strsplit(tl_data, "\n")[[1]]
@@ -513,6 +514,7 @@ test_that("T7b: from-fit predictions reproduce the fit's own PRED, per contrast"
   # carry the five free thetas.
   ref_model <- cases$ref[[1]]
   fit <- tl_fit(ref_model, data)
+  fit <- unsealed_fit(fit)
   fit$theta[] <- c(2, 0.1, 0.2, 0.3, 0.4, 0.5, 10)
   level <- c(0, 0.1, 0.2, 0.3, 0.4, 0.5)
   dt <- c(1, 3, 8)
@@ -610,6 +612,7 @@ test_that("T9: a level-block model with a fit lacking bindings is refused", {
   b <- tl_base()
   fit <- b$fit
   # The shape of a fit saved before ferx recorded its bindings (#370).
+  fit <- unsealed_fit(fit)
   fit$theta_levels <- NULL
   err <- tryCatch(ferx_simulate(b$model, b$data, fit = fit), error = function(e) e)
   expect_s3_class(err, "error")
@@ -1183,6 +1186,7 @@ test_that("T14c: ferx_simulate_adaptive(fit = ) reads each level's fitted theta"
   expect_identical(names(fit$theta), c(
     "TVCL", "PLACEBO[STUDY=1]", "PLACEBO[STUDY=2]", "TVV"
   ))
+  fit <- unsealed_fit(fit)
   fit$theta[] <- c(2, 0.3, -0.5, 10)
   # Studies 2 and 3: the fit's second free level, and its derived third.
   rows <- strsplit(tl_data3, "\n")[[1]]
@@ -1221,6 +1225,7 @@ test_that("R1: the glue refuses a theta_levels table it cannot trust", {
   b <- tl_base()
   refused <- function(tl, pattern) {
     fit <- b$fit
+    fit <- unsealed_fit(fit)
     fit$theta_levels <- tl
     expect_error(ferx_predict(b$model, b$data, fit = fit), pattern, fixed = TRUE)
   }
@@ -1389,6 +1394,7 @@ test_that("T16: print.ferx_fit collapses a block of 20 free levels, not one of 1
   # A profiled block (ferx-core #1065) carries core's own suffix on this line.
   # Set on the record in process: the line is print's, whatever fitted it.
   prof <- fit
+  prof <- unsealed_fit(prof)
   prof$profiled_blocks <- "PLACEBO"
   expect_true(any(capture.output(print(prof)) == sprintf(
     "PLACEBO  20 free coefficients, profiled (not searched)   min %.4f  median %.4f  max %.4f",
@@ -1914,6 +1920,7 @@ test_that("T18: THETA BLOCKS counts FIX coefficients apart from free ones", {
 
   # A partly fixed block splits the same way.
   part <- fit
+  part <- unsealed_fit(part)
   part$theta_fixed[which(is_pla)[4:20]] <- FALSE
   out <- capture.output(print(part))
   expect_true(any(startsWith(out, "PLACEBO  17 free, 3 FIX coefficients   min ")))

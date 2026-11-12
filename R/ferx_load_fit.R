@@ -6,7 +6,9 @@
 #' (or by the ferx-core Rust CLI's \code{--output} flag) with ferx-core's own
 #' loader, and builds the list with the converter \code{\link{ferx_fit}} uses,
 #' so a loaded fit has the fields a fresh one has, plus the R-specific fields
-#' the fit kept in the bundle's \code{interface_extras.json}.
+#' the fit kept in the bundle's \code{interface_extras.json}, and the objects
+#' the user added to the fit before it was saved. The loaded fit is read-only,
+#' as a fresh one is (\link{ferx_fit-read-only}).
 #' \code{fit$individual_estimates} needs the data, so it is \code{NULL} for a
 #' bundle without \code{data.csv}. Only bundles of format version 2 load: an
 #' older one fails with a version error, and the model must be refitted.
@@ -161,7 +163,8 @@ ferx_load_fit <- function(path) {
     result$cond_dist$nsamp <- as.integer(extras$cond_dist$nsamp %||% NA_integer_)
     result$cond_dist$burnin <- as.integer(extras$cond_dist$burnin %||% NA_integer_)
   }
-  result
+  # Read-only from here (#713), with the objects the user added before the save.
+  .ferx_fit_seal_with_user(result, .ferx_fit_user_values(extras))
 }
 
 # A new fit from `bundle`, the bytes a step made from `fit`'s, which it leaves as
@@ -175,16 +178,21 @@ ferx_load_fit <- function(path) {
   staged <- tempfile("fitrx_model_", fileext = ".ferx")
   on.exit(unlink(staged), add = TRUE)
   writeBin(charToRaw(loaded$model_text), staged)
-  result <- .ferx_fit_view(
+  view <- .ferx_fit_view(
     loaded, bundle, staged, fit$data_path, data = fit$data_path,
     name = fit$model_name %||% ""
   )
+  # The objects the user added are the input fit's, not what the bytes kept from
+  # an earlier save: an addition removed since is not brought back.
+  result <- unclass(view)
+  for (k in .ferx_fit_user_fields(view)) result[[k]] <- NULL
   result$model_path <- fit$model_path
   result$data_source <- fit$data_source
   if (is.null(result$individual_estimates)) {
     result["individual_estimates"] <- list(fit$individual_estimates)
   }
-  result
+  user <- .ferx_fit_user_fields(fit)
+  .ferx_fit_seal_with_user(result, unclass(fit)[user])
 }
 
 # `fit` as its bytes say it is, for a step to read in place of the caller's list:

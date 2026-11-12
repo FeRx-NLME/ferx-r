@@ -411,7 +411,7 @@ test_that("a held level the fit does not have is refused, not dropped", {
                fixed = TRUE)
   # A step reads the same bytes through the same check.
   bytes <- readBin(bad, "raw", n = file.size(bad))
-  expect_error(quiet(ferx_sir(modifyList(b, list(bundle = bytes)),
+  expect_error(quiet(ferx_sir(modifyList(unsealed_fit(b), list(bundle = bytes)),
                               sir_samples = 10L, sir_resamples = 5L)),
                "`profiled_levels_at_bound` names theta index 999", fixed = TRUE)
 })

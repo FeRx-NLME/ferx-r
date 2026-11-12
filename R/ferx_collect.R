@@ -56,8 +56,10 @@ ferx_collect <- function(handle, verbose = TRUE) {
       )
     } else {
       # A fit the engine could not serialize is still a fit: only a save refuses it.
+      result <- unclass(result)
       result$trace_path <- NULL
       result$trace <- NULL
+      result <- .ferx_fit_seal(result)
     }
   }
   result

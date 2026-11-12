@@ -50,6 +50,7 @@ test_that("ferx_get_warnings() puts the details beside their row", {
   expect_true(any(grepl("details: durbin_watson, iwres_lag1_autocorr", out, fixed = TRUE)))
   # A fit with no warning at all still gets the column.
   bare <- fit
+  bare <- unsealed_fit(bare)
   bare$warnings <- character()
   bare$warnings_structured <- NULL
   bare$warning_details <- NULL

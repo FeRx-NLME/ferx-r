@@ -2836,6 +2836,7 @@ test_that("print.ferx_fit shows fired_accept and excluded_subject_ids when prese
   skip_on_cran()
   fit <- warfarin_sel_fit()
   # Augment the exclusions in-place to exercise the display branches.
+  fit <- unsealed_fit(fit)
   fit$exclusions$fired_accept          <- c("accept: DV > -999")
   fit$exclusions$excluded_subject_ids  <- c("3", "5")
   out <- capture.output(print(fit))

@@ -55,8 +55,16 @@ line reads and writes: \code{ferx summary run1.fitrx} works on it.
 A fit's bundle (\code{fit$bundle}) is what is saved, not its list: the
 engine wrote it when the fit was made, and \code{\link{ferx_covariance}},
 \code{\link{ferx_sir}} and \code{\link{ferx_calc_npde}} return a new fit with
-new bytes. A change made to the list by hand is not saved, and does not reach
-\code{write_model}'s file either. A fit with no
+new bytes. A fit is read-only (\link{ferx_fit-read-only}): its fields cannot be
+assigned to, and a fit whose fields were changed anyway (by \code{unclass()},
+an edit and a new class) is refused with an error of class
+\code{ferx_fit_edited_error}, since the edit would not reach the bytes. So is
+a fit with no record of its fields, such as one built by hand. Objects added
+to a fit under a new name (\code{fit$notes <- "..."}) are saved in the
+bundle's \code{interface_extras.json} and restored by
+\code{\link{ferx_load_fit}}; one that does not survive a round trip through
+JSON (an environment, for one) is left out with a warning of class
+\code{ferx_fit_user_field_dropped_warning}. A fit with no
 bundle, such as one from an \code{.rds} written by an older ferx, is refused
 with an error of class \code{ferx_no_bundle_error}: refit it.
 

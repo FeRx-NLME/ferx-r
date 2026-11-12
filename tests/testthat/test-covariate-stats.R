@@ -230,6 +230,7 @@ test_that("C5: a symbolic model with a fit lacking statistics gets core's refusa
 test_that("C6: statistics for a covariate the model does not read are refused", {
   b <- cs_base()
   fit <- b$fit
+  fit <- unsealed_fit(fit)
   fit$covariate_stats$covariate <- "AGE"
   msg <- cs_msg(ferx_predict(b$sym, b$design, fit = fit))
   expect_match(msg, "carry no entry for it", fixed = TRUE)
@@ -259,6 +260,7 @@ test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
   coded(ferx_covariance(bare), "covariance")
   coded(ferx_sir(bare, sir_samples = 20L, sir_resamples = 10L), "sir")
   other <- b$fit
+  other <- unsealed_fit(other)
   other$covariate_stats$covariate <- "AGE"
   coded(ferx_predict(b$sym, b$design, fit = other), "predict, unread covariate")
 })
@@ -266,10 +268,12 @@ test_that("C6b: from-fit statistics refusals carry E_COVARIATE_STATS_BINDING", {
 test_that("C7: malformed statistics are refused in R's terms", {
   b <- cs_base()
   dup <- b$fit
+  dup <- unsealed_fit(dup)
   dup$covariate_stats <- rbind(dup$covariate_stats, dup$covariate_stats)
   expect_match(cs_msg(ferx_predict(b$sym, b$design, fit = dup)),
                "covariate `WT` is listed twice", fixed = TRUE)
   na <- b$fit
+  na <- unsealed_fit(na)
   na$covariate_stats$median <- NA_real_
   expect_match(cs_msg(ferx_predict(b$sym, b$design, fit = na)),
                "covariate `WT` has a `median` that is not a finite number",

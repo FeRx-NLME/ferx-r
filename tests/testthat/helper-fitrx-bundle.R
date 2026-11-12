@@ -91,3 +91,11 @@ fitrx_core_only_bundle <- function(path) {
 
 # The columns of `fit$theta_levels` the wire carries.
 fitrx_layout_cols <- c("block", "label", "group", "contrast")
+
+# `fit` without its read-only seal (#713): a plain list a test may edit, to probe
+# how a reader handles a field the engine never writes that way. A save refuses
+# it (`ferx_fit_edited_error`); a step reads the bytes, not the edit.
+unsealed_fit <- function(fit) {
+  attr(fit, "ferx_core_digest") <- NULL
+  fit
+}

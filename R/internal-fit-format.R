@@ -957,7 +957,8 @@
 # @param loaded TRUE when `raw` came from a bundle (`ferx_load_fit()`): the
 #   fit is not being made now, so nothing is announced or read from the
 #   engine's trace file.
-# @return A `ferx_fit` object. Saving it (`output=`) stays with the caller.
+# @return A `ferx_fit` object, sealed read-only (`.ferx_fit_seal()`) unless
+#   `loaded`, whose caller seals it. Saving it (`output=`) stays with the caller.
 .ferx_fit_from_raw <- function(raw,
                                model,
                                data,
@@ -1464,9 +1465,13 @@
     )
   }
 
-  class(result) <- "ferx_fit"
-
-  result
+  # Read-only from here (#713): a loaded fit is sealed by `.ferx_fit_view()`,
+  # once it has added what needs the model file.
+  if (loaded) {
+    class(result) <- "ferx_fit"
+    return(result)
+  }
+  .ferx_fit_seal(result)
 }
 
 # One line reporting the parameter-prior split of a fit's objective, or NULL

@@ -12,8 +12,16 @@
 #' A fit's bundle (\code{fit$bundle}) is what is saved, not its list: the
 #' engine wrote it when the fit was made, and \code{\link{ferx_covariance}},
 #' \code{\link{ferx_sir}} and \code{\link{ferx_calc_npde}} return a new fit with
-#' new bytes. A change made to the list by hand is not saved, and does not reach
-#' \code{write_model}'s file either. A fit with no
+#' new bytes. A fit is read-only (\link{ferx_fit-read-only}): its fields cannot be
+#' assigned to, and a fit whose fields were changed anyway (by \code{unclass()},
+#' an edit and a new class) is refused with an error of class
+#' \code{ferx_fit_edited_error}, since the edit would not reach the bytes. So is
+#' a fit with no record of its fields, such as one built by hand. Objects added
+#' to a fit under a new name (\code{fit$notes <- "..."}) are saved in the
+#' bundle's \code{interface_extras.json} and restored by
+#' \code{\link{ferx_load_fit}}; one that does not survive a round trip through
+#' JSON (an environment, for one) is left out with a warning of class
+#' \code{ferx_fit_user_field_dropped_warning}. A fit with no
 #' bundle, such as one from an \code{.rds} written by an older ferx, is refused
 #' with an error of class \code{ferx_no_bundle_error}: refit it.
 #'
@@ -97,6 +105,9 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
     stop("`write_model` must be TRUE or FALSE.")
   }
   bundle <- .ferx_fit_bundle(fit, "ferx_save_fit")
+  # A fit edited around the read-only guards is refused (#713): the edit would
+  # not reach the bytes this writes.
+  .ferx_fit_check_sealed(fit, "ferx_save_fit")
   bundles_data <- isTRUE(include_data) || !is.null(fit$data_source)
   # What goes beside the bytes is read from them too, so a hand edit of the list
   # cannot make a `_final.ferx` or a data check disagree with the bundle.
@@ -145,6 +156,10 @@ ferx_save_fit <- function(fit, output, include_data = FALSE,
   } else {
     bundle <- ferx_rust_bundle_without_data(bundle)
   }
+  # The objects the user added go in the bundle's interface extras (#713).
+  bundle <- .ferx_bundle_with_user_fields(
+    bundle, .ferx_fit_user_json(fit, "ferx_save_fit")
+  )
 
   out_abs <- normalizePath(dirname(output), mustWork = FALSE)
   if (!dir.exists(out_abs)) dir.create(out_abs, recursive = TRUE)

@@ -180,6 +180,7 @@ test_that("an `s` the fit could not form is not formed by the replay either", {
   # estimator": covariance_status says the step failed, and there is no ran
   # label to set against the fit's.
   labelled <- f
+  labelled <- unsealed_fit(labelled)
   labelled$covariance_method <- "s"
   got <- replay(labelled)
   expect_identical(got$fit$covariance_status, "failed")
