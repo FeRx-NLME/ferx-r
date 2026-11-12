@@ -1397,14 +1397,15 @@
 #'   \item{shrinkage_eps}{EPS shrinkage: \code{1 - SD(IWRES)}. \code{NA} when
 #'     fewer than 2 valid residuals.}
 #'   \item{dw_statistic}{Pooled Durbin-Watson statistic for IWRES over pairs
-#'     of consecutive rows of one subject that share, under a
-#'     \code{correlation ... by} line, a residual block. A subject's occasions
-#'     (an IOV column, an \code{iov_occasion} rule, or a nested model's
-#'     innermost level cell) split its series further only when they are
-#'     parallel, such as study arms or level cells, which restart the clock;
-#'     occasions that follow one another in time (dosing intervals, study
-#'     periods) are one series, so a design with one observation per occasion
-#'     has a statistic (ferx-core #2829). The denominator is
+#'     of consecutive rows of one subject, taken within each series: a
+#'     subject's rows are split at parallel occasions (study arms, level
+#'     cells) and, under a \code{correlation ... by} line, at each residual
+#'     block, but not at occasions that follow one another in time.
+#'     Occasions come from an IOV column, an \code{iov_occasion} rule, or a
+#'     nested model's innermost level cell; parallel ones restart the clock,
+#'     while sequential ones (dosing intervals, study periods) stay one
+#'     series, so a design with one observation per occasion has a
+#'     statistic (ferx-core #2829). The denominator is
 #'     pair-normalised, so independent residuals give 2 however short the
 #'     series (ferx-core #2798); values from earlier versions of ferx are
 #'     not comparable. 2.0 = no autocorrelation; < 1.5 = positive autocorrelation
