@@ -24,11 +24,15 @@
 #' The mapping from `fit` to the standard NONMEM table columns is:
 #' \itemize{
 #'   \item \strong{sdtab} from `fit$sdtab`: `ID`, `TIME`, `DV`, `PRED`,
-#'     `IPRED`, `CWRES`, `IWRES`, and (when present) `NPDE`, `NPD`, `CMT`, `OCC`,
+#'     `IPRED`, `CWRES`, `IWRES`, and (when present) `NPDE`, `NPD`, `EPRED`,
+#'     `PWRES`, `EWRES`, `CMT`, `OCC`,
 #'     `CENS`, `TAFD`, `TAD`. `RES = DV - PRED` and `IRES = DV - IPRED` are
 #'     derived; `WRES` is set to `NA` (ferx does not compute the FO-weighted
 #'     residual). `NPDE`/`NPD` (present when the fit ran with `npde_nsim > 0`)
-#'     are mapped to the residual role, so Xpose residual plots can use them.
+#'     are mapped to the residual role, so Xpose residual plots can use them, as
+#'     are `PWRES`/`EWRES` (the Monte-Carlo population-weighted residual from the
+#'     same simulation); `EPRED`, its expected prediction, joins the prediction
+#'     role.
 #'     Only the Gaussian observation rows are used: the binary-endpoint rows
 #'     and the time-to-event residual rows (`COXSNELL`, `MARTINGALE`,
 #'     `DEVIANCE`, `PIT`) that `fit$sdtab` carries after them are left out,
@@ -189,8 +193,9 @@ ferx_xpose <- function(fit,
     id      = "ID",
     idv     = "TIME",
     dv      = present("DV"),
-    pred    = present(c("PRED", "IPRED")),
-    res     = present(c("RES", "IRES", "WRES", "CWRES", "IWRES", "NPDE", "NPD")),
+    pred    = present(c("PRED", "IPRED", "EPRED")),
+    res     = present(c("RES", "IRES", "WRES", "CWRES", "IWRES", "NPDE", "NPD",
+                        "PWRES", "EWRES")),
     occ     = present("OCC"),
     param   = param_cols,
     eta     = eta_cols,

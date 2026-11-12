@@ -391,7 +391,9 @@
 #'       warning). Supported by FOCE, FOCEI, Laplace and SAEM -- not IMP/IMPMAP.}
 #'     \item{\code{npde_nsim}}{(default 0, i.e. disabled) Monte-Carlo replicates
 #'       per subject for the simulation-based NPDE/NPD diagnostics computed after
-#'       the fit; with 0 no NPDE/NPD columns are produced. A typical value is
+#'       the fit, along with the \code{EPRED} and \code{PWRES}/\code{EWRES}
+#'       columns from the same simulation (see \code{\link{ferx_calc_npde}});
+#'       with 0 none of these columns are produced. A typical value is
 #'       1000, and cost scales linearly. See also \code{\link{ferx_calc_npde}}
 #'       to add them post hoc.}
 #'     \item{\code{npde_seed}}{RNG seed for the NPDE/NPD simulation. Unset, a
