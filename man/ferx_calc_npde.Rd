@@ -28,7 +28,9 @@ full-rank simulated covariance; subjects that fail this get \code{NA} NPDE
 \value{
 A new fit with new bytes, the input \code{fit} being left as it was,
 with \code{NPDE} and \code{NPD} columns added to its \code{sdtab} data
-frame (replacing any existing ones). They are in the fit's bundle, so they
+frame (replacing any existing ones). They are computed for the Gaussian
+observations only: on the discrete (e.g. binary) and time-to-event rows of
+\code{sdtab} they are \code{NA}. They are in the fit's bundle, so they
 survive \code{\link{ferx_save_fit}}. A fit with no bundle, such as one from
 an \code{.rds} written by an older ferx, is refused with an error of class
 \code{ferx_no_bundle_error}: refit it. Because the diagnostics live in

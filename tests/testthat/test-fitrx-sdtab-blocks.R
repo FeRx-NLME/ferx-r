@@ -128,17 +128,23 @@ test_that("an empty or missing sdtab has no rows in any block", {
   expect_blocks(blocks_fn(fit), integer(), integer(), integer())
 })
 
-test_that(".ferx_attach_npde leaves the TTE rows NA wherever they are", {
+test_that(".ferx_attach_npde leaves the non-Gaussian rows NA wherever they are", {
   attach_npde <- getFromNamespace(".ferx_attach_npde", "ferx")
   sdtab <- data.frame(ID = c(1, 1, 2, 2), TIME = c(1, 2, 1, 2))
   npde_tbl <- data.frame(ID = c(1, 1, 2), TIME = c(1, 2, 2),
                          NPDE = c(0.1, 0.2, 0.3), NPD = c(1, 2, 3))
-  out <- attach_npde(sdtab, npde_tbl, tte_rows = 3L)
+  out <- attach_npde(sdtab, npde_tbl, gaussian_rows = c(1L, 2L, 4L))
   expect_identical(out$NPDE, c(0.1, 0.2, NA, 0.3))
   expect_identical(out$NPD, c(1, 2, NA, 3))
-  # Leaving out the TTE rows does not skip the ID/TIME check on the rest.
+  # Leaving out the other rows does not skip the ID/TIME check on the rest,
+  # nor the row count.
   npde_tbl$TIME[3] <- 1
-  expect_error(attach_npde(sdtab, npde_tbl, tte_rows = 3L), "do not line up")
+  expect_error(attach_npde(sdtab, npde_tbl, gaussian_rows = c(1L, 2L, 4L)),
+               "do not line up")
+  expect_error(attach_npde(sdtab, npde_tbl, gaussian_rows = 1:2), "cannot align")
+  # A binary-only fit: no Gaussian rows, an empty NPDE table, all NA.
+  out <- attach_npde(sdtab, npde_tbl[0, ], gaussian_rows = integer())
+  expect_identical(out$NPDE, rep(NA_real_, 4))
 })
 
 # Each caller on the synthetic Gaussian + binary + TTE fit, the one geometry
@@ -159,13 +165,17 @@ for (case in c("counts", "columns")) {
 
     # ferx_calc_npde(): the engine's NPDE table has the Gaussian rows only
     # (ferx-core `compute_npde_npd` loops over `subject.observations`), so
-    # this is a Gaussian + TTE fit; a fit with discrete rows is still refused
-    # (#708).
+    # NPDE/NPD go on those and the discrete and TTE rows stay NA (#708).
     attach_npde <- getFromNamespace(".ferx_attach_npde", "ferx")
-    pk_tte <- mixed_fit(n_disc = c(0L, 0L))
-    if (case == "columns") pk_tte$subject_summary <- NULL
-    npde_tbl <- cbind(pk_tte$sdtab[1:3, c("ID", "TIME")], NPDE = 1:3 / 10, NPD = 1:3)
-    out <- attach_npde(pk_tte$sdtab, npde_tbl, tte_rows = blocks_fn(pk_tte)$tte)
-    expect_identical(out$NPDE, c(1:3 / 10, NA, NA))
+    npde_tbl <- cbind(fit$sdtab[1:3, c("ID", "TIME")], NPDE = 1:3 / 10, NPD = 1:3)
+    out <- attach_npde(fit$sdtab, npde_tbl,
+                       gaussian_rows = blocks_fn(fit)$gaussian)
+    expect_identical(out$NPDE, c(1:3 / 10, rep(NA, 5)))
+    expect_identical(out$NPD, c(1, 2, 3, rep(NA, 5)))
+    # The ID/TIME check still runs on the Gaussian rows.
+    npde_tbl$TIME[2] <- 99
+    expect_error(attach_npde(fit$sdtab, npde_tbl,
+                             gaussian_rows = blocks_fn(fit)$gaussian),
+                 "do not line up")
   })
 }

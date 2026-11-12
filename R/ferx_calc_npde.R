@@ -45,7 +45,9 @@
 #'
 #' @return A new fit with new bytes, the input \code{fit} being left as it was,
 #'   with \code{NPDE} and \code{NPD} columns added to its \code{sdtab} data
-#'   frame (replacing any existing ones). They are in the fit's bundle, so they
+#'   frame (replacing any existing ones). They are computed for the Gaussian
+#'   observations only: on the discrete (e.g. binary) and time-to-event rows of
+#'   \code{sdtab} they are \code{NA}. They are in the fit's bundle, so they
 #'   survive \code{\link{ferx_save_fit}}. A fit with no bundle, such as one from
 #'   an \code{.rds} written by an older ferx, is refused with an error of class
 #'   \code{ferx_no_bundle_error}: refit it. Because the diagnostics live in
@@ -180,7 +182,7 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
 
   # A new fit from new bytes, the columns in them; `fit` is left as it was.
   sdtab <- .ferx_attach_npde(fit$sdtab, npde_tbl,
-                             tte_rows = .fitrx_sdtab_blocks(fit)$tte)
+                             gaussian_rows = .fitrx_sdtab_blocks(fit)$gaussian)
   .ferx_fit_with_bundle(
     fit, ferx_rust_bundle_with_sdtab(fit$bundle, lapply(sdtab, as.numeric))
   )
@@ -189,33 +191,35 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
 # Internal: splice NPDE/NPD onto an sdtab by position.
 #
 # The engine emits the NPDE table in exactly the same subject/observation order
-# as `fit$sdtab` (both iterate the same freshly read population) and emits ID and
-# TIME the same way `io::output::sdtab` does, so a row-for-row positional copy is
-# the correct alignment. We *assert* that invariant (equal row count, matching
-# per-row ID and TIME) rather than silently re-joining: a mismatch means the
-# `data`/`model` differ from the fit, or the model has non-Gaussian (e.g. TTE)
-# rows that sdtab and the NPDE table count differently - both cases should be a
-# clear error, not a quietly wrong or NA-filled column.
+# as the Gaussian rows of `fit$sdtab` (both iterate the same freshly read
+# population) and emits ID and TIME the same way `io::output::sdtab` does, so a
+# row-for-row positional copy is the correct alignment. We *assert* that
+# invariant (equal row count, matching per-row ID and TIME) rather than
+# silently re-joining: a mismatch means the `data`/`model` differ from the
+# fit, and should be a clear error, not a quietly wrong or NA-filled column.
 #
-# The one exception is the time-to-event residual rows ferx-core appends
-# after every other sdtab row (#901), `tte_rows` as `.fitrx_sdtab_blocks()`
-# finds them (#696): the NPDE table has no rows for them, so NPDE/NPD go on
-# the other rows and are NA on those.
-.ferx_attach_npde <- function(sdtab, npde_tbl, tte_rows = integer()) {
-  rest <- setdiff(seq_len(nrow(sdtab)), tte_rows)
-  if (length(tte_rows) > 0L && length(rest) == nrow(npde_tbl)) {
-    head <- .ferx_attach_npde(sdtab[rest, , drop = FALSE], npde_tbl)
+# The NPDE table covers the Gaussian observations only (ferx-core
+# `compute_npde_npd` loops over `subject.observations`), while `fit$sdtab`
+# holds the Gaussian rows, then the discrete (binary, ferx-core #900) rows,
+# then the time-to-event residual rows (#901). `gaussian_rows` are the
+# Gaussian rows as `.fitrx_sdtab_blocks()` finds them (#696): NPDE/NPD go on
+# those, checked against the table by ID/TIME, and are NA on every other row
+# (#708).
+.ferx_attach_npde <- function(sdtab, npde_tbl,
+                              gaussian_rows = seq_len(nrow(sdtab))) {
+  gaussian_rows <- as.integer(gaussian_rows)
+  if (!identical(gaussian_rows, seq_len(nrow(sdtab)))) {
+    gauss <- .ferx_attach_npde(sdtab[gaussian_rows, , drop = FALSE], npde_tbl)
     sdtab$NPDE <- NA_real_
     sdtab$NPD  <- NA_real_
-    sdtab$NPDE[rest] <- head$NPDE
-    sdtab$NPD[rest]  <- head$NPD
+    sdtab$NPDE[gaussian_rows] <- gauss$NPDE
+    sdtab$NPD[gaussian_rows]  <- gauss$NPD
     return(sdtab)
   }
   if (nrow(sdtab) != nrow(npde_tbl)) {
     stop(sprintf(paste0(
       "ferx_calc_npde: the NPDE table has %d row(s) but fit$sdtab has %d; cannot align. ",
-      "This happens when `model`/`data` differ from the fit, or for non-Gaussian ",
-      "(e.g. TTE) endpoints, which are not yet supported."),
+      "This happens when `model`/`data` differ from the fit."),
       nrow(npde_tbl), nrow(sdtab)), call. = FALSE)
   }
   id_ok   <- isTRUE(all.equal(as.numeric(sdtab$ID),   as.numeric(npde_tbl$ID)))

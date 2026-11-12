@@ -588,6 +588,27 @@ test_that("ferx_xpose keeps only a binary model's Gaussian rows (#688)", {
                  sprintf("%d discrete-endpoint sdtab rows", 2L * n_subj))
 })
 
+# The same fit through ferx_calc_npde(): the engine's NPDE table covers the
+# Gaussian rows only, so NPDE/NPD land on those and the binary rows stay NA,
+# where the attach used to refuse the fit as "cannot align" (#708).
+test_that("ferx_calc_npde attaches NPDE on a binary model's Gaussian rows (#708)", {
+  fit <- xpose_edited_fit("warfarin", "binary_reused_id",
+                          edit = function(d) add_binary_rows(reuse_third_id(d)),
+                          model_edit = add_binary_model)
+  n_gauss <- sum(fit$subject_summary$n_obs)
+  n_disc <- sum(fit$subject_summary$n_obs_discrete)
+  expect_gt(n_disc, 0L)
+  out <- ferx_calc_npde(fit, nsim = 100L, seed = 1L)
+  expect_equal(nrow(out$sdtab), n_gauss + n_disc)
+  gauss <- seq_len(n_gauss)
+  expect_true(all(is.finite(out$sdtab$NPD[gauss])))
+  expect_true(all(is.na(out$sdtab$NPDE[-gauss])))
+  expect_true(all(is.na(out$sdtab$NPD[-gauss])))
+  expect_equal(out$sdtab$TIME, fit$sdtab$TIME)
+  # The input fit is left as it was.
+  expect_false("NPD" %in% names(fit$sdtab))
+})
+
 test_that("xpose rows: missing n_obs_discrete / n_obs_tte count as 0 (#688)", {
   fit <- fake_fit()
   fit$subject_summary <- data.frame(ID = c("1", "2"), n_obs = c(2L, 2L))
