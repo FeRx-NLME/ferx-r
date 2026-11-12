@@ -9,6 +9,19 @@
 #' nonlinearity and non-Gaussian random effects, and follow N(0, 1) under a
 #' correctly specified model.
 #'
+#' The same simulation also gives \code{EPRED}, the Monte-Carlo expected
+#' prediction (the mean of the simulated replicates, NONMEM's \code{EPRED}), and
+#' \code{PWRES}, the population-weighted residual
+#' \eqn{\Sigma_{sim}^{-1/2}(y - EPRED)} (Monolix's \code{PWRES}), also written as
+#' \code{EWRES} (NONMEM's name for it). PWRES is the simulation-based analogue of
+#' CWRES: it needs no FOCE linearization, so it is valid after any estimator, and
+#' it keeps the size of an outlier that NPDE, a rank, caps. It uses only the first
+#' two moments, so it is N(0, 1) under the true model only when the marginal
+#' distribution of the observations is Gaussian; NPDE stays the primary
+#' simulation-based check. PWRES is decorrelated with the symmetric inverse
+#' square root of the simulated covariance (NONMEM's default for \code{EWRES}),
+#' NPDE with its Cholesky factor (the \pkg{npde} package's convention).
+#'
 #' The data are re-read with the selection the fit was made with
 #' (\code{fit$reader_settings}): a \code{ferx_fit(ignore =, accept =,
 #' ignore_ids =)} selection applies as well as the model file's
@@ -35,7 +48,7 @@
 #' @param nsim Number of Monte-Carlo replicates per subject (default \code{1000}).
 #'   NPDE needs \code{nsim} greater than each subject's observation count for a
 #'   full-rank simulated covariance; subjects that fail this get \code{NA} NPDE
-#'   (NPD is still computed).
+#'   and PWRES (NPD and EPRED are still computed).
 #' @param seed Optional integer RNG seed for reproducibility. \code{NULL}
 #'   (default) uses the engine's built-in default seed.
 #' @param model Path to the \code{.ferx} model file. Defaults to
@@ -44,10 +57,11 @@
 #'   \code{\link{ferx_fit}}). Defaults to the fit's own data.
 #'
 #' @return A new fit with new bytes, the input \code{fit} being left as it was,
-#'   with \code{NPDE} and \code{NPD} columns added to its \code{sdtab} data
-#'   frame (replacing any existing ones). They are computed for the Gaussian
-#'   observations only: on the discrete (e.g. binary) and time-to-event rows of
-#'   \code{sdtab} they are \code{NA}. They are in the fit's bundle, so they
+#'   with \code{NPDE}, \code{NPD}, \code{EPRED}, \code{EWRES} and \code{PWRES}
+#'   columns added to its \code{sdtab} data frame (replacing any existing
+#'   ones). They are computed for the Gaussian observations only: on the
+#'   discrete (e.g. binary) and time-to-event rows of \code{sdtab} they are
+#'   \code{NA}. They are in the fit's bundle, so they
 #'   survive \code{\link{ferx_save_fit}}. A fit with no bundle, such as one from
 #'   an \code{.rds} written by an older ferx, is refused with an error of class
 #'   \code{ferx_no_bundle_error}: refit it. Because the diagnostics live in
@@ -62,7 +76,7 @@
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
 #' fit <- ferx_calc_npde(fit, nsim = 1000L, seed = 12345L)
-#' head(fit$sdtab[, c("ID", "TIME", "NPDE", "NPD")])
+#' head(fit$sdtab[, c("ID", "TIME", "NPDE", "NPD", "EPRED", "PWRES")])
 #'
 #' @family simulation
 #' @export
@@ -190,7 +204,12 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
   )
 }
 
-# Internal: splice NPDE/NPD onto an sdtab by position.
+# The columns the engine's NPDE table carries beyond ID/TIME, in the order
+# ferx-core's sdtab writes them. A table without some of them (an older engine)
+# attaches the ones it has.
+.ferx_npde_columns <- c("NPDE", "NPD", "EPRED", "EWRES", "PWRES")
+
+# Internal: splice NPDE/NPD (and EPRED / EWRES / PWRES) onto an sdtab by position.
 #
 # The engine emits the NPDE table in exactly the same subject/observation order
 # as the Gaussian rows of `fit$sdtab` (both iterate the same freshly read
@@ -204,18 +223,19 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
 # `compute_npde_npd` loops over `subject.observations`), while `fit$sdtab`
 # holds the Gaussian rows, then the discrete (binary, ferx-core #900) rows,
 # then the time-to-event residual rows (#901). `gaussian_rows` are the
-# Gaussian rows as `.fitrx_sdtab_blocks()` finds them (#696): NPDE/NPD go on
-# those, checked against the table by ID/TIME, and are NA on every other row
-# (#708).
+# Gaussian rows as `.fitrx_sdtab_blocks()` finds them (#696): the columns go
+# on those, checked against the table by ID/TIME, and are NA on every other
+# row (#708).
 .ferx_attach_npde <- function(sdtab, npde_tbl,
                               gaussian_rows = seq_len(nrow(sdtab))) {
+  cols <- intersect(.ferx_npde_columns, names(npde_tbl))
   gaussian_rows <- as.integer(gaussian_rows)
   if (!identical(gaussian_rows, seq_len(nrow(sdtab)))) {
     gauss <- .ferx_attach_npde(sdtab[gaussian_rows, , drop = FALSE], npde_tbl)
-    sdtab$NPDE <- NA_real_
-    sdtab$NPD  <- NA_real_
-    sdtab$NPDE[gaussian_rows] <- gauss$NPDE
-    sdtab$NPD[gaussian_rows]  <- gauss$NPD
+    for (col in cols) {
+      sdtab[[col]] <- NA_real_
+      sdtab[[col]][gaussian_rows] <- gauss[[col]]
+    }
     return(sdtab)
   }
   if (nrow(sdtab) != nrow(npde_tbl)) {
@@ -230,7 +250,6 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     stop("ferx_calc_npde: NPDE rows do not line up with fit$sdtab by ID/TIME; ",
          "refusing to attach possibly-misaligned diagnostics.", call. = FALSE)
   }
-  sdtab$NPDE <- npde_tbl$NPDE
-  sdtab$NPD  <- npde_tbl$NPD
+  for (col in cols) sdtab[[col]] <- npde_tbl[[col]]
   sdtab
 }
