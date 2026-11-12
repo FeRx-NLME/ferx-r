@@ -114,3 +114,35 @@ rs_edited_model <- function(fit, env = parent.frame()) {
   fit$model_path <- model
   fit
 }
+
+# A fit that records a population fingerprint but no reader settings: the shape
+# ferx-core's in-memory `fit()` writes (#1941), and the only shape besides a
+# hand edit that still reaches the legacy guard (#530).
+rs_fingerprint_only <- function(fit) {
+  fitrx_edit_fit(fit, function(w) {
+    w$reader_settings <- NULL
+    w
+  })
+}
+
+# warfarin with a model file stating `accept = TIME < 100`, fitted with a
+# record-only `ignore = "TIME > 110"`: every row the call's clause matches the
+# file's clause drops anyway, so the population is the file's, but the reader
+# checks `ignore` before `accept` and credits the TIME = 120 rows to the call's
+# clause (#530 gap 2).
+rs_accept_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex <- ferx_example("warfarin")
+      model <- tempfile(fileext = ".ferx")
+      writeLines(c(readLines(ex$model), "", "[data_selection]",
+                   "  accept = TIME < 100"), model)
+      fit <<- suppressWarnings(ferx_fit(
+        model, ex$data, method = "focei", verbose = FALSE, covariance = TRUE,
+        ignore = "TIME > 110", settings = list(maxiter = 30L)
+      ))
+    }
+    fit
+  }
+})

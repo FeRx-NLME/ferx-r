@@ -111,8 +111,8 @@ ferx_rust_settings_record <- function(kind, record, entry_point, field) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_unstated_selection <- function(entry_point, model_path, model_hash, fired_ignore, fired_accept, call_iov_column) {
-  .Call("wrap__ferx_rust_unstated_selection", entry_point, model_path, model_hash, as.character(fired_ignore), as.character(fired_accept), call_iov_column)
+ferx_rust_unstated_selection <- function(entry_point, model_path, model_hash, fired_ignore, fired_accept, call_iov_column, data_path, population_fingerprint) {
+  .Call("wrap__ferx_rust_unstated_selection", entry_point, model_path, model_hash, as.character(fired_ignore), as.character(fired_accept), call_iov_column, data_path, population_fingerprint)
 }
 
 #' @title Internal Rust backend binding

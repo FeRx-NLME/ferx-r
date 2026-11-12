@@ -116,17 +116,6 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     stop("No usable data file: pass `data=` or refit so `fit$data_path` is set.")
   }
 
-  .ferx_refuse_unrecorded_selection(
-    fit, "ferx_calc_npde",
-    paste0(
-      "Refit with `ferx_fit(..., settings = list(npde_nsim = ", nsim, "))`, ",
-      "or refit and call ferx_calc_npde() on the new fit."
-    ),
-    model_path = model,
-    model_hash = if (model_is_fits) fit$model_hash else "",
-    data = data_override
-  )
-
   # On the fit's own model and data the engine checks the re-read population
   # against the fit's fingerprint (ferx-core #1814): a data file edited since
   # the fit is refused with E_POPULATION_MISMATCH. That includes `model =` /
@@ -138,6 +127,19 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
   } else {
     ""
   }
+
+  .ferx_refuse_unrecorded_selection(
+    fit, "ferx_calc_npde",
+    paste0(
+      "Refit with `ferx_fit(..., settings = list(npde_nsim = ", nsim, "))`, ",
+      "or refit and call ferx_calc_npde() on the new fit."
+    ),
+    model_path = model,
+    model_hash = if (model_is_fits) fit$model_hash else "",
+    data = data_override,
+    data_path = data,
+    fingerprint = fingerprint
+  )
 
   # A refusal (bad params, unreadable data, ...) is an R error, classed like a
   # refused `ferx_fit()` (#385).

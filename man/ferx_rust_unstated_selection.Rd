@@ -10,7 +10,9 @@ ferx_rust_unstated_selection(
   model_hash,
   fired_ignore,
   fired_accept,
-  call_iov_column
+  call_iov_column,
+  data_path,
+  population_fingerprint
 )
 }
 \description{

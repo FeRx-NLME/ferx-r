@@ -303,10 +303,26 @@ validate_fit_for_params <- function(fit) {
 # its own to say so (#526 review 1). `data` names a `data =` override, which
 # cannot be checked against the fit's selection from here. `remedy` is the entry
 # point's own way to get the step from a fresh fit.
+#
+# A clause is credited to the first one that matches its row, so a clause the
+# file does not state can be named although it removed nothing the file would
+# not (#530). When the step reads the fit's own model and data, `data_path` and
+# `fingerprint` (the fit's `population_fingerprint`) let the glue read the data
+# the way the step will and compare it with the fit's population: the same
+# population runs. A fit that records neither field has nothing to compare
+# against, and its named clauses are refused as before.
+#
+# Every fit ferx writes today records its reader settings, so this guard is
+# reached only by a fit whose bytes leave them out (a bundle written by another
+# writer, or a hand edit): a `.fitrx` older than format version 2 does not load
+# at all, and an engine-written one carries `reader_settings`, the fingerprint
+# and `exclusions` like an R one (ferx-core #2695).
 .ferx_refuse_unrecorded_selection <- function(fit, caller, remedy,
                                               model_path = fit$model_path,
                                               model_hash = fit$model_hash,
-                                              data = NULL) {
+                                              data = NULL,
+                                              data_path = .ferx_fit_data_path(fit),
+                                              fingerprint = fit$population_fingerprint) {
   if (!is.null(fit$reader_settings)) {
     return(invisible(NULL))
   }
@@ -325,6 +341,12 @@ validate_fit_for_params <- function(fit) {
     return(invisible(NULL))
   }
   model_path <- normalizePath(model_path, mustWork = FALSE)
+  one_string <- function(x) {
+    if (is.character(x) && length(x) == 1L && !is.na(x)) x else ""
+  }
+  fingerprint <- one_string(fingerprint)
+  data_path <- one_string(data_path)
+  if (nzchar(data_path)) data_path <- normalizePath(data_path, mustWork = FALSE)
   unstated <- .ferx_engine_call(
     ferx_rust_unstated_selection(
       entry_point = caller,
@@ -332,7 +354,9 @@ validate_fit_for_params <- function(fit) {
       model_hash = .ferx_hash_arg(model_hash),
       fired_ignore = fired_ignore,
       fired_accept = fired_accept,
-      call_iov_column = call_iov
+      call_iov_column = call_iov,
+      data_path = if (nzchar(fingerprint)) data_path else "",
+      population_fingerprint = fingerprint
     ),
     model_path, data %||% fit$data_path
   )
