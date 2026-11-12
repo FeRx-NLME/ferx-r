@@ -78,3 +78,65 @@ test_that("a fit's bytes carry reader_settings, fingerprint and exclusions in co
   expect_false(is.null(loaded$reader_settings))
   expect_identical(loaded$exclusions$fired_ignore, fit$exclusions$fired_ignore)
 })
+
+# -- Gap 2 on a level-block model (#530 review 1) -----------------------------
+#
+# A `theta NAME[...]` fit's fingerprint holds the level index columns binding
+# writes. The guard's re-read is bound with the fit's own bindings before it is
+# compared; unbound it never matched, and the overlapping clause was refused.
+# The fixture is test-theta-levels.R's (two studies x TIME {1, 4, 12}), with the
+# file stating `accept = TIME < 10` and the call adding `ignore = "TIME > 11"`.
+
+test_that("a level-block fit with a fingerprint and the file's population is not refused (#530)", {
+  data <- withr::local_tempfile(fileext = ".csv")
+  writeLines(c(
+    "ID,TIME,DV,EVID,AMT,CMT,RATE,MDV,STUDY",
+    "1,0,.,1,100,1,0,1,1", "1,1,8.1,0,.,1,0,0,1", "1,4,6.2,0,.,1,0,0,1",
+    "1,12,3.1,0,.,1,0,0,1",
+    "2,0,.,1,100,1,0,1,2", "2,1,7.4,0,.,1,0,0,2", "2,4,5.5,0,.,1,0,0,2",
+    "2,12,2.8,0,.,1,0,0,2"
+  ), data)
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]",
+    "  theta TVCL(2.0, 0.001, 20.0)",
+    "  theta PLACEBO[STUDY, TIME](0.0, -5.0, 5.0)",
+    "  theta TVV(10.0, FIX)",
+    "  omega ETA_V ~ 0.04",
+    "  sigma PROP_ERR ~ 0.05",
+    "[individual_parameters]",
+    "  CL = TVCL + PLACEBO",
+    "  V  = TVV",
+    "  Z  = TVV * exp(ETA_V)",
+    "[structural_model]",
+    "  pk one_cpt_iv(cl=CL, v=V)",
+    "[derived]",
+    "  Z_OUT = Z",
+    "[error_model]",
+    "  DV ~ proportional(PROP_ERR)",
+    "[fit_options]",
+    "  maxiter = 2",
+    "  inner_maxiter = 3",
+    "  covariance = false",
+    "[data_selection]",
+    "  accept = TIME < 10"
+  ), model)
+  base <- suppressWarnings(ferx_fit(model, data, verbose = FALSE, ignore = "TIME > 11"))
+  expect_false(is.null(base$theta_levels))
+  expect_identical(base$exclusions$fired_ignore, "ignore: TIME > 11")
+  fit <- rs_fingerprint_only(base)
+  expect_null(fit$reader_settings)
+
+  # Unbound, the re-read is not the fit's population and the label stands:
+  # the comparison this test pins is the bound one.
+  args <- list("probe", normalizePath(fit$model_path), "", fit$exclusions$fired_ignore,
+               character(), "", normalizePath(fit$data_path), fit$population_fingerprint)
+  expect_identical(do.call(ferx:::ferx_rust_unstated_selection, c(args, list(list()))),
+                   "ignore: TIME > 11")
+  expect_identical(
+    do.call(ferx:::ferx_rust_unstated_selection,
+            c(args, list(ferx:::.ferx_fit_binding_args(fit)$fit_bindings))),
+    character()
+  )
+  expect_no_error(ferx:::.ferx_refuse_unrecorded_selection(fit, "probe", "remedy"))
+})

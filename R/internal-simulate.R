@@ -356,7 +356,14 @@ validate_fit_for_params <- function(fit) {
       fired_accept = fired_accept,
       call_iov_column = call_iov,
       data_path = if (nzchar(fingerprint)) data_path else "",
-      population_fingerprint = fingerprint
+      population_fingerprint = fingerprint,
+      # Bound onto the re-read data before the comparison: a level-block fit's
+      # fingerprint holds the level index columns binding writes (#530 review 1).
+      fit_bindings = if (nzchar(fingerprint)) {
+        .ferx_fit_binding_args(fit)$fit_bindings
+      } else {
+        list()
+      }
     ),
     model_path, data %||% fit$data_path
   )

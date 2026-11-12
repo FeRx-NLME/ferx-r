@@ -12,7 +12,8 @@ ferx_rust_unstated_selection(
   fired_accept,
   call_iov_column,
   data_path,
-  population_fingerprint
+  population_fingerprint,
+  fit_bindings
 )
 }
 \description{
