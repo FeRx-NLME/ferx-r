@@ -28,6 +28,17 @@ test_that("each assignment form on a core field errors", {
   expect_identical(as.integer(g), pos)
   expect_error(fit[[g]] <- 1, class = "ferx_fit_read_only_error")
   expect_error(fit[g] <- list(1), class = "ferx_fit_read_only_error")
+  # Classed numbers (Date, POSIXct, difftime) replace by position too.
+  d <- as.Date(pos, origin = "1970-01-01")
+  expect_identical(as.numeric(d), as.numeric(pos))
+  expect_error(fit[[d]] <- 1, class = "ferx_fit_read_only_error")
+  expect_error(fit[d] <- list(1), class = "ferx_fit_read_only_error")
+  expect_error(fit[[as.difftime(pos, units = "secs")]] <- 1,
+               class = "ferx_fit_read_only_error")
+  expect_error(fit[as.POSIXct(pos, origin = "1970-01-01", tz = "UTC")] <- list(1),
+               class = "ferx_fit_read_only_error")
+  expect_error(fit[[TRUE]] <- 1, class = "ferx_fit_read_only_error")
+  expect_error(fit[-1L] <- list(NULL), class = "ferx_fit_read_only_error")
   err <- tryCatch(fit$theta <- 1, ferx_fit_read_only_error = function(e) e)
   expect_identical(err$fields, "theta")
   expect_match(conditionMessage(err), "read-only")
@@ -50,6 +61,16 @@ test_that("each assignment form works for a new name", {
   expect_identical(fit$note1, "b")
   expect_false("note2" %in% names(fit))
   expect_setequal(ferx:::.ferx_fit_user_fields(fit), c("note1", "note3"))
+  # `[[TRUE]] <-` replaces the first element only: allowed when that is the
+  # user's own, whatever core fields follow it.
+  first <- ferx:::.ferx_fit_seal(c(list(mine = 0), unclass(warfarin_fit())),
+                                 user = "mine")
+  first[[TRUE]] <- 1
+  expect_identical(first$mine, 1)
+  # Putting back the value a field already has changes nothing.
+  same <- warfarin_fit()
+  same$theta <- same$theta
+  expect_identical(same, warfarin_fit())
   # Where the fit's files are now is not a core field.
   fit$model_path <- "elsewhere.ferx"
   expect_identical(fit$model_path, "elsewhere.ferx")

@@ -61,30 +61,30 @@
   setdiff(names(unclass(fit)), c(core, .FERX_FIT_FREE_FIELDS, ""))
 }
 
-# The names an assignment `x[i] <-` or `x[[i]] <-` writes to.
-.ferx_fit_target_names <- function(x, i, missing_i) {
-  nms <- names(unclass(x)) %||% character()
-  if (missing_i) return(nms)
-  # A factor subscript replaces by position, its integer code, not by label.
-  if (is.factor(i)) i <- as.integer(i)
-  if (is.character(i)) return(i)
-  if (is.logical(i)) {
-    return(nms[rep_len(i, length(nms)) %in% TRUE])
+# The assignment's result, `new` (the unclassed list after base R's own
+# replacement), as a fit; refused when it changed a core field of the sealed fit
+# `x`. Judged by what the replacement did, not by reading the subscript: R
+# accepts names, positions, negatives, logicals, factors (by code), Dates and
+# other classed numbers (as positions), and a resolver of its own would miss
+# one. `identical()` returns at once for a field the replacement left as it was
+# (the same object), so the check costs nothing for an untouched fit. An
+# assignment that puts back the value a field already has changes nothing, and
+# goes through.
+.ferx_fit_assigned <- function(x, new) {
+  core <- .ferx_fit_core_fields(x)
+  if (!is.null(core)) {
+    old <- unclass(x)
+    have <- names(new) %||% character()
+    changed <- core[vapply(core, function(k) {
+      !(k %in% have) || !identical(old[[k]], new[[k]])
+    }, NA)]
+    if (length(changed)) .ferx_fit_read_only_error(changed)
   }
-  if (is.numeric(i)) {
-    i <- i[!is.na(i)]
-    if (any(i < 0)) return(nms[i])
-    return(nms[i[i >= 1 & i <= length(nms)]])
-  }
-  character()
+  class(new) <- class(x)
+  new
 }
 
-# Refuse an assignment that writes to a core field of a sealed fit.
-.ferx_fit_guard <- function(x, targets) {
-  core <- .ferx_fit_core_fields(x)
-  if (is.null(core)) return(invisible())
-  hit <- unique(intersect(targets, core))
-  if (length(hit) == 0L) return(invisible())
+.ferx_fit_read_only_error <- function(hit) {
   one <- length(hit) == 1L
   stop(errorCondition(paste0(
     "ferx_fit objects are read-only: ", paste0("fit$", hit, collapse = ", "),
@@ -116,25 +116,31 @@
 #' @keywords internal
 #' @export
 `$<-.ferx_fit` <- function(x, name, value) {
-  .ferx_fit_guard(x, name)
-  NextMethod()
+  new <- unclass(x)
+  new[[name]] <- value
+  .ferx_fit_assigned(x, new)
 }
 
 #' @rdname ferx_fit-read-only
 #' @export
 `[[<-.ferx_fit` <- function(x, i, ..., value) {
-  target <- .ferx_fit_target_names(x, if (length(i)) i[[1L]] else i,
-                                   missing_i = FALSE)
-  .ferx_fit_guard(x, target)
-  NextMethod()
+  new <- unclass(x)
+  new[[i, ...]] <- value
+  .ferx_fit_assigned(x, new)
 }
 
 #' @rdname ferx_fit-read-only
 #' @export
 `[<-.ferx_fit` <- function(x, i, j, ..., value) {
-  target <- .ferx_fit_target_names(x, if (!missing(i)) i, missing_i = missing(i))
-  .ferx_fit_guard(x, target)
-  NextMethod()
+  new <- unclass(x)
+  if (missing(i)) {
+    new[] <- value
+  } else if (missing(j)) {
+    new[i, ...] <- value
+  } else {
+    new[i, j, ...] <- value
+  }
+  .ferx_fit_assigned(x, new)
 }
 
 # Refuse to save a fit whose core fields are not the ones it was built with: the
