@@ -17,6 +17,17 @@ test_that("each assignment form on a core field errors", {
   expect_error(fit[c("my_note", "omega")] <- list(1, 2),
                class = "ferx_fit_read_only_error")
   expect_error(fit$sdtab$DV <- 0, class = "ferx_fit_read_only_error")
+  # A factor subscript replaces by its integer code, as a position.
+  f <- factor("theta", levels = names(unclass(fit)))
+  expect_error(fit[[f]] <- 1, class = "ferx_fit_read_only_error")
+  expect_error(fit[f] <- list(1), class = "ferx_fit_read_only_error")
+  # A factor whose label is a free name but whose code is a core field's
+  # position: the position is what is replaced.
+  pos <- match("ofv", names(unclass(fit)))
+  g <- factor("my_note", levels = c(paste0("l", seq_len(pos - 1L)), "my_note"))
+  expect_identical(as.integer(g), pos)
+  expect_error(fit[[g]] <- 1, class = "ferx_fit_read_only_error")
+  expect_error(fit[g] <- list(1), class = "ferx_fit_read_only_error")
   err <- tryCatch(fit$theta <- 1, ferx_fit_read_only_error = function(e) e)
   expect_identical(err$fields, "theta")
   expect_match(conditionMessage(err), "read-only")

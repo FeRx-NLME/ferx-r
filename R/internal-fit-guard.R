@@ -65,6 +65,8 @@
 .ferx_fit_target_names <- function(x, i, missing_i) {
   nms <- names(unclass(x)) %||% character()
   if (missing_i) return(nms)
+  # A factor subscript replaces by position, its integer code, not by label.
+  if (is.factor(i)) i <- as.integer(i)
   if (is.character(i)) return(i)
   if (is.logical(i)) {
     return(nms[rep_len(i, length(nms)) %in% TRUE])
