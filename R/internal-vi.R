@@ -101,3 +101,88 @@
     superseded_by = superseded_by[[1L]]
   )
 }
+
+# -- Reporting a VI fit (#507) ------------------------------------------------
+#
+# VI estimates a bound, not an objective: under `vi_final_ofv = none` the fit
+# has no OFV, so `fit$ofv`, `fit$aic` and `fit$bic` are NaN by design. Every
+# surface that would show those NaNs - print(), summary(), ferx_bic(),
+# ferx_runlog() - says why, in the same words, through these helpers.
+
+# ferx-core's `ElboTightness::IMPLAUSIBLE_RATIO` (src/estimation/vi/elbo.rs):
+# above it the engine warns `W_VI_BAD_BASIN` and reports `converged: false`.
+# Not reachable through ferx-core's public API, so mirrored here.
+.ferx_vi_tightness_limit <- 25
+
+# TRUE when `fit` is a VI fit whose OFV is missing because VI reports a bound.
+# A VI result with a finite OFV (vi_final_ofv = laplace, an eval-only Laplace
+# stage, or a later estimating stage that superseded VI) has an OFV to show.
+.ferx_vi_ofv_missing <- function(fit) {
+  if (is.null(fit$vi)) return(FALSE)
+  ofv <- suppressWarnings(as.numeric(fit$ofv %||% NA_real_))
+  length(ofv) != 1L || !is.finite(ofv)
+}
+
+# The explanation, one sentence on why and one on what to do instead.
+.ferx_vi_ofv_note <- function() {
+  paste0(
+    "OFV is NaN because VI estimates a bound (-2*ELBO) rather than an ",
+    "objective value, so the fit has no OFV, AIC or BIC. For a comparable ",
+    "OFV, set vi_final_ofv = \"laplace\", or chain method = c(\"vi\", ",
+    "\"laplace\") with agq_eval_only = TRUE."
+  )
+}
+
+# The VI block's lines, unindented and unstyled, shared by print.ferx_fit(),
+# print.ferx_summary() and ferx_runlog(). NULL for a fit without `fit$vi`.
+.ferx_vi_report_lines <- function(fit, width = 72L) {
+  v <- fit$vi
+  if (is.null(v)) return(NULL)
+  fmt <- function(x, spec = "%.4f") {
+    x <- suppressWarnings(as.numeric(x %||% NA_real_))
+    if (length(x) != 1L || is.na(x)) "NA" else sprintf(spec, x)
+  }
+  int <- function(x) fmt(x, "%.0f")
+  lines <- sprintf("-2*ELBO: %s  (a bound, not an OFV; data term %s, KL term %s)",
+                   fmt(v$neg_two_elbo), fmt(v$data_term), fmt(v$kl_term))
+  lines <- c(lines, sprintf(
+    "Converged: %s    Iterations: %s    Family: %s    MC samples: %s    KL: %s",
+    if (isTRUE(v$converged)) "YES" else "NO", int(v$n_iterations),
+    v$family %||% "NA", int(v$n_mc_samples), v$kl %||% "NA"
+  ))
+  ratio <- suppressWarnings(as.numeric(v$elbo_tightness_ratio %||% NA_real_))
+  if (length(ratio) == 1L && !is.na(ratio)) {
+    flag <- if (is.finite(ratio) && ratio > .ferx_vi_tightness_limit) {
+      sprintf("  [!] above %g: the bound is not usable here (bad basin)",
+              .ferx_vi_tightness_limit)
+    } else {
+      ""
+    }
+    lines <- c(lines, sprintf("ELBO tightness ratio: %s%s", fmt(ratio, "%.2f"), flag))
+  }
+  n_kl <- suppressWarnings(as.numeric(v$n_kl_fallback_subjects %||% 0))
+  if (length(n_kl) == 1L && !is.na(n_kl) && n_kl > 0) {
+    lines <- c(lines, sprintf("KL sampled (no closed form) for %s subject(s)", int(n_kl)))
+  }
+  n_fd <- suppressWarnings(as.numeric(v$n_fd_subjects %||% 0))
+  if (length(n_fd) == 1L && !is.na(n_fd) && n_fd > 0) {
+    lines <- c(lines, sprintf(
+      "Finite-difference eta gradients for %s subject(s) (slower, not wrong)", int(n_fd)))
+  }
+  # A later estimating stage re-estimated after VI: its EBEs are the fit's,
+  # and everything in `fit$vi` describes the point VI ended on. Otherwise -
+  # an eval-only readout included, which keeps the preceding stage's EBEs -
+  # the reported EBEs are VI's posterior means, not modes.
+  sup <- v$superseded_by
+  if (length(sup) == 1L && !is.na(sup) && nzchar(sup)) {
+    lines <- c(lines, strwrap(sprintf(
+      "Superseded by %s: these VI numbers describe the estimates VI ended on, not the reported ones.",
+      sup), width = width))
+  } else {
+    lines <- c(lines, "EBEs, sdtab ETAs and shrinkage are the VI posterior means, not modes.")
+  }
+  if (.ferx_vi_ofv_missing(fit)) {
+    lines <- c(lines, strwrap(.ferx_vi_ofv_note(), width = width))
+  }
+  lines
+}

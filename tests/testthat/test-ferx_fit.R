@@ -1535,11 +1535,17 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "ebe_convergence_warnings", "max_unconverged_subjects",
     "total_ebe_fallbacks", "model_structure", "profiled_blocks",
     "call_settings",
-    "model_file_settings", "sir_ess", "importance_sampling", "bayes",
+    "model_file_settings", "sir_ess", "importance_sampling", "bayes", "vi",
     "warnings",
     "uses_sde", "ode_linear_exact", "dw_statistic", "iwres_lag1_r",
     "saem_n_subjects_hmc", "mixture_overrides", "se_mixture_overrides"
   ), ignore.order = TRUE)
+})
+test_that("summary.ferx_fit passes through the VI result (#507)", {
+  expect_null(summary(make_fake_fit())$vi)
+  vi <- list(neg_two_elbo = 317.2, converged = TRUE, family = "full_rank",
+             elbo_tightness_ratio = 2.1, superseded_by = NA_character_)
+  expect_identical(summary(make_fake_fit(vi = vi))$vi, vi)
 })
 test_that("summary.ferx_fit passes through call_settings", {
   fit <- make_fake_fit(call_settings = list(optimizer = "slsqp", max_iter = 200L))

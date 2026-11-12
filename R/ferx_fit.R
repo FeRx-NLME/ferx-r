@@ -1067,7 +1067,10 @@
 #'     \code{imp_eval_only} stage it is the previous estimator's objective.
 #'     Compare NONMEM \code{METHOD=IMP} objectives with the
 #'     importance-sampling marginal,
-#'     \code{importance_sampling$minus2_log_likelihood}, not with \code{ofv}.}
+#'     \code{importance_sampling$minus2_log_likelihood}, not with \code{ofv}.
+#'     \code{NaN} after a \code{method = "vi"} fit under the default
+#'     \code{vi_final_ofv = "none"} (as are \code{aic} and \code{bic}): VI
+#'     reports a bound, \code{vi$neg_two_elbo}, not an objective value.}
 #'   \item{ofv_data}{The data half of \code{ofv} - the -2 log-likelihood the
 #'     AIC and BIC are computed from, and the value to compare against an
 #'     unpriored fit of the same model. Equal to \code{ofv} when no prior is
@@ -1809,10 +1812,19 @@
 #'     occasion-by-kappa matrices of the IOV posterior means (no rows without
 #'     IOV); \code{n_fd_subjects}; \code{elbo_tightness_ratio}; and
 #'     \code{superseded_by}, the later estimating stage that moved the
-#'     estimates after VI, or \code{NA}. Under VI, \code{ebe_etas} holds the
-#'     posterior means. \code{ferx_save_fit()} / \code{ferx_load_fit()} carry
-#'     it in the bundle's \code{vi} section, the layout ferx-core itself
-#'     uses.}
+#'     estimates after VI, or \code{NA}. \code{elbo_tightness_ratio} measures
+#'     how loose the bound is (1 is ideal, single digits are unremarkable);
+#'     above 25 the engine reports the fit unconverged in a bad basin.
+#'     Unless \code{superseded_by} is set, \code{ebe_etas}, the sdtab ETA
+#'     columns and \code{shrinkage_eta} are computed from the posterior means
+#'     \code{eta_means}, not from conditional modes (a trailing
+#'     \code{agq_eval_only} / \code{imp_eval_only} readout keeps them).
+#'     \code{print()} and \code{summary()} show a VI block with
+#'     \code{neg_two_elbo}, convergence, the family and the tightness ratio,
+#'     and say why \code{ofv} is \code{NaN}; \code{ferx_bic()} gives
+#'     \code{NA} for such a fit. \code{ferx_save_fit()} /
+#'     \code{ferx_load_fit()} carry it in the bundle's \code{vi} section, the
+#'     layout ferx-core itself uses.}
 #'   \item{omega_param_corr}{Parameter-level correlation matrix for block omega.
 #'     Uses the bivariate lognormal formula for lognormal pairs and falls back
 #'     to the eta-level formula for additive or unknown parameterisations.
@@ -3321,6 +3333,15 @@ print.ferx_fit <- function(x, ...) {
   prior_line <- .ferx_prior_ofv_line(x)
   if (!is.null(prior_line)) cat(prior_line, "\n", sep = "")
 
+  # VARIATIONAL INFERENCE block (#507): the bound VI reports, how the run went,
+  # and - when the OFV above is NaN - why, and how to get one.
+  vi_lines <- .ferx_vi_report_lines(x)
+  if (!is.null(vi_lines)) {
+    cat("\n", .ferx_style("VARIATIONAL INFERENCE", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
+    cat(paste0(" ", vi_lines, "\n"), sep = "")
+  }
+
   # DATA SELECTION block (only when [data_selection] rules were active).
   ex <- x$exclusions
   if (!is.null(ex)) {
@@ -3881,7 +3902,7 @@ print.ferx_fit <- function(x, ...) {
 #'   \code{covariance_status}, \code{eigenvalues}, \code{condition_number}
 #'   (see \code{\link{ferx_fit}} for definitions), \code{wall_time_secs},
 #'   \code{ferx_version}, \code{call_settings}, \code{model_file_settings},
-#'   \code{sir_ess}, \code{importance_sampling}, \code{warnings},
+#'   \code{sir_ess}, \code{importance_sampling}, \code{vi}, \code{warnings},
 #'   \code{ebe_convergence_warnings}, \code{max_unconverged_subjects},
 #'   \code{total_ebe_fallbacks}, \code{dw_statistic}, \code{iwres_lag1_r}.
 #' @examples
@@ -3952,6 +3973,8 @@ summary.ferx_fit <- function(object, ...) {
     sir_ess = x$sir_ess,
     importance_sampling = x$importance_sampling,
     bayes = x$bayes,
+    # The VI result (#507), for the VI block print.ferx_summary() shows.
+    vi = x$vi,
     warnings = x$warnings,
     uses_sde = isTRUE(x$uses_sde),
     ode_linear_exact = isTRUE(x$ode_linear_exact),
@@ -4050,6 +4073,11 @@ print.ferx_summary <- function(x, ...) {
   cat(sprintf("\nOFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
   prior_line <- .ferx_prior_ofv_line(x)
   if (!is.null(prior_line)) cat(prior_line, "\n", sep = "")
+  vi_lines <- .ferx_vi_report_lines(x)
+  if (!is.null(vi_lines)) {
+    cat("Variational inference:\n")
+    cat(paste0("  ", vi_lines, "\n"), sep = "")
+  }
   cat(sprintf(
     "Subjects: %d  Obs: %d  Params: %s  Iter: %d\n",
     x$n_subjects, x$n_obs,

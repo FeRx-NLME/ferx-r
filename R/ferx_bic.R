@@ -37,6 +37,11 @@
 #'   subject / record count under a convention that needs its logarithm.
 #'   (ferx-core's \code{bic()} reports \code{NaN} in exactly those cases.) A
 #'   fit with no free parameter returns its OFV under every convention.
+#'   A variational-inference fit with no OFV (\code{method = "vi"} under the
+#'   default \code{vi_final_ofv = "none"}, whose \code{fit$ofv} is \code{NaN})
+#'   gives \code{NA_real_} with a warning that points at
+#'   \code{vi_final_ofv = "laplace"} or a \code{c("vi", "laplace")} chain with
+#'   \code{agq_eval_only = TRUE}.
 #' @examples
 #' \dontrun{
 #' ex  <- ferx_example("warfarin")
@@ -54,6 +59,13 @@ ferx_bic <- function(fit, type = c("mixed", "fixed", "iiv", "random")) {
          call. = FALSE)
   }
   type <- match.arg(type)
+
+  # A VI fit under `vi_final_ofv = none` has no OFV to penalise (#507): say
+  # why, rather than passing its NaN on as a BIC.
+  if (.ferx_vi_ofv_missing(fit)) {
+    warning(.ferx_vi_ofv_note(), call. = FALSE)
+    return(NA_real_)
+  }
 
   inp <- .ferx_bic_inputs(fit)
   if (is.null(inp)) return(NA_real_)

@@ -23,7 +23,11 @@
 #'   single character string.
 #'
 #' @return A single character string containing the full log (invisibly when
-#'   \code{verbose = TRUE}).
+#'   \code{verbose = TRUE}). For a variational-inference fit the objective
+#'   section adds the VI result (\code{fit$vi}); when that fit has no OFV
+#'   (\code{vi_final_ofv = "none"}, the default) OFV, AIC and BIC read
+#'   \code{NA}, with a note pointing at \code{vi_final_ofv = "laplace"} or a
+#'   \code{c("vi", "laplace")} chain with \code{agq_eval_only = TRUE}.
 #'
 #' @details
 #' Sections that depend on fields introduced in engine version 0.1.6
@@ -351,10 +355,14 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
 
   # -- OFV / AIC / BIC -------------------------------------------------------
   lines <- c(lines, .sec("Objective function"))
+  # A VI fit with no OFV (#507) reports NA here, not the NaN it carries, and
+  # its VI block below says why.
+  vi_no_ofv <- .ferx_vi_ofv_missing(fit)
+  ofv_num <- function(v) if (vi_no_ofv) NA_real_ else v %||% NA_real_
   lines <- c(lines,
-    sprintf("  OFV   = %.6g", fit$ofv %||% NA_real_),
-    sprintf("  AIC   = %.6g", fit$aic %||% NA_real_),
-    sprintf("  BIC   = %.6g", fit$bic %||% NA_real_),
+    sprintf("  OFV   = %.6g", ofv_num(fit$ofv)),
+    sprintf("  AIC   = %.6g", ofv_num(fit$aic)),
+    sprintf("  BIC   = %.6g", ofv_num(fit$bic)),
     sprintf("  Convergence: %s", if (isTRUE(fit$converged)) "YES" else "NO"),
     # The engine's verdict (ferx-core #2799) and its reasons.
     local({
@@ -363,6 +371,10 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
               if (length(st$reasons) > 0L) sprintf(" (%s)", paste(st$reasons, collapse = ", ")) else "")
     })
   )
+  vi_lines <- .ferx_vi_report_lines(fit, width = 70L)
+  if (!is.null(vi_lines)) {
+    lines <- c(lines, .blank(), "  Variational inference:", paste0("    ", vi_lines))
+  }
   lines <- c(lines, .blank())
 
   # -- Iteration history (requires optimizer_trace = TRUE) -------------------
