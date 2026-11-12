@@ -10305,7 +10305,31 @@ fn ferx_rust_covariance(
 /// @param model_hash `fit$model_hash` for the fit's own file; "" for none.
 /// @param fired_ignore `fit$exclusions$fired_ignore`.
 /// @param fired_accept `fit$exclusions$fired_accept`.
+/// The labels alone over-refuse (ferx-r #530 gap 2): the reader credits a
+/// dropped row to the first clause that matches it (`ignore_subjects`, then
+/// `ignore`, then `accept`), so a call-time `ignore = "TIME > 200"` on a file
+/// stating `accept = TIME < 120` is named even though it removed nothing the
+/// file would not. So when the labels name something and the fit carries a
+/// population fingerprint, the data file is read the way the step will read it
+/// (the model file's reader settings) and verified against it: the same
+/// population, by the engine's own record-for-record check, means the step
+/// scores the fit's rows, and nothing is returned. A read that fails, a
+/// mismatch, or a fingerprint of another encoding (verified with a note: it
+/// cannot be compared) leaves the labels standing, so the refusal names the
+/// clause rather than the engine's `E_POPULATION_MISMATCH`.
+///
+/// @param entry_point The R entry point, opening every refusal.
+/// @param model_path The model file the step reads.
+/// @param model_hash `fit$model_hash` for the fit's own file; "" for none.
+/// @param fired_ignore `fit$exclusions$fired_ignore`.
+/// @param fired_accept `fit$exclusions$fired_accept`.
 /// @param call_iov_column `fit$call_settings$iov_column`; "" when not passed.
+/// @param data_path The data file the step reads; "" with no fingerprint.
+/// @param population_fingerprint `fit$population_fingerprint` when the step
+///   reads the fit's own model and data; "" otherwise, or when it records none.
+/// @param fit_bindings The fit's data-derived bindings
+///   (`.ferx_fit_binding_args(fit)$fit_bindings`), bound onto the re-read data
+///   before it is compared; an empty list with no fingerprint.
 /// @return Character vector of the settings the file does not state.
 /// @export
 #[extendr]
@@ -10316,9 +10340,12 @@ fn ferx_rust_unstated_selection(
     fired_ignore: Vec<String>,
     fired_accept: Vec<String>,
     call_iov_column: &str,
+    data_path: &str,
+    population_fingerprint: &str,
+    fit_bindings: List,
 ) -> Vec<String> {
     entry(move || {
-        let source = read_fit_model(entry_point, model_path, model_hash)?;
+        let mut source = read_fit_model(entry_point, model_path, model_hash)?;
         let opts = &source.parsed.fit_options;
         let labels = |prefix: &str, exprs: &[String]| -> Vec<String> {
             exprs
@@ -10342,8 +10369,50 @@ fn ferx_rust_unstated_selection(
         {
             unstated.push(format!("iov_column: {call_iov_column}"));
         }
+        if unstated.is_empty() || population_fingerprint.is_empty() || data_path.is_empty() {
+            return Ok(unstated);
+        }
+        let fp: ferx_core::PopulationFingerprint = serde_json::from_str(population_fingerprint)
+            .map_err(|e| format!("{entry_point}: `fit$population_fingerprint`: {e}"))?;
+        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        if same_population_as_file_reads(&mut source, data_path, &fitted, &fp) {
+            return Ok(Vec::new());
+        }
         Ok(unstated)
     })
+}
+
+/// Whether `data_path`, read with the model file's own reader settings, is the
+/// population `fp` records: the read a post-hoc step makes of a fit that records
+/// no reader settings (ferx-r #530). `false` for a read that fails, a population
+/// that differs, and a fingerprint of another encoding, which `verify` passes with
+/// a note because it cannot compare it.
+///
+/// The population is bound with the fit's own data-derived bindings first, as
+/// `run_covariance` / `run_sir` / `ferx_calc_npde()` bind theirs before they
+/// verify: a level-block (`theta NAME[...]`) fit's fingerprint holds the level
+/// index columns binding writes, which a raw read lacks, so an unbound read never
+/// matches (`E_THETA_LEVELS_DATA_UNBOUND`, #530 review 1). A binding the fit's
+/// bindings cannot make reads as `false`, and the caller refuses on the labels.
+fn same_population_as_file_reads(
+    source: &mut ferx_core::ModelSource,
+    data_path: &str,
+    fitted: &DataBindings,
+    fp: &ferx_core::PopulationFingerprint,
+) -> bool {
+    let settings = ferx_core::api::ReaderSettings::from_parsed(&source.parsed);
+    let mut population =
+        match ferx_core::api::read_population_with(&source.parsed.model, &settings, data_path) {
+            Ok((population, _)) => population,
+            Err(_) => return false,
+        };
+    if refuse_unbound_levels(&source.parsed, fitted).is_err()
+        || ferx_core::api::bind_from_fit(&mut source.parsed, &source.text, &mut population, fitted)
+            .is_err()
+    {
+        return false;
+    }
+    matches!(fp.verify(&source.parsed.model, &population), Ok(notes) if notes.is_empty())
 }
 
 /// A JSON-carried fit field (`fit$reader_settings`, `fit$population_fingerprint`)

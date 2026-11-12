@@ -974,7 +974,7 @@ test_that("the guard labels the model file's clauses through the engine's parse 
   writeLines(lines, model)
   unstated <- ferx:::ferx_rust_unstated_selection(
     "probe", model, "", c("ignore: DV < 1.0", "ignore: TIME > 100", "ignore_subjects: 4"),
-    "accept: TIME < 120", ""
+    "accept: TIME < 120", "", "", "", list()
   )
   # Only the clauses the file does not state, the file's own dropped.
   expect_identical(unstated,
@@ -984,7 +984,8 @@ test_that("the guard labels the model file's clauses through the engine's parse 
 test_that("the guard compares a call-time iov_column with the file's, case-insensitively (#526)", {
   ex <- ferx_example("warfarin_iov")
   unstated <- function(col) {
-    ferx:::ferx_rust_unstated_selection("probe", ex$model, "", character(), character(), col)
+    ferx:::ferx_rust_unstated_selection("probe", ex$model, "", character(), character(), col,
+                                       "", "", list())
   }
   # The file says `iov_column = OCC`.
   expect_identical(unstated("VISIT"), "iov_column: VISIT")
