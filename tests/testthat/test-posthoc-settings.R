@@ -655,6 +655,7 @@ test_that("S18: a regularized [covariate_nn] fit records its NN penalty strength
   expect_identical(args$scoring_settings$nn_l2_lambda, 0.1)
   expect_identical(args$sir_settings$scoring$nn_l2_lambda, 0.1)
   bare <- fit
+  bare <- unsealed_fit(bare)
   bare$scoring_settings <- NULL
   args <- ferx:::.ferx_fit_record_args(bare, scoring = list(mu_referencing = TRUE),
                                        sir = list(samples = 300L))

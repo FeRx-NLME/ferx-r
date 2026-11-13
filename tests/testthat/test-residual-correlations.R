@@ -151,6 +151,7 @@ test_that("reconstruction paths run against a free block_sigma fit", {
 
 # The fit as an older ferx (or a caller's list surgery) leaves it.
 without_rho <- function(fit) {
+  fit <- unsealed_fit(fit)
   fit$residual_correlations <- NULL
   fit
 }
@@ -219,6 +220,7 @@ test_that("a zero-row residual_correlations frame is refused like NULL", {
   skip_on_cran()
   case <- rho_case()
   fit <- case$fit
+  fit <- unsealed_fit(fit)
   fit$residual_correlations <- fit$residual_correlations[0, ]
 
   expect_error(ferx_predict(case$model, case$data, fit = fit),
@@ -240,6 +242,7 @@ test_that("an intact free fit is rebuilt at its fitted rho", {
   # simulate reads rho through the residual draw, so moving it to the
   # declared value has to change DV_SIM.
   at_declared <- fit
+  at_declared <- unsealed_fit(at_declared)
   at_declared$residual_correlations$rho <- declared_rho
   sim_fit <- ferx_simulate(case$model, case$data, n_sim = 2L, seed = 1L,
                            fit = fit)
@@ -408,6 +411,7 @@ test_that("a non-finite or out-of-range fitted rho is refused", {
   label <- case$fit$residual_correlations$name
 
   na_fit <- case$fit
+  na_fit <- unsealed_fit(na_fit)
   na_fit$residual_correlations$rho <- NA_real_
   msg <- refusal(ferx_predict(case$model, case$data, fit = na_fit),
                  "^Fit error: the block_sigma correlation ")
@@ -420,6 +424,7 @@ test_that("a non-finite or out-of-range fitted rho is refused", {
   expect_no_match(msg, "0.3.x", fixed = TRUE)
 
   one_fit <- case$fit
+  one_fit <- unsealed_fit(one_fit)
   one_fit$residual_correlations$rho <- 1
   msg <- refusal(
     ferx_simulate(case$model, case$data, n_sim = 1L, seed = 1L,
@@ -536,7 +541,7 @@ rho2_fix_case <- rho2_fixture(fix_b = TRUE)
 # The free two-block fit with its two rhos set apart, so a swap shows.
 rho2_spread <- function() {
   case <- rho2_case()
-  fit <- case$fit
+  fit <- unsealed_fit(case$fit)
   rc <- fit$residual_correlations
   expect_identical(nrow(rc), 2L)
   rc$rho[rc$name == "ADD_A ~ PROP_A"] <- 0.5

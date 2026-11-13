@@ -230,6 +230,7 @@ test_that("a FIX block_sigma is left as declared (#678)", {
 test_that("comments on a declaration spread over lines are kept (#678)", {
   fit <- update_model_fit()
   copy <- fit
+  copy <- unsealed_fit(copy)
   copy$model_text <- NULL
   copy$model_path <- write_test_model(list(
     parameters = c(
@@ -292,6 +293,7 @@ test_that("a free block_sigma the fit has no correlation for warns (#678)", {
   case <- block_sigma_case(decl)
   on.exit(unlink(dirname(case$model), recursive = TRUE), add = TRUE)
   fit <- case$fit
+  fit <- unsealed_fit(fit)
   fit$residual_correlations <- NULL  # as on a fit from an older bundle
   expect_warning(text <- ferx_update_model(fit),
                  "no fitted value in the fit for the ADD_ERR ~ PROP_ERR correlation")
@@ -426,6 +428,7 @@ test_that("a [mixture] fit's per-class overrides take their fitted values (#678)
 test_that("a [mixture] fit without recorded overrides warns and leaves them (#678)", {
   fit <- mixture_update_fit()
   on.exit(unlink(fit$model_path), add = TRUE)
+  fit <- unsealed_fit(fit)
   fit$mixture_overrides <- NULL
   expect_warning(text <- ferx_update_model(fit), "left as written")
   expect_true("  omega(2) ETA_CL ~ 0.10   # class-2 IIV" %in%

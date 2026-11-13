@@ -147,6 +147,7 @@ pp_twins <- function(rule, env = parent.frame()) {
   model <- pp_iov_model(NULL, env)
   fit <- pp_fit(model, data, settings = list(iov_occasion = rule))
   expect_identical(fit$iov_occasion, rule)
+  fit <- unsealed_fit(fit)
   for (k in c("theta", "omega", "sigma", "omega_iov", "cov_matrix")) fit[[k]] <- col[[k]]
   list(col = col, fit = fit, model = model, data = data)
 }
@@ -266,6 +267,7 @@ test_that("P13: from-fit ferx_predict_survival() reads fit$iov_occasion (#523 re
   fit <- suppressWarnings(ferx_fit(model, data, method = "focei", verbose = FALSE))
   expect_identical(fit$iov_occasion, "column")
   expect_no_error(ferx_predict_survival(model, data, times = c(0, 6), fit = fit))
+  fit <- unsealed_fit(fit)
   fit$iov_occasion <- "weekly"
   expect_error(ferx_predict_survival(model, data, times = c(0, 6), fit = fit),
                "ferx_predict_survival: `fit$iov_occasion`", fixed = TRUE)

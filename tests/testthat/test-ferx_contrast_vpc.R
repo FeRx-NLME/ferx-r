@@ -123,6 +123,7 @@ test_that("(b) study-level random effects cancel: a 100x study omega widens the 
   ex <- ferx_example("mbma_placebo")
   fit <- mbma_fit()
   big <- fit
+  big <- unsealed_fit(big)
   big$omega <- fit$omega * 100   # ETA_E0 SD x 10
   n_sim <- 500L
 

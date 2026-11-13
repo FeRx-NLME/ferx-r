@@ -326,7 +326,7 @@ test_that("a step does not lose what the bundle cannot rebuild (#712)", {
 
 test_that("a fit with no bytes is refused everywhere, saying to refit, with no fallback (#712)", {
   skip_on_cran()
-  fit <- fitrx_parity_cases$plain()
+  fit <- unsealed_fit(fitrx_parity_cases$plain())
   fit$bundle <- NULL
   # The way such a fit arrives: an old `.rds`.
   rds <- withr::local_tempfile(fileext = ".rds")
@@ -345,12 +345,18 @@ test_that("a fit with no bytes is refused everywhere, saying to refit, with no f
   expect_false(file.exists(out))
 })
 
-test_that("a hand edit of the list is not saved: the bytes are the fit (#712)", {
+test_that("a hand edit of the list is refused, not saved: the bytes are the fit (#712, #713)", {
   skip_on_cran()
   fit <- fitrx_parity_cases$plain()
   edited <- fit
+  expect_error(edited$theta[[1L]] <- 99, class = "ferx_fit_read_only_error")
+  edited <- unclass(fit)
   edited$theta[[1L]] <- 99
-  expect_identical(fitrx_round_trip(edited)$theta, fit$theta)
+  class(edited) <- "ferx_fit"
+  out <- withr::local_tempfile(fileext = ".fitrx")
+  expect_error(ferx_save_fit(edited, out), class = "ferx_fit_edited_error")
+  expect_false(file.exists(out))
+  expect_identical(fitrx_round_trip(fit)$theta, fit$theta)
 })
 
 test_that("a hand edit of the list reaches no step: each reads the bytes (#712)", {
@@ -360,7 +366,7 @@ test_that("a hand edit of the list reaches no step: each reads the bytes (#712)"
   # SIR: an edited record is not run; an explicit argument still is.
   sir_args <- list(sir_samples = 50L, sir_resamples = 20L, sir_seed = 1L)
   clean <- suppressWarnings(do.call(ferx_sir, c(list(fit), sir_args)))
-  edited <- clean
+  edited <- unsealed_fit(clean)
   edited$sir_settings$df <- 1
   edited$sir_settings$samples <- 60L
   again <- suppressWarnings(ferx_sir(edited))
@@ -369,12 +375,12 @@ test_that("a hand edit of the list reaches no step: each reads the bytes (#712)"
 
   # Covariance: the call's step settings and the scoring record are the bytes'.
   cov <- suppressWarnings(ferx_covariance(fit))
-  edited <- fit
+  edited <- unsealed_fit(fit)
   edited$call_settings$covariance_method <- "s"
   out <- suppressWarnings(ferx_covariance(edited))
   expect_identical(out$covariance_method, cov$covariance_method)
   expect_identical(out$cov_matrix, cov$cov_matrix)
-  edited <- fit
+  edited <- unsealed_fit(fit)
   edited$scoring_settings$inner_maxiter <- 1L
   expect_identical(
     suppressWarnings(ferx_covariance(edited, mu_referencing = TRUE))$cov_matrix,
@@ -383,7 +389,7 @@ test_that("a hand edit of the list reaches no step: each reads the bytes (#712)"
 
   # NPDE: computed at the fit's estimates, on the fit's table.
   clean <- fitrx_steps$npde(fit)
-  edited <- fit
+  edited <- unsealed_fit(fit)
   edited$theta[[1L]] <- edited$theta[[1L]] * 3
   edited$sdtab$PRED <- 0
   out <- fitrx_steps$npde(edited)
@@ -392,19 +398,23 @@ test_that("a hand edit of the list reaches no step: each reads the bytes (#712)"
   expect_bytes_agree(out, "npde on an edited list")
 })
 
-test_that("write_model renders the bytes, not an edited list (#712)", {
+test_that("write_model renders the bytes; an edited list writes nothing (#712, #713)", {
   skip_on_cran()
   fit <- fitrx_parity_cases$plain()
   dir <- withr::local_tempdir()
   ferx_save_fit(fit, file.path(dir, "clean.fitrx"), write_model = TRUE)
-  edited <- fit
+  expect_true(file.exists(file.path(dir, "clean_final.ferx")))
+  edited <- unsealed_fit(fit)
   edited$theta[[1L]] <- 99
   edited$omega[1L, 1L] <- 9
   edited$sigma[[1L]] <- 9
   edited$model_text <- "not the model"
-  ferx_save_fit(edited, file.path(dir, "edited.fitrx"), write_model = TRUE)
-  expect_identical(readLines(file.path(dir, "edited_final.ferx")),
-                   readLines(file.path(dir, "clean_final.ferx")))
+  expect_error(
+    ferx_save_fit(edited, file.path(dir, "edited.fitrx"), write_model = TRUE),
+    class = "ferx_fit_edited_error"
+  )
+  expect_false(file.exists(file.path(dir, "edited_final.ferx")))
+  expect_false(file.exists(file.path(dir, "edited.fitrx")))
 })
 
 test_that("a save whose model file cannot be written leaves the bundle (#712)", {

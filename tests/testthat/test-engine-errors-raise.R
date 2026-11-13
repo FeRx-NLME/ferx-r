@@ -141,6 +141,7 @@ test_that("the fit = forms raise a fit that cannot drive the model's kappa", {
   ex  <- ferx_example("warfarin_iov")
   fit <- ferx_fit(ex$model, ex$data, covariance = FALSE, verbose = FALSE,
                   settings = list(maxiter = 3L))
+  fit <- unsealed_fit(fit)
   fit$omega_iov <- NULL
 
   calls <- list(
@@ -162,6 +163,7 @@ test_that("the fit = forms raise a fit that cannot drive the model's kappa", {
 test_that("a fit that does not fit the model is not labelled with the data's diagnostic", {
   ex    <- ferx_example("warfarin")
   short <- warfarin_fit_cov()
+  short <- unsealed_fit(short)
   short$theta <- short$theta[-1L]
   data  <- infusion_into_cmt0_data()
 

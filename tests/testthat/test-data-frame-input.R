@@ -489,6 +489,7 @@ test_that("simulate and predict with `fit =` and no `data` use the fit's own dat
 
   # A fit whose data can no longer be found falls back to the [data] block.
   lost <- fit
+  lost <- unsealed_fit(lost)
   lost$data_source <- NULL
   lost$data_path <- file.path(tempdir(), "no-such-data.csv")
   expect_setequal(unique(ferx_simulate(model, n_sim = 1L, seed = 1L, fit = lost)$ID),
