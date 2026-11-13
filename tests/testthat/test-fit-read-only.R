@@ -138,6 +138,74 @@ test_that("an unserializable user addition warns and is left out", {
   back <- ferx_load_fit(out)
   expect_false("env" %in% names(back))
   expect_identical(back$ok, 1)
+
+  # Functions, S4 objects, and classes or attributes outside the allowlist are
+  # not plain data either.
+  for (value in list(function(x) x, methods::getClass("numeric"),
+                     structure(1, class = "my_class"), structure(1, note = "x"),
+                     as.POSIXlt("2026-01-01", tz = "UTC"), 1i, as.raw(1))) {
+    other <- warfarin_fit()
+    other$bad <- value
+    expect_warning(ferx_save_fit(other, tempfile(fileext = ".fitrx")),
+                   class = "ferx_fit_user_field_dropped_warning")
+  }
+})
+
+test_that("the allowlisted kinds of plain data round-trip exactly", {
+  fit <- warfarin_fit()
+  kinds <- list(
+    dbl = c(a = 1.5, b = NaN, c = Inf, d = -Inf, e = NA, f = 1 / 3),
+    int = c(1L, NA, .Machine$integer.max), lgl = c(TRUE, NA), chr = c("x", NA),
+    empty = character(), nested = list(a = list(b = NULL, c = "q")),
+    df = data.frame(x = c(0.1, 2), f = factor(c("u", "v")), s = c("a", "b")),
+    ord = ordered(c("lo", "hi"), levels = c("lo", "hi")),
+    mat = matrix(c(0.1, 2, 3, 4), 2, dimnames = list(c("r1", "r2"), c("a", "b"))),
+    date = as.Date("2026-11-12"),
+    time = as.POSIXct("2026-11-12 10:11:12.5", tz = "UTC"),
+    dt = as.difftime(5, units = "mins"), tab = table(c(1, 1, 2))
+  )
+  for (k in names(kinds)) fit[[k]] <- kinds[[k]]
+  out <- tempfile(fileext = ".fitrx")
+  expect_no_warning(ferx_save_fit(fit, out))
+  back <- ferx_load_fit(out)
+  for (k in names(kinds)) expect_identical(back[[k]], kinds[[k]], info = k)
+})
+
+test_that("a crafted bundle's user objects are decoded as data, never deserialized", {
+  fit <- warfarin_fit()
+  # A jsonlite::serializeJSON() payload (which unserializeJSON() would hand to
+  # base unserialize() or a namespace) is not a node of the encoding, and nor
+  # are a node of a type, class or attribute outside the allowlist.
+  payload <- as.character(jsonlite::serializeJSON(quote(stop("ran"))))
+  # The helper rebuilds the fit through the same decoder, which warns there too.
+  crafted <- suppressWarnings(fitrx_edit_extras(fit, function(r) {
+    r$user <- list(
+      serialized = payload,
+      closure = list(type = "closure", values = list()),
+      s4 = list(type = "S4", values = list()),
+      classed = list(type = "double", values = list(1),
+                     attributes = list(class = list(type = "character",
+                                                    values = list("evil")))),
+      attr = list(type = "double", values = list(1),
+                  attributes = list(srcref = list(type = "integer",
+                                                  values = list(1L)))),
+      fine = list(type = "character", values = list("kept"))
+    )
+    r
+  }))
+  path <- tempfile(fileext = ".fitrx")
+  writeBin(crafted$bundle, path)
+  w <- NULL
+  loaded <- withCallingHandlers(
+    ferx_load_fit(path),
+    ferx_fit_user_field_dropped_warning = function(cnd) {
+      w <<- cnd
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_setequal(w$fields, c("serialized", "closure", "s4", "classed", "attr"))
+  expect_identical(loaded$fine, "kept")
+  expect_identical(ferx:::.ferx_fit_user_fields(loaded), "fine")
 })
 
 test_that("internal code building a fit is not tripped by the guards", {

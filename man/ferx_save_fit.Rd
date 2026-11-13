@@ -62,9 +62,11 @@ an edit and a new class) is refused with an error of class
 a fit with no record of its fields, such as one built by hand. Objects added
 to a fit under a new name (\code{fit$notes <- "..."}) are saved in the
 bundle's \code{interface_extras.json} and restored by
-\code{\link{ferx_load_fit}}; one that does not survive a round trip through
-JSON (an environment, for one) is left out with a warning of class
-\code{ferx_fit_user_field_dropped_warning}. A fit with no
+\code{\link{ferx_load_fit}}, when they are plain data: base vectors and
+lists, data frames, factors, matrices, tables, dates and times. Anything else
+(an environment, a function, an S4 object, another class) is left out with a
+warning of class \code{ferx_fit_user_field_dropped_warning}. Loading decodes
+them as data, and never deserializes R code from a bundle. A fit with no
 bundle, such as one from an \code{.rds} written by an older ferx, is refused
 with an error of class \code{ferx_no_bundle_error}: refit it.
 

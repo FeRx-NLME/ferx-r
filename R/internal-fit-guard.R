@@ -14,7 +14,8 @@
 #    `ferx_fit_edited_error`.
 #
 # User additions are saved in the bundle's `interface_extras.json`, under
-# `r$user`, one jsonlite::serializeJSON() text per name, and come back on load.
+# `r$user`, one node of this file's own JSON encoding per name (see
+# `.ferx_user_encode()`), and come back on load.
 #
 # Internal code that builds or rebuilds a fit works on the unclassed list and
 # seals it at the end; nothing in the package assigns into a sealed fit.
@@ -176,9 +177,142 @@
 
 # ----- user additions in the bundle --------------------------------------------
 
-# The user's additions to `fit` as `name -> serializeJSON text`. One that does not
-# come back from JSON as it went in (an environment, an external pointer, a
-# closure over local state, ...) is left out with a
+# ----- the user-addition encoding ----------------------------------------------
+#
+# A bundle is untrusted input, so what `ferx_load_fit()` decodes from it must be
+# data and nothing else: no `unserialize()`, no namespace loaded, no S4 object
+# made, no method dispatched. jsonlite::unserializeJSON() does all of those, so
+# user additions use this encoding instead, which only base vector types,
+# allowlisted attributes and allowlisted classes get into, and which is decoded
+# with primitives alone (`vapply()`, `lapply()`, `attr<-`).
+#
+# A node is `{"type": t, "values": [...], "attributes": {name: node, ...}}`:
+# `t` is one of "NULL", "logical", "integer", "double", "character", "list";
+# `values` holds the elements, NA as null, and for "double" the strings "NaN",
+# "Inf" and "-Inf"; "list" values are nodes. `attributes` is left out when there
+# are none.
+
+.FERX_USER_TYPES <- c("NULL", "logical", "integer", "double", "character", "list")
+.FERX_USER_ATTRS <- c("names", "dim", "dimnames", "levels", "row.names", "tzone",
+                      "units", "class")
+.FERX_USER_CLASSES <- c("data.frame", "factor", "ordered", "Date", "POSIXct",
+                        "POSIXt", "difftime", "table", "noquote")
+.FERX_USER_MAX_DEPTH <- 64L
+
+.ferx_user_bad <- function(what) stop(what, call. = FALSE)
+
+# `x` as a node (an R list for jsonlite::toJSON(auto_unbox = TRUE)); an error for
+# anything outside the encoding.
+.ferx_user_encode <- function(x, depth = 0L) {
+  if (depth > .FERX_USER_MAX_DEPTH) .ferx_user_bad("nested too deeply")
+  if (isS4(x)) .ferx_user_bad("an S4 object")
+  type <- typeof(x)
+  if (!type %in% .FERX_USER_TYPES) .ferx_user_bad(paste("a value of type", type))
+  if (type == "NULL") return(list(type = "NULL"))
+  a <- attributes(x)
+  bare <- x
+  attributes(bare) <- NULL
+  values <- switch(type,
+    double = lapply(bare, function(v) {
+      if (is.nan(v)) "NaN" else if (is.na(v)) NULL else if (v == Inf) "Inf" else
+        if (v == -Inf) "-Inf" else v
+    }),
+    list = lapply(bare, .ferx_user_encode, depth = depth + 1L),
+    as.list(bare)
+  )
+  node <- list(type = type, values = values)
+  if (length(a)) {
+    extra <- setdiff(names(a), .FERX_USER_ATTRS)
+    if (length(extra)) .ferx_user_bad(paste("attribute", extra[[1L]]))
+    cls <- setdiff(a$class, .FERX_USER_CLASSES)
+    if (length(cls)) .ferx_user_bad(paste("class", cls[[1L]]))
+    node$attributes <- lapply(a, .ferx_user_encode, depth = depth + 1L)
+  }
+  node
+}
+
+# The value a node (as jsonlite::parse_json(simplifyVector = FALSE) reads it)
+# stands for; an error for anything that is not a node of the encoding.
+.ferx_user_decode <- function(node, depth = 0L) {
+  if (depth > .FERX_USER_MAX_DEPTH) .ferx_user_bad("nested too deeply")
+  if (!is.list(node) || is.null(names(node)) ||
+      !all(names(node) %in% c("type", "values", "attributes"))) {
+    .ferx_user_bad("not a node")
+  }
+  type <- node$type
+  if (!is.character(type) || length(type) != 1L || !type %in% .FERX_USER_TYPES) {
+    .ferx_user_bad("an unknown type")
+  }
+  if (type == "NULL") {
+    if (length(node$values) || length(node$attributes)) .ferx_user_bad("NULL")
+    return(NULL)
+  }
+  vals <- node$values %||% list()
+  if (!is.list(vals) || !is.null(names(vals))) .ferx_user_bad("values")
+  scalar <- function(v, ok) is.null(v) || (length(v) == 1L && ok(v))
+  check <- function(ok) {
+    if (!all(vapply(vals, scalar, NA, ok = ok))) .ferx_user_bad(type)
+  }
+  x <- switch(type,
+    logical = {
+      check(is.logical)
+      vapply(vals, function(v) if (is.null(v)) NA else v, NA)
+    },
+    integer = {
+      check(function(v) is.numeric(v) && is.finite(v) && v == trunc(v) &&
+              abs(v) <= .Machine$integer.max)
+      vapply(vals, function(v) if (is.null(v)) NA_integer_ else as.integer(v),
+             NA_integer_)
+    },
+    double = {
+      check(function(v) is.numeric(v) ||
+              (is.character(v) && v %in% c("NaN", "Inf", "-Inf")))
+      vapply(vals, function(v) {
+        if (is.null(v)) NA_real_ else if (is.character(v))
+          c("NaN" = NaN, "Inf" = Inf, "-Inf" = -Inf)[[v]] else as.numeric(v)
+      }, NA_real_)
+    },
+    character = {
+      check(is.character)
+      vapply(vals, function(v) if (is.null(v)) NA_character_ else v, "")
+    },
+    list = lapply(vals, .ferx_user_decode, depth = depth + 1L)
+  )
+  attrs <- node$attributes
+  if (length(attrs)) {
+    if (!is.list(attrs) || is.null(names(attrs)) ||
+        !all(names(attrs) %in% .FERX_USER_ATTRS) || anyDuplicated(names(attrs))) {
+      .ferx_user_bad("attributes")
+    }
+    attrs <- lapply(attrs, .ferx_user_decode, depth = depth + 1L)
+    cls <- attrs$class
+    if (!is.null(cls) && (!is.character(cls) || !all(cls %in% .FERX_USER_CLASSES))) {
+      .ferx_user_bad("class")
+    }
+    # dim before dimnames, class last: `attr<-` is a primitive and dispatches
+    # nothing, so setting a class here runs no code.
+    order <- c(intersect(c("dim", "dimnames"), names(attrs)),
+               setdiff(names(attrs), c("dim", "dimnames", "class")),
+               intersect("class", names(attrs)))
+    for (nm in order) attr(x, nm) <- attrs[[nm]]
+  }
+  x
+}
+
+# A value's node, when it comes back through JSON as it went in; NULL otherwise.
+.ferx_user_node <- function(value) {
+  tryCatch({
+    node <- .ferx_user_encode(value)
+    json <- jsonlite::toJSON(node, auto_unbox = TRUE, digits = I(17),
+                             null = "null", na = "null")
+    back <- .ferx_user_decode(jsonlite::parse_json(json, simplifyVector = FALSE))
+    if (identical(back, value)) node else NULL
+  }, error = function(e) NULL)
+}
+
+# The user's additions to `fit` as `name -> node`. One the encoding cannot carry
+# exactly (an environment, a function, an S4 object, a class or attribute
+# outside the allowlist, ...) is left out with a
 # `ferx_fit_user_field_dropped_warning`.
 .ferx_fit_user_json <- function(fit, who) {
   user <- .ferx_fit_user_fields(fit)
@@ -186,18 +320,15 @@
   dropped <- character()
   x <- unclass(fit)
   for (k in user) {
-    value <- x[[k]]
-    text <- tryCatch({
-      s <- jsonlite::serializeJSON(value, digits = I(17))
-      if (identical(jsonlite::unserializeJSON(s), value)) as.character(s) else NULL
-    }, error = function(e) NULL)
-    if (is.null(text)) dropped <- c(dropped, k) else out[[k]] <- text
+    node <- .ferx_user_node(x[[k]])
+    if (is.null(node)) dropped <- c(dropped, k) else out[[k]] <- node
   }
   if (length(dropped)) {
     warning(warningCondition(paste0(
       who, ": ", paste0("fit$", dropped, collapse = ", "),
-      if (length(dropped) == 1L) " does" else " do",
-      " not survive a round trip through JSON, so ",
+      if (length(dropped) == 1L) " is" else " are",
+      " not plain data that survives a round trip through JSON (base vectors, ",
+      "lists, data frames, factors, dates and times), so ",
       if (length(dropped) == 1L) "it is" else "they are",
       " not saved with the fit. Other objects you added are saved."),
       class = "ferx_fit_user_field_dropped_warning", fields = dropped,
@@ -206,7 +337,7 @@
   out
 }
 
-# `bundle` with its `interface_extras.json` holding `user` (from
+# `bundle` with its `interface_extras.json` holding `user` (the nodes from
 # `.ferx_fit_user_json()`) under `r$user`, in place of whatever the bundle held
 # there. The rest of the file is kept, other interfaces' keys included; a bundle
 # with no user additions either way is returned as it is.
@@ -224,16 +355,27 @@
 }
 
 # The user additions a bundle's interface extras (`.fitrx_read_interface_extras()`)
-# hold, as a named list of values. One that no longer parses is left out with a
-# `ferx_fit_user_field_dropped_warning`.
+# hold, as a named list of values, decoded by `.ferx_user_decode()`, never by a
+# deserializer that could run code. One that is not a valid node is left out
+# with a `ferx_fit_user_field_dropped_warning`.
 .ferx_fit_user_values <- function(extras) {
   user <- extras$user
   if (!length(user)) return(list())
   out <- list()
   dropped <- character()
-  for (k in names(user)) {
-    value <- tryCatch(list(jsonlite::unserializeJSON(user[[k]])),
-                      error = function(e) NULL)
+  keys <- names(user)
+  if (!is.list(user) || is.null(keys)) {
+    warning(warningCondition(
+      "ferx_load_fit: the bundle's saved user objects are malformed, so none is loaded.",
+      class = "ferx_fit_user_field_dropped_warning", fields = character(),
+      call = NULL))
+    return(list())
+  }
+  for (i in seq_along(user)) {
+    k <- keys[[i]]
+    value <- if (nzchar(k) && !k %in% names(out)) {
+      tryCatch(list(.ferx_user_decode(user[[i]])), error = function(e) NULL)
+    }
     if (is.null(value)) dropped <- c(dropped, k) else out[k] <- value
   }
   if (length(dropped)) {
