@@ -1,5 +1,15 @@
 # ferx 0.4.0.9000 (development version)
 
+## Performance
+
+- **Fits run faster on the mimalloc allocator.** The package's Rust code now uses
+  mimalloc instead of the system allocator. An estimation allocates many small,
+  short-lived buffers per subject per evaluation. Measured with `ferx_fit(threads = 1)`
+  on the bundled examples, fits are 1.06–1.13× faster (`warfarin_ode` 1.13×,
+  `two_cpt_oral_cov` 1.10×, `warfarin_iov` 1.07×, `mm_oral` 1.06×), with identical
+  results; fits under 0.1 s are within timing noise. The `ferx` command-line tool has
+  used it since ferx-core #2435 (FeRx-NLME/ferx-core#2549).
+
 # ferx 0.4.0
 
 ## Breaking changes
