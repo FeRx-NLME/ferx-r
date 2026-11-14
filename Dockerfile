@@ -20,7 +20,7 @@
 # Final image based on rocker/tidyverse.
 # ===========================================================================
 # Pinned to a specific R release tag for reproducible builds (avoid :latest drift).
-FROM rocker/tidyverse:4.6.0
+FROM rocker/tidyverse:4.6.1
 
 # ---------------------------------------------------------------------------
 # 1. System build + runtime deps.
