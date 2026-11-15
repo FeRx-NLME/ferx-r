@@ -120,20 +120,42 @@ plot.ferx_vpc_rtte <- function(x, y = NULL, which = c("mcf", "absolute", "gap"),
   invisible(x)
 }
 
+# The band's grid intervals for a left-continuous curve (KMMC, core's
+# `KmmcCurve::at`): the value at grid time `t[k]` holds over
+# `(t[k-1], t[k]]`, so each row's interval ends at its own time and starts at
+# the previous grid time (`bin_min`). Rows past the horizon and undefined (NA)
+# rows are dropped; the row at the horizon itself is kept.
+.ferx_vpc_kmmc_bins <- function(b, horizon) {
+  b <- b[order(b$time), , drop = FALSE]
+  b$bin_min <- c(b$time[1L], utils::head(b$time, -1L))
+  b[b$time <= horizon & !is.na(b$lo) & !is.na(b$med) & !is.na(b$hi), ,
+    drop = FALSE]
+}
+
 # One VPC panel with base graphics: the band (`time`, `lo`, `med`, `hi`) as an
-# opaque step ribbon over [0, horizon), its middle line dashed, and the
-# observed step curve from (0, `start`): `step = "s"` for a right-continuous
-# curve (Kaplan-Meier, MCF), `"S"` for a left-continuous one (KMMC). The y
-# range covers both.
+# opaque step ribbon, its middle line dashed, and the observed step curve from
+# (0, `start`). `step = "s"` for a right-continuous curve (Kaplan-Meier, MCF),
+# whose band at `t[k]` holds over `[t[k], t[k+1])`; `"S"` for a left-continuous
+# one (KMMC), whose band at `t[k]` holds over `(t[k-1], t[k]]` (#754 review,
+# finding 2). The y range covers both.
 .ferx_vpc_step_panel <- function(band, obs_time, obs_y, horizon, start, ylab,
                                  main, step = "s", ...) {
-  b <- .ferx_vpc_tte_bins(band, horizon)
+  b <- if (step == "S") {
+    .ferx_vpc_kmmc_bins(band, horizon)
+  } else {
+    .ferx_vpc_tte_bins(band, horizon)
+  }
   ys <- c(start, obs_y, b$lo, b$hi)
   ys <- ys[is.finite(ys)]
   ylim <- if (length(ys)) range(ys) else c(0, 1)
   graphics::plot(c(0, horizon), ylim, type = "n", xlab = "Time", ylab = ylab,
                  main = main, ...)
-  if (nrow(b)) {
+  if (nrow(b) && step == "S") {
+    graphics::rect(b$bin_min, b$lo, b$time, b$hi,
+                   col = "#C8D9EA", border = "#C8D9EA")
+    graphics::lines(b$time, b$med, type = "S", lty = 2, col = "steelblue",
+                    lwd = 2)
+  } else if (nrow(b)) {
     graphics::rect(b$time, b$lo, b$bin_max, b$hi,
                    col = "#C8D9EA", border = "#C8D9EA")
     graphics::lines(c(b$time, utils::tail(b$bin_max, 1L)),

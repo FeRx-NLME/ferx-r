@@ -19,9 +19,10 @@
 \description{
 Draws each stratum's observed Kaplan-Meier mean covariate curve over its
 replicate band from \code{\link{ferx_vpc_kmmc}}, one panel per stratum, with
-base graphics. The band is a step ribbon: the band at grid time \code{t[k]}
-holds until \code{t[k + 1]}. The observed curve stops where fewer than
-\code{min_at_risk} subjects are at risk.
+base graphics. The curve is left-continuous, and so is the band: the band at
+grid time \code{t[k]} holds from \code{t[k - 1]} up to and including
+\code{t[k]}. The observed curve stops where fewer than \code{min_at_risk}
+subjects are at risk.
 }
 \examples{
 ex <- ferx_example("tte_weibull")

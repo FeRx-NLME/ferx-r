@@ -155,6 +155,22 @@ test_that("a time-varying covariate warns, with guidance", {
                         capture.output(print(v)), fixed = TRUE)))
 })
 
+test_that("the KMMC band is drawn left-continuous, the row at H kept (#754 review, 2)", {
+  bins <- getFromNamespace(".ferx_vpc_kmmc_bins", "ferx")
+  b <- data.frame(time = c(10, 0, 5, 20, 25), lo = c(3, 1, 2, 4, 5),
+                  med = c(3, 1, 2, 4, 5), hi = c(3, 1, 2, 4, 5))
+  out <- bins(b, horizon = 20)
+  # Sorted; each row's interval is (previous grid time, its own time].
+  expect_identical(out$time, c(0, 5, 10, 20))
+  expect_identical(out$bin_min, c(0, 0, 5, 10))
+  expect_identical(out$lo, c(1, 2, 3, 4))
+  # An undefined row is dropped, and the next row still starts at its time.
+  b$lo[b$time == 5] <- NA
+  out2 <- bins(b, horizon = 20)
+  expect_identical(out2$time, c(0, 10, 20))
+  expect_identical(out2$bin_min, c(0, 5, 10))
+})
+
 test_that("plot() draws one panel per stratum", {
   ex <- ferx_example("tte_weibull")
   v <- kmmc_quiet(ex$model, kmmc_data(), covariate = "WT", n_sim = 20L,
