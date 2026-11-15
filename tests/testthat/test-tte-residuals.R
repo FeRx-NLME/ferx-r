@@ -127,13 +127,18 @@ test_that("a non-TTE fit keeps an [output] column called PIT through save/load",
   expect_identical(loaded$sdtab$PIT, fit$sdtab$PIT)
 })
 
-test_that("ferx_calc_npde() on a joint PK-TTE fit fills the Gaussian rows, NA on TTE rows", {
+test_that("ferx_calc_npde() on a joint PK-TTE fit fills the Gaussian and the TTE rows", {
+  # Since ferx-core #1889 the single-event TTE rows are scored too (NPDE == NPD
+  # there), and EPRED / PWRES stay NA on them; test-ferx_calc_npde.R checks the
+  # scores against a fit-time run.
   fit <- joint_fit()
   out <- suppressWarnings(ferx_calc_npde(fit, nsim = 50L, seed = 1L))
   n_tte <- sum(fit$subject_summary$n_obs_tte)
   tte <- seq.int(nrow(out$sdtab) - n_tte + 1L, nrow(out$sdtab))
   expect_identical(nrow(out$sdtab), nrow(fit$sdtab))
-  expect_true(all(is.na(out$sdtab$NPDE[tte])))
+  expect_true(all(is.finite(out$sdtab$NPDE[tte])))
+  expect_identical(out$sdtab$NPD[tte], out$sdtab$NPDE[tte])
+  expect_true(all(is.na(out$sdtab$EPRED[tte])))
   expect_true(all(is.finite(out$sdtab$NPDE[-tte])))
   expect_true(all(is.finite(out$sdtab$NPD[-tte])))
 })
