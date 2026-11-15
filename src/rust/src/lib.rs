@@ -1536,6 +1536,8 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
 ///   uncertainty distribution
 /// @param n_sim_per_draw Number of eta/eps replicates per parameter draw
 /// @param seed Random seed for reproducibility
+/// @param horizon TTE administrative horizon of every draw (ferx-core #2003);
+///   non-finite or `<= 0` (R's `NULL` arrives as -1) leaves it unset
 /// @return Data frame with DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM, OBSERVED
 ///   columns. DV_SIM carries the simulated 0/1 outcome for a `[binary_model]`
 ///   endpoint row; OBSERVED is set only for TTE rows (NA otherwise). A
@@ -1566,6 +1568,7 @@ fn ferx_rust_simulate_with_uncertainty(
     n_uncertainty_draws: i32,
     n_sim_per_draw: i32,
     seed: i32,
+    horizon: f64,
 ) -> Robj {
     entry(move || {
         let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
@@ -1649,6 +1652,9 @@ fn ferx_rust_simulate_with_uncertainty(
             n_sim_per_draw: n_sim_per_draw.max(0) as usize,
             method: uncertainty_method,
             seed: Some(seed as u64),
+            // The TTE administrative horizon of every draw (ferx-core #2003); the
+            // R side's `NULL` arrives as -1, "unset", as in `ferx_rust_simulate`.
+            horizon: (horizon.is_finite() && horizon > 0.0).then_some(horizon),
             // Spread the rest so a field added in ferx-core is additive here rather
             // than an `error[E0063]: missing field` build break (ferx-core #529).
             // Every field this entry point exposes stays explicit: the two counts
@@ -3795,6 +3801,9 @@ fn recorded_rows(
                     martingale: number("MARTINGALE"),
                     deviance: number("DEVIANCE"),
                     pit: number("PIT"),
+                    // ferx-core #1889: a bundle old enough to need this path
+                    // predates TTE npde, so the column is absent and reads NaN.
+                    npde: number("NPDE"),
                 });
             }
             #[cfg(not(feature = "survival"))]
@@ -5345,6 +5354,9 @@ fn default_fit_result(
         // prints come from a fit's own bytes, never from this scaffold.
         mixture_override_params: Vec::new(),
         se_mixture_overrides: None,
+        // ferx-core #2867: what each start of a multi-start fit did. This
+        // scaffold ran no start; the rows R shows come from a fit's own bytes.
+        starts: Vec::new(),
         // No outer optimizer ran in this scaffold, so there is no init-escape
         // verdict, and no packed tally to classify: `model_selection::bic()`
         // reports NaN on the default `BicInputs` rather than a wrong penalty
@@ -6734,6 +6746,33 @@ fn held_at_bound_to_r(held: &[ferx_core::HeldAtBound]) -> List {
     )
 }
 
+/// `FitResult::starts` (ferx-core #2867) as R columns, one row per start of a
+/// multi-start fit, in start order; no rows for a single-start fit. `start` is
+/// the engine's index, `0` the model file's own initial values, so a row matches
+/// the start the `multi_start` warning line names. A number or string the engine
+/// leaves unset (a failed start's OFV, status and error code) is `NA`.
+/// `status_reasons` and `theta` are one vector per start, which R holds as list
+/// columns; `theta` is in `theta_names` order and empty for a failed start.
+fn starts_to_r(starts: &[ferx_core::StartRecord]) -> List {
+    let num = |v: Option<f64>| v.map_or_else(Rfloat::na, Rfloat::from);
+    let text = |v: &Option<String>| v.as_deref().map_or(Rstr::na(), Rstr::from);
+    list!(
+        start = starts.iter().map(|s| s.start as i32).collect::<Vec<i32>>(),
+        ofv = starts.iter().map(|s| num(s.ofv)).collect::<Doubles>(),
+        penalized = starts.iter().map(|s| s.penalized).collect::<Vec<bool>>(),
+        objective = starts.iter().map(|s| num(s.objective)).collect::<Doubles>(),
+        converged = starts.iter().map(|s| s.converged).collect::<Vec<bool>>(),
+        status = starts.iter().map(|s| text(&s.status)).collect::<Strings>(),
+        status_reasons = List::from_values(starts.iter().map(|s| s.status_reasons.clone())),
+        n_iterations = starts.iter().map(|s| s.n_iterations as i32).collect::<Vec<i32>>(),
+        wall_time_secs = starts.iter().map(|s| s.wall_time_secs).collect::<Vec<f64>>(),
+        theta = List::from_values(starts.iter().map(|s| s.theta.clone())),
+        selected = starts.iter().map(|s| s.selected).collect::<Vec<bool>>(),
+        error = starts.iter().map(|s| text(&s.error)).collect::<Strings>(),
+        error_code = starts.iter().map(|s| text(&s.error_code)).collect::<Strings>()
+    )
+}
+
 /// The fit list, for a fresh fit and a loaded one alike.
 fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<List, String> {
     // Theta
@@ -7455,6 +7494,9 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         // `parameter`, `kind`, `index` (1-based, within its family) and
         // `reason`; R makes it a data frame.
         held_at_bound = held_at_bound_to_r(&result.held_at_bound),
+        // What each start of a multi-start fit did (ferx-core #2867); no rows
+        // for a single-start fit. R makes it a data frame.
+        starts = starts_to_r(&result.starts),
         // The `[covariate_model]` statistics the fit was bound with (ferx-r
         // #412); empty for a model that states none symbolically.
         covariate_stats = view.covariate_stats,
