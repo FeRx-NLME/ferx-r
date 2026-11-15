@@ -487,3 +487,51 @@ test_that("an RTTE endpoint is skipped with W_NPDE_TTE_SKIPPED and its rows stay
                  "W_NPDE_TTE_SKIPPED: the time-to-event records were not scored")
   expect_true(all(is.na(post$sdtab$NPDE)))
 })
+
+test_that("TTE NPDE lands after the binary rows, in the sdtab and in predictions_tte.csv", {
+  # #754 review, finding 6: TTE rows come after every Gaussian *and* discrete
+  # row, and no other fixture has both, so the discrete term of the TTE-row
+  # offset (glue `tte_npde_into_fit`, `.fitrx_sdtab_blocks()`) was untested.
+  ex <- ferx_example("tte_exponential")
+  m <- readLines(ex$model)
+  at <- grep("^\\s*omega ", m)[1L]
+  m <- append(m, "  theta TH0(0.0, -10.0, 10.0)", after = at - 1L)
+  m <- c(m, "", "[binary_model]", "  cmt   = 3", "  logit = TH0")
+  model <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(m, model)
+  d <- utils::read.csv(ex$data)
+  ids <- unique(d$ID)
+  bin <- d[match(ids, d$ID)[rep(seq_along(ids), each = 2L)], ]
+  bin$TIME <- rep(c(1, 2), length(ids))
+  bin$DV <- seq_len(nrow(bin)) %% 2L
+  bin$CMT <- 3L
+  d <- rbind(d, bin)
+  d <- d[order(d$ID, d$TIME), ]
+
+  plain <- suppressWarnings(ferx_fit(model, d, covariance = FALSE, verbose = FALSE))
+  at_fit <- suppressWarnings(ferx_fit(
+    model, d, covariance = FALSE, verbose = FALSE,
+    settings = list(npde_nsim = 200L, npde_seed = 3L)
+  ))
+  post <- ferx_calc_npde(plain, nsim = 200L, seed = 3L)
+  b <- ferx:::.fitrx_sdtab_blocks(post)
+  expect_length(b$discrete, 2L * length(ids))
+  expect_length(b$tte, length(ids))
+  expect_identical(min(b$tte), max(b$discrete) + 1L)
+  sd <- post$sdtab
+  # The binary rows carry no npde; the TTE rows carry the engine's fit-time one.
+  expect_true(all(is.na(sd$NPDE[b$discrete])))
+  expect_true(all(is.finite(sd$NPDE[b$tte])))
+  expect_equal(sd$NPDE[b$tte],
+               at_fit$sdtab$NPDE[ferx:::.fitrx_sdtab_blocks(at_fit)$tte],
+               tolerance = 1e-12)
+  # Core's own TTE table, written through the glue's offset, holds the same
+  # scores in TTE-row order, and a reload reads them back.
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(post, path)
+  staging <- withr::local_tempdir()
+  utils::unzip(path, files = "predictions_tte.csv", exdir = staging)
+  tte <- utils::read.csv(file.path(staging, "predictions_tte.csv"))
+  expect_equal(tte$NPDE, sd$NPDE[b$tte], tolerance = 1e-12)
+  expect_identical(ferx_load_fit(path)$sdtab$NPDE, sd$NPDE)
+})
