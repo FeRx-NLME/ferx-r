@@ -470,7 +470,7 @@ test_that(".ferx_attach_tte_npde puts the scores on the TTE rows, checked by ID/
   expect_error(attach_tte(sd, bad, 4:5), "do not line up")
 })
 
-test_that("an RTTE endpoint is skipped with W_NPDE_TTE_SKIPPED, Gaussian rows still scored", {
+test_that("an RTTE endpoint is skipped with W_NPDE_TTE_SKIPPED and its rows stay NA", {
   m <- tempfile(fileext = ".ferx")
   writeLines(c("[parameters]", "  theta TVLAMBDA(0.1, 0.001, 10.0)",
                "  omega ETA_LAMBDA ~ 0.09", "[event_model]", "  cmt    = 2",
