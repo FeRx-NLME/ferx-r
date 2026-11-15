@@ -29,9 +29,13 @@ and PWRES (NPD and EPRED are still computed).}
 A new fit with new bytes, the input \code{fit} being left as it was,
 with \code{NPDE}, \code{NPD}, \code{EPRED}, \code{EWRES} and \code{PWRES}
 columns added to its \code{sdtab} data frame (replacing any existing
-ones). They are computed for the Gaussian observations only: on the
-discrete (e.g. binary) and time-to-event rows of \code{sdtab} they are
-\code{NA}. They are in the fit's bundle, so they
+ones). They are computed for the Gaussian observations; on the discrete
+(e.g. binary) rows of \code{sdtab} they are \code{NA}. On the
+time-to-event rows of a single-event TTE endpoint, \code{NPDE} and
+\code{NPD} hold the record's simulation-based npde (see the section on
+time-to-event records)
+and \code{EPRED} / \code{EWRES} / \code{PWRES} are \code{NA}. They are in
+the fit's bundle, so they
 survive \code{\link{ferx_save_fit}}. A fit with no bundle, such as one from
 an \code{.rds} written by an older ferx, is refused with an error of class
 \code{ferx_no_bundle_error}: refit it. Because the diagnostics live in
@@ -83,6 +87,25 @@ the re-read data are checked against the fit's
 file edited since the fit is refused with code
 \code{E_POPULATION_MISMATCH}, saying what differs.
 }
+\section{Time-to-event records}{
+
+A single-event TTE record is scored against the model's population
+predictive distribution of the event time (ferx-core #1889): with
+\eqn{\hat F(y)} the fraction of \code{nsim} simulated replicates of the
+subject with an event before \eqn{y}, an observed event at \eqn{t} has
+\eqn{pd = \hat F(t)}, and a time right-censored at \eqn{c} has \eqn{pd}
+drawn uniformly on \eqn{[\hat F(c), 1]}. The score is \eqn{\Phi^{-1}(pd)},
+so an event earlier than the model predicts is negative. One event per
+subject leaves nothing to decorrelate, so \code{NPDE} and \code{NPD} hold
+the same number. The engine is called as a fit with
+\code{settings = list(npde_nsim = nsim, npde_seed = seed)} calls it, so the
+scores equal that fit's.
+
+Repeated events, competing risks, left truncation and interval-censored
+records are not scored: their rows stay \code{NA}, the Gaussian rows are
+scored as usual, and a \code{W_NPDE_TTE_SKIPPED} warning says why.
+}
+
 \section{Errors raised by the engine}{
 
 A model or dataset the engine refuses is an R error, never a \code{NULL}
@@ -127,6 +150,12 @@ fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
 fit <- ferx_calc_npde(fit, nsim = 1000L, seed = 12345L)
 head(fit$sdtab[, c("ID", "TIME", "NPDE", "NPD", "EPRED", "PWRES")])
 
+# A single-event time-to-event model: NPDE on its TTE rows.
+tte <- ferx_example("tte_weibull")
+tfit <- ferx_fit(tte$model, tte$data, covariance = FALSE)
+tfit <- ferx_calc_npde(tfit, nsim = 500L, seed = 1L)
+summary(tfit$sdtab$NPDE)
+
 }
 \seealso{
 Other simulation:
@@ -137,6 +166,7 @@ Other simulation:
 \code{\link[=ferx_simulate]{ferx_simulate()}},
 \code{\link[=ferx_simulate_adaptive]{ferx_simulate_adaptive()}},
 \code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}},
+\code{\link[=ferx_vpc_kmmc]{ferx_vpc_kmmc()}},
 \code{\link[=ferx_vpc_tte]{ferx_vpc_tte()}}
 }
 \concept{simulation}

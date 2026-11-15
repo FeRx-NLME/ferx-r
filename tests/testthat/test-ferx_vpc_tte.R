@@ -143,6 +143,28 @@ test_that("the seed, censoring, horizon and grid reach the engine", {
   expect_gt(nrow(s$band), nrow(a$band))
 })
 
+test_that("the observed records are cut at a horizon below follow-up (#2950)", {
+  m <- vpc_tte_model()
+  d <- vpc_tte_data()
+  full <- vpc_tte_quiet(m, d, n_sim = 30L, seed = 3L)
+  h <- vpc_tte_quiet(m, d, n_sim = 30L, seed = 3L, horizon = 15)
+  expect_equal(h$horizon, 15)
+  # The observed curve now ends at H, a record after H being a censoring there.
+  expect_lte(max(h$observed$time), 15)
+  before <- full$observed$time < 15
+  expect_equal(h$observed$surv[seq_len(sum(before))], full$observed$surv[before])
+  expect_equal(h$observed$n_risk[seq_len(sum(before))],
+               full$observed$n_risk[before])
+  at_h <- h$observed[h$observed$time == 15, ]
+  expect_identical(nrow(at_h), 1L)
+  expect_identical(at_h$n_censor, sum(d$TIME >= 15) - at_h$n_event)
+  # A grid time past H has no observed value.
+  g <- vpc_tte_quiet(m, d, n_sim = 30L, seed = 3L, horizon = 15,
+                     grid = c(0, 10, 20))
+  expect_true(is.na(g$band$obs[g$band$time == 20]))
+  expect_false(is.na(g$band$obs[g$band$time == 10]))
+})
+
 test_that("by_dose stratifies on the first dose", {
   ex <- ferx_example("tte_exponential")
   v <- vpc_tte_quiet(ex$model, ex$data, n_sim = 20L, by_dose = TRUE)
@@ -201,12 +223,13 @@ test_that("each refusal comes back as E_VPC_TTE_INPUT", {
   expect_vpc_tte_refusal(ferx_vpc_tte(m, dd, n_sim = 20L),
                          "subject id 1 appears more than once")
 
-  # Repeated events.
+  # Repeated events are no longer refused: they get core's vpc_rtte()
+  # (ferx-core #1886 PR2; test-ferx_vpc_rtte.R checks it).
   rtte <- vpc_tte_model("  type   = rtte")
   dr <- data.frame(ID = rep(1:3, each = 2), TIME = c(3, 30, 5, 30, 8, 30),
                    DV = c(1, 0, 1, 0, 1, 0), EVID = 0L, AMT = 0, CMT = 2L,
                    MDV = 0L)
-  expect_vpc_tte_refusal(ferx_vpc_tte(rtte, dr, n_sim = 20L), "repeated-events")
+  expect_s3_class(vpc_tte_quiet(rtte, dr, n_sim = 20L), "ferx_vpc_rtte")
 
   # Left truncation (delayed entry through TENTRY).
   dl <- d

@@ -2071,8 +2071,10 @@ fn ferx_rust_predict_survival_from_fit(
     })
 }
 
-/// Kaplan-Meier VPC for a single-event TTE endpoint at the model file's
-/// initial values (ferx-core #1886).
+/// Kaplan-Meier VPC for a TTE endpoint at the model file's initial values
+/// (ferx-core #1886). A single-event endpoint gets core's `vpc_tte`; a
+/// repeated-events (RTTE) endpoint gets core's `vpc_rtte` (#1886 PR2): the mean
+/// cumulative function and Kaplan-Meier curves by event order.
 ///
 /// @param model_path Path to .ferx model file
 /// @param data_path Path to NONMEM-format CSV with the observed TTE records
@@ -2087,9 +2089,11 @@ fn ferx_rust_predict_survival_from_fit(
 /// @param cmt The TTE endpoint; `<= 0` lets the engine pick the only one
 /// @param horizon The simulation horizon; non-finite or `<= 0` means the
 ///   latest time recorded on the endpoint
-/// @return A list: cmt, horizon, n_sim, probs, censoring and `strata`, one
-///   list per stratum (label, value, n_subjects, observed, band); see
-///   `vpc_tte_to_list`. The engine's warnings are its `simulation_warnings`
+/// @param max_order The highest event order of an RTTE endpoint's curves;
+///   `<= 0` lets the engine choose. Refused on a single-event endpoint.
+/// @return A list with `kind` ("km" or "rtte"): cmt, horizon, n_sim, probs,
+///   censoring and `strata`, one list per stratum; see `vpc_tte_to_list` and
+///   `vpc_rtte_to_list`. The engine's warnings are its `simulation_warnings`
 ///   attribute.
 /// @export
 #[extendr]
@@ -2107,31 +2111,22 @@ fn ferx_rust_vpc_tte(
     strata_covariate: &str,
     cmt: i32,
     horizon: f64,
+    max_order: i32,
 ) -> Robj {
     entry(move || {
         let opts = vpc_tte_options(
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
-        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-            Ok(p) => p,
-            Err(e) => return Err(format!("Error parsing model: {e}")),
-        };
-        let mut population = read_vpc_tte_population(&parsed, data_path)?;
-        // A level block's theta layout comes from this design (ferx-r #370), and
-        // a model-file `iov_occasion` rule derives the occasions (ferx-r #523);
-        // see `ferx_rust_predict_survival`.
-        bind_design(&mut parsed, model_path, &mut population).map_err(|e| e.refusal(""))?;
-        let occasion_notes = derive_file_occasions(&parsed, &mut population);
-        let vpc = ferx_core::vpc_tte(&parsed.model, &population, &parsed.model.default_params, &opts)
-            .map_err(|e| engine_refusal("Error simulating: ", e))?;
-        Ok(attach_sim_warnings(vpc_tte_to_list(&vpc), occasion_notes, &vpc))
+        let run = VpcRun::at_model_file(model_path, data_path)?;
+        run.km_or_rtte(opts, max_order)
     })
 }
 
-/// Kaplan-Meier VPC for a single-event TTE endpoint at a fit's parameters
-/// (ferx-core #1886). The fit arguments are those of
-/// `ferx_rust_simulate_from_fit`; the rest those of `ferx_rust_vpc_tte`.
+/// Kaplan-Meier VPC for a TTE endpoint at a fit's parameters (ferx-core
+/// #1886); RTTE endpoints as in `ferx_rust_vpc_tte`. The fit arguments are
+/// those of `ferx_rust_simulate_from_fit`; the rest those of
+/// `ferx_rust_vpc_tte`.
 ///
 /// @param model_path Path to .ferx model file
 /// @param data_path Path to NONMEM-format CSV with the observed TTE records
@@ -2156,6 +2151,7 @@ fn ferx_rust_vpc_tte(
 /// @param strata_covariate The covariate when `stratify` is "covariate"
 /// @param cmt The TTE endpoint; `<= 0` for the only one
 /// @param horizon The simulation horizon; non-finite or `<= 0` for the default
+/// @param max_order The highest RTTE event order; `<= 0` for the engine's choice
 /// @return As `ferx_rust_vpc_tte`.
 /// @export
 #[extendr]
@@ -2184,43 +2180,329 @@ fn ferx_rust_vpc_tte_from_fit(
     strata_covariate: &str,
     cmt: i32,
     horizon: f64,
+    max_order: i32,
 ) -> Robj {
     entry(move || {
         let opts = vpc_tte_options(
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
-        let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
-            Ok(p) => p,
-            Err(e) => return Err(format!("Error parsing model: {e}")),
-        };
+        let run = VpcRun::at_fit(
+            "ferx_vpc_tte",
+            model_path,
+            data_path,
+            FitParams {
+                theta: &theta,
+                omega_flat: &omega_flat,
+                omega_dim,
+                sigma: &sigma,
+                omega_iov_flat: &omega_iov_flat,
+                omega_iov_dim,
+                residual_rho: &residual_rho,
+                residual_rho_pairs: &residual_rho_pairs,
+                mixture_overrides: &mixture_overrides,
+            },
+            &fit_bindings,
+            iov_occasion,
+        )?;
+        run.km_or_rtte(opts, max_order)
+    })
+}
+
+/// Kaplan-Meier mean covariate (KMMC) VPC for a single-event TTE endpoint at
+/// the model file's initial values (ferx-core #1886 PR3, `vpc_kmmc`). The
+/// arguments are those of `ferx_rust_vpc_tte` without `max_order`, then
+/// `covariate`, `level` and `min_at_risk`.
+///
+/// @param model_path Path to .ferx model file
+/// @param data_path Path to NONMEM-format CSV with the observed TTE records
+/// @param n_sim Number of replicates
+/// @param seed Random seed
+/// @param probs Three band probabilities
+/// @param grid "auto", "all_steps" or "times"
+/// @param grid_times The grid when `grid` is "times"
+/// @param censoring "observed" or "horizon"
+/// @param stratify "none", "dose" or "covariate"
+/// @param strata_covariate The covariate when `stratify` is "covariate"
+/// @param cmt The TTE endpoint; `<= 0` for the only one
+/// @param horizon The simulation horizon; non-finite or `<= 0` for the default
+/// @param covariate The baseline covariate whose at-risk mean is taken
+/// @param level The value whose at-risk share is taken instead of the mean;
+///   NaN for the mean
+/// @param min_at_risk A curve is undefined where fewer subjects are at risk
+/// @return A list: cmt, covariate, level, horizon, n_sim, probs, min_at_risk,
+///   censoring and `strata`; see `vpc_kmmc_to_list`.
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_vpc_kmmc(
+    model_path: &str,
+    data_path: &str,
+    n_sim: i32,
+    seed: i32,
+    probs: Vec<f64>,
+    grid: &str,
+    grid_times: Vec<f64>,
+    censoring: &str,
+    stratify: &str,
+    strata_covariate: &str,
+    cmt: i32,
+    horizon: f64,
+    covariate: &str,
+    level: f64,
+    min_at_risk: i32,
+) -> Robj {
+    entry(move || {
+        let vpc = vpc_tte_options(
+            n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
+            horizon,
+        )?;
+        let run = VpcRun::at_model_file(model_path, data_path)?;
+        run.kmmc(vpc, covariate, level, min_at_risk)
+    })
+}
+
+/// KMMC VPC at a fit's parameters. The fit arguments are those of
+/// `ferx_rust_vpc_tte_from_fit`; the rest those of `ferx_rust_vpc_kmmc`.
+///
+/// @param model_path Path to .ferx model file
+/// @param data_path Path to NONMEM-format CSV with the observed TTE records
+/// @param theta Fitted theta vector
+/// @param omega_flat Row-major flattened omega matrix
+/// @param omega_dim Side length of the omega matrix
+/// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV
+/// @param residual_rho Fitted residual correlations
+/// @param residual_rho_pairs Their endpoint pairs
+/// @param mixture_overrides `fit$mixture_overrides`
+/// @param fit_bindings The fit's data bindings
+/// @param iov_occasion `fit$iov_occasion`
+/// @param n_sim Number of replicates
+/// @param seed Random seed
+/// @param probs Three band probabilities
+/// @param grid "auto", "all_steps" or "times"
+/// @param grid_times The grid when `grid` is "times"
+/// @param censoring "observed" or "horizon"
+/// @param stratify "none", "dose" or "covariate"
+/// @param strata_covariate The covariate when `stratify` is "covariate"
+/// @param cmt The TTE endpoint; `<= 0` for the only one
+/// @param horizon The simulation horizon; non-finite or `<= 0` for the default
+/// @param covariate The baseline covariate whose at-risk mean is taken
+/// @param level The value whose at-risk share is taken; NaN for the mean
+/// @param min_at_risk A curve is undefined where fewer subjects are at risk
+/// @return As `ferx_rust_vpc_kmmc`.
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_vpc_kmmc_from_fit(
+    model_path: &str,
+    data_path: &str,
+    theta: Vec<f64>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
+    residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
+    fit_bindings: List,
+    iov_occasion: &str,
+    n_sim: i32,
+    seed: i32,
+    probs: Vec<f64>,
+    grid: &str,
+    grid_times: Vec<f64>,
+    censoring: &str,
+    stratify: &str,
+    strata_covariate: &str,
+    cmt: i32,
+    horizon: f64,
+    covariate: &str,
+    level: f64,
+    min_at_risk: i32,
+) -> Robj {
+    entry(move || {
+        let vpc = vpc_tte_options(
+            n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
+            horizon,
+        )?;
+        let run = VpcRun::at_fit(
+            "ferx_vpc_kmmc",
+            model_path,
+            data_path,
+            FitParams {
+                theta: &theta,
+                omega_flat: &omega_flat,
+                omega_dim,
+                sigma: &sigma,
+                omega_iov_flat: &omega_iov_flat,
+                omega_iov_dim,
+                residual_rho: &residual_rho,
+                residual_rho_pairs: &residual_rho_pairs,
+                mixture_overrides: &mixture_overrides,
+            },
+            &fit_bindings,
+            iov_occasion,
+        )?;
+        run.kmmc(vpc, covariate, level, min_at_risk)
+    })
+}
+
+/// A fit's parameters as the R side passes them, for `params_from_fit`.
+struct FitParams<'a> {
+    theta: &'a [f64],
+    omega_flat: &'a [f64],
+    omega_dim: i32,
+    sigma: &'a [f64],
+    omega_iov_flat: &'a [f64],
+    omega_iov_dim: i32,
+    residual_rho: &'a [f64],
+    residual_rho_pairs: &'a [i32],
+    mixture_overrides: &'a [f64],
+}
+
+/// What every VPC entry point runs on: the model, the observed population laid
+/// out on the right theta layout with its occasions derived, the parameters the
+/// replicates are drawn at, and the occasion notes for `simulation_warnings`.
+struct VpcRun {
+    parsed: ParsedModel,
+    population: Population,
+    params: ModelParameters,
+    notes: OccasionNotes,
+}
+
+impl VpcRun {
+    /// At the model file's initial values. A level block's theta layout comes
+    /// from this design (ferx-r #370), and a model-file `iov_occasion` rule
+    /// derives the occasions (ferx-r #523); see `ferx_rust_predict_survival`.
+    fn at_model_file(model_path: &str, data_path: &str) -> std::result::Result<Self, String> {
+        let mut parsed = ferx_core::parse_full_model_file(Path::new(model_path))
+            .map_err(|e| format!("Error parsing model: {e}"))?;
         let mut population = read_vpc_tte_population(&parsed, data_path)?;
-        // The fit's theta layout and occasions (ferx-r #370, #523); see
-        // `ferx_rust_simulate_from_fit`.
-        let fitted = fit_bindings_from_r(&fit_bindings)?;
+        bind_design(&mut parsed, model_path, &mut population).map_err(|e| e.refusal(""))?;
+        let notes = derive_file_occasions(&parsed, &mut population);
+        let params = parsed.model.default_params.clone();
+        Ok(VpcRun { parsed, population, params, notes })
+    }
+
+    /// At a fit's parameters: the fit's theta layout and occasions (ferx-r #370,
+    /// #523), see `ferx_rust_simulate_from_fit`. The replicates are simulations,
+    /// so a `[mixture]` model's classes are drawn under the fitted overrides.
+    fn at_fit(
+        entry_point: &str,
+        model_path: &str,
+        data_path: &str,
+        fit: FitParams<'_>,
+        fit_bindings: &List,
+        iov_occasion: &str,
+    ) -> std::result::Result<Self, String> {
+        let mut parsed = ferx_core::parse_full_model_file(Path::new(model_path))
+            .map_err(|e| format!("Error parsing model: {e}"))?;
+        let mut population = read_vpc_tte_population(&parsed, data_path)?;
+        let fitted = fit_bindings_from_r(fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
             .map_err(|e| e.refusal(""))?;
-        let occasion_notes =
-            derive_fit_occasions("ferx_vpc_tte", &parsed, &mut population, iov_occasion)?;
-        // The replicates are simulations, so a `[mixture]` model's classes are
-        // drawn under the fitted overrides, as in `ferx_rust_simulate_from_fit`.
+        let notes = derive_fit_occasions(entry_point, &parsed, &mut population, iov_occasion)?;
         let params = params_from_fit(
             &parsed.model,
-            &theta,
-            &omega_flat,
-            omega_dim,
-            &sigma,
-            &omega_iov_flat,
-            omega_iov_dim,
-            &residual_rho,
-            &residual_rho_pairs,
-            &mixture_overrides,
+            fit.theta,
+            fit.omega_flat,
+            fit.omega_dim,
+            fit.sigma,
+            fit.omega_iov_flat,
+            fit.omega_iov_dim,
+            fit.residual_rho,
+            fit.residual_rho_pairs,
+            fit.mixture_overrides,
             MixtureClasses::Read,
         )?;
-        let vpc = ferx_core::vpc_tte(&parsed.model, &population, &params, &opts)
+        Ok(VpcRun { parsed, population, params, notes })
+    }
+
+    /// Core's `vpc_tte` for a single-event endpoint, `vpc_rtte` for a
+    /// repeated-events one (#1886 PR2). Which one is core's own endpoint rule,
+    /// read off the endpoint `opts.cmt` names or the model's only TTE endpoint;
+    /// an endpoint that does not resolve (no TTE endpoint, several and no `cmt`,
+    /// a `cmt` that is not a TTE endpoint) goes to `vpc_tte`, whose refusal says
+    /// what is wrong, with or without `max_order` (#754 review, finding 1).
+    fn km_or_rtte(
+        self,
+        opts: ferx_core::VpcTteOptions,
+        max_order: i32,
+    ) -> std::result::Result<Robj, String> {
+        let model = &self.parsed.model;
+        let repeated = tte_endpoint_is_repeated(model, opts.cmt);
+        if repeated != Some(true) {
+            if repeated == Some(false) && max_order > 0 {
+                return Err(argument_refusal(
+                    "ferx_vpc_tte: `max_order` applies to a repeated-events (RTTE) endpoint; \
+                     this one is single-event."
+                        .to_string(),
+                ));
+            }
+            let vpc = ferx_core::vpc_tte(model, &self.population, &self.params, &opts)
+                .map_err(|e| engine_refusal("Error simulating: ", e))?;
+            return Ok(attach_sim_warnings(vpc_tte_to_list(&vpc), self.notes, &vpc));
+        }
+        let rtte = ferx_core::VpcRtteOptions {
+            n_sim: opts.n_sim,
+            probs: opts.probs,
+            grid: opts.grid,
+            censoring: opts.censoring,
+            stratify: opts.stratify,
+            cmt: opts.cmt,
+            max_order: (max_order > 0).then_some(max_order as usize),
+            sim: opts.sim,
+            // Every field is set today; the spread keeps a field core adds later
+            // additive here (ferx-core #529, the CI options-literal check).
+            ..Default::default()
+        };
+        let vpc = ferx_core::vpc_rtte(model, &self.population, &self.params, &rtte)
             .map_err(|e| engine_refusal("Error simulating: ", e))?;
-        Ok(attach_sim_warnings(vpc_tte_to_list(&vpc), occasion_notes, &vpc))
-    })
+        Ok(attach_sim_warnings(vpc_rtte_to_list(&vpc), self.notes, &vpc))
+    }
+
+    /// Core's `vpc_kmmc` (#1886 PR3), with the Kaplan-Meier VPC options `vpc` and
+    /// the R arguments; a NaN `level` is the mean. `VpcKmmcOptions` is
+    /// `#[non_exhaustive]`: built from `new` and assigned.
+    fn kmmc(
+        self,
+        vpc: ferx_core::VpcTteOptions,
+        covariate: &str,
+        level: f64,
+        min_at_risk: i32,
+    ) -> std::result::Result<Robj, String> {
+        let mut opts = ferx_core::VpcKmmcOptions::new(covariate);
+        opts.vpc = vpc;
+        opts.level = (!level.is_nan()).then_some(level);
+        opts.min_at_risk = min_at_risk.max(0) as usize;
+        let vpc = ferx_core::vpc_kmmc(&self.parsed.model, &self.population, &self.params, &opts)
+            .map_err(|e| engine_refusal("Error simulating: ", e))?;
+        Ok(attach_sim_warnings(vpc_kmmc_to_list(&vpc), self.notes, &vpc))
+    }
+}
+
+/// The kind of the endpoint a TTE VPC checks, the endpoint `cmt` names or else
+/// the model's only TTE endpoint: `Some(true)` for a repeated-events one,
+/// `Some(false)` for a single-event one, by the endpoint kind core's own
+/// `vpc_tte` / `vpc_rtte` check (`TteRecurrence::Repeated`). `None` when that
+/// is no TTE endpoint (a `cmt` that names none, no TTE endpoint, several and no
+/// `cmt`), which core's `vpc_tte` refuses with the reason.
+fn tte_endpoint_is_repeated(model: &CompiledModel, cmt: Option<usize>) -> Option<bool> {
+    let tte = model.tte_cmts();
+    let c = match (cmt, tte.as_slice()) {
+        (Some(c), _) => c,
+        (None, [only]) => *only,
+        _ => return None,
+    };
+    match model.endpoints.get(&c) {
+        Some(ferx_core::EndpointLikelihood::Tte { recurrence, .. }) => {
+            Some(matches!(recurrence, ferx_core::TteRecurrence::Repeated { .. }))
+        }
+        _ => None,
+    }
 }
 
 /// The observed population a Kaplan-Meier VPC is drawn against. Unlike
@@ -2337,14 +2619,250 @@ fn vpc_tte_to_list(vpc: &ferx_core::TteVpc) -> Robj {
         })
         .collect();
     list!(
+        kind = "km",
         cmt = vpc.cmt as i32,
         horizon = vpc.horizon,
         n_sim = vpc.n_sim as i32,
         probs = vpc.probs.to_vec(),
-        censoring = match vpc.censoring {
-            ferx_core::VpcCensoring::Observed => "observed",
-            ferx_core::VpcCensoring::Horizon => "horizon",
-        },
+        censoring = vpc_censoring_label(vpc.censoring),
+        strata = List::from_values(strata)
+    )
+    .into()
+}
+
+/// The TTE half of `ferx_calc_npde()` (ferx-core #1889): `compute_tte_npde` at
+/// the fitted parameters, called as core's `fit()` calls it for `npde_nsim > 0`
+/// (no occasion rule, the fit's seed), so the scores equal a fit-time run's.
+/// Returns a data frame with one row per scored record in `tte_rows` order
+/// (ID as the sdtab numbers it, TIME as written, CMT, NPDE), or NULL for a
+/// model with no TTE endpoint, and `notes` with what the fit would add to its
+/// warnings: the reference replicates' failed solves, or `W_NPDE_TTE_SKIPPED`
+/// in core's words for an input the score refuses (repeated events, competing
+/// risks, left truncation, interval censoring), whose rows stay blank.
+#[cfg(feature = "survival")]
+fn tte_npde_table(
+    model: &CompiledModel,
+    population: &Population,
+    params: &ModelParameters,
+    nsim: i32,
+    seed: Option<u64>,
+    mut notes: Vec<String>,
+) -> (Robj, Vec<String>) {
+    if model.tte_cmts().is_empty() {
+        return (().into(), notes);
+    }
+    match ferx_core::stats::npde::compute_tte_npde(
+        model,
+        population,
+        params,
+        nsim as usize,
+        seed,
+        None,
+    ) {
+        Ok((per_subject, warnings)) => {
+            let (mut id, mut time, mut cmt, mut npde) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+            for (si, (subject, scores)) in population.subjects.iter().zip(&per_subject).enumerate() {
+                for s in scores {
+                    id.push(sdtab_id(&subject.id, si));
+                    time.push(s.time);
+                    cmt.push(s.cmt as i32);
+                    npde.push(s.npde);
+                }
+            }
+            // core's `fit_time_warnings` (crate-private): a failed event-time solve
+            // is worth a line; a degenerate hazard draw is what a cure fraction
+            // legitimately gives, so the fit drops it.
+            const SOLVE_FAILED: &str = "W_TTE_SOLVE_FAILED: ";
+            notes.extend(warnings.into_iter().filter_map(|w| {
+                w.strip_prefix(SOLVE_FAILED).map(|rest| {
+                    format!(
+                        "{SOLVE_FAILED}in the npde reference replicates of the time-to-event \
+                         records, where a failed solve counts as \"no event\": {rest}"
+                    )
+                })
+            }));
+            (data_frame!(ID = id, TIME = time, CMT = cmt, NPDE = npde).into(), notes)
+        }
+        Err(why) => {
+            notes.push(format!(
+                "W_NPDE_TTE_SKIPPED: the time-to-event records were not scored, so the NPDE / \
+                 NPD cells of their rows are blank. Every other row is scored as usual. \
+                 Reason: {why}"
+            ));
+            (().into(), notes)
+        }
+    }
+}
+
+/// The R spelling of a VPC's replicate censoring.
+fn vpc_censoring_label(c: ferx_core::VpcCensoring) -> &'static str {
+    match c {
+        ferx_core::VpcCensoring::Observed => "observed",
+        ferx_core::VpcCensoring::Horizon => "horizon",
+    }
+}
+
+/// A band entry core leaves empty (too few replicate curves defined) is `NA`.
+fn vpc_na_opt(v: &[Option<f64>]) -> Doubles {
+    v.iter().map(|x| x.map_or_else(Rfloat::na, Rfloat::from)).collect()
+}
+
+fn vpc_ints(v: &[usize]) -> Vec<i32> {
+    v.iter().map(|&n| n as i32).collect()
+}
+
+/// An `RtteVpc` (ferx-core #1886 PR2) as an R list, every number read off core's
+/// strata. Per stratum: the mean cumulative function (`mcf`, its observed curve,
+/// and `mcf_band`), then each family of curves by event order as long tables with
+/// an `order` column: `absolute` / `absolute_band` (orders `1..=max_order`) and
+/// `gap` / `gap_band` (orders `2..=max_order`), and `orders`, one row per
+/// (family, order) with the observed subjects in it.
+fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
+    let curves = |bands: &[ferx_core::RtteOrderBand]| -> (Robj, Robj) {
+        let mut o = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut b: (Vec<i32>, Vec<f64>, Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>, Vec<usize>) =
+            Default::default();
+        for band in bands {
+            let km = &band.observed;
+            let k = band.order as i32;
+            o.0.extend(std::iter::repeat_n(k, km.time.len()));
+            o.1.extend_from_slice(&km.time);
+            o.2.extend_from_slice(&km.n_risk);
+            o.3.extend_from_slice(&km.n_event);
+            o.4.extend_from_slice(&km.n_censor);
+            o.5.extend_from_slice(&km.surv);
+            b.0.extend(std::iter::repeat_n(k, band.grid.len()));
+            b.1.extend_from_slice(&band.grid);
+            b.2.extend_from_slice(&band.obs_on_grid);
+            b.3.extend_from_slice(&band.lo);
+            b.4.extend_from_slice(&band.med);
+            b.5.extend_from_slice(&band.hi);
+            b.6.extend_from_slice(&band.n_used);
+        }
+        let observed = data_frame!(
+            order = o.0,
+            time = o.1,
+            n_risk = vpc_ints(&o.2),
+            n_event = vpc_ints(&o.3),
+            n_censor = vpc_ints(&o.4),
+            surv = o.5
+        );
+        let band = data_frame!(
+            order = b.0,
+            time = b.1,
+            obs = vpc_na_opt(&b.2),
+            lo = vpc_na_opt(&b.3),
+            med = vpc_na_opt(&b.4),
+            hi = vpc_na_opt(&b.5),
+            n_used = vpc_ints(&b.6)
+        );
+        (observed.into(), band.into())
+    };
+    let strata: Vec<Robj> = vpc
+        .strata
+        .iter()
+        .map(|s| {
+            let m = &s.mcf;
+            let mcf = data_frame!(
+                time = m.observed.time.clone(),
+                n_risk = vpc_ints(&m.observed.n_risk),
+                n_event = vpc_ints(&m.observed.n_event),
+                mcf = m.observed.mcf.clone()
+            );
+            let mcf_band = data_frame!(
+                time = m.grid.clone(),
+                obs = vpc_na_opt(&m.obs_on_grid),
+                lo = vpc_na_opt(&m.lo),
+                med = vpc_na_opt(&m.med),
+                hi = vpc_na_opt(&m.hi),
+                n_used = vpc_ints(&m.n_used)
+            );
+            let (absolute, absolute_band) = curves(&s.absolute);
+            let (gap, gap_band) = curves(&s.gap);
+            let fam = |name: &str, n: usize| std::iter::repeat_n(name.to_string(), n);
+            let orders = data_frame!(
+                clock = fam("absolute", s.absolute.len())
+                    .chain(fam("gap", s.gap.len()))
+                    .collect::<Vec<String>>(),
+                order = s.absolute.iter().chain(&s.gap).map(|b| b.order as i32).collect::<Vec<i32>>(),
+                n_subjects = s
+                    .absolute
+                    .iter()
+                    .chain(&s.gap)
+                    .map(|b| b.n_subjects as i32)
+                    .collect::<Vec<i32>>()
+            );
+            list!(
+                label = s.label.clone(),
+                value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
+                n_subjects = s.n_subjects as i32,
+                mcf = mcf,
+                mcf_band = mcf_band,
+                absolute = absolute,
+                absolute_band = absolute_band,
+                gap = gap,
+                gap_band = gap_band,
+                orders = orders
+            )
+            .into()
+        })
+        .collect();
+    list!(
+        kind = "rtte",
+        cmt = vpc.cmt as i32,
+        horizon = vpc.horizon,
+        n_sim = vpc.n_sim as i32,
+        probs = vpc.probs.to_vec(),
+        censoring = vpc_censoring_label(vpc.censoring),
+        max_order = vpc.max_order as i32,
+        strata = List::from_values(strata)
+    )
+    .into()
+}
+
+/// A `KmmcVpc` (ferx-core #1886 PR3) as an R list, every number read off core's
+/// strata: per stratum the observed Kaplan-Meier mean covariate curve, one row
+/// per row of the stratum's Kaplan-Meier curve, and the band on the grid.
+fn vpc_kmmc_to_list(vpc: &ferx_core::KmmcVpc) -> Robj {
+    let strata: Vec<Robj> = vpc
+        .strata
+        .iter()
+        .map(|s| {
+            let c = &s.observed;
+            let observed = data_frame!(
+                time = c.time.clone(),
+                n_risk = vpc_ints(&c.n_risk),
+                n_event = vpc_ints(&c.n_event),
+                n_censor = vpc_ints(&c.n_censor),
+                mean = c.mean.clone()
+            );
+            let band = data_frame!(
+                time = s.grid.clone(),
+                obs = vpc_na_opt(&s.obs_on_grid),
+                lo = vpc_na_opt(&s.lo),
+                med = vpc_na_opt(&s.med),
+                hi = vpc_na_opt(&s.hi),
+                n_used = vpc_ints(&s.n_used)
+            );
+            list!(
+                label = s.label.clone(),
+                value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
+                n_subjects = s.n_subjects as i32,
+                observed = observed,
+                band = band
+            )
+            .into()
+        })
+        .collect();
+    list!(
+        cmt = vpc.cmt as i32,
+        covariate = vpc.covariate.clone(),
+        level = vpc.level.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
+        horizon = vpc.horizon,
+        n_sim = vpc.n_sim as i32,
+        probs = vpc.probs.to_vec(),
+        min_at_risk = vpc.min_at_risk as i32,
+        censoring = vpc_censoring_label(vpc.censoring),
         strata = List::from_values(strata)
     )
     .into()
@@ -2554,7 +3072,16 @@ fn ferx_rust_npde_from_fit(
             PWRES = pwres
         )
         .into();
+        // The single-event time-to-event records' npde (ferx-core #1889), as a fit
+        // with `npde_nsim > 0` computes it: same call, same seed, so the scores
+        // reproduce the fit's.
+        #[cfg(feature = "survival")]
+        let (tte, notes) = tte_npde_table(&parsed.model, &population, &params, nsim, seed_opt, notes);
+        #[cfg(not(feature = "survival"))]
+        let tte: Robj = ().into();
         df.set_attrib("npde_notes", notes)
+            .map_err(|e| format!("internal: {e}"))?;
+        df.set_attrib("tte_npde", tte)
             .map_err(|e| format!("internal: {e}"))?;
         Ok(df)
     })
@@ -4200,7 +4727,8 @@ fn ferx_rust_bundle_without_data(bundle: Raw) -> Raw {
 fn ferx_rust_bundle_with_sdtab(bundle: Raw, sdtab: List) -> Raw {
     entry(move || {
         let bytes = bundle.as_slice();
-        let mut fit = read_bundle_fit(bytes)?.fit;
+        let read = read_bundle_fit(bytes)?;
+        let mut fit = read.fit.clone();
         // A bundle written before ferx-core #911 keeps its time-to-event rows only
         // in the glue's entry. Only `fit` is wanted here, not the rows.
         recorded_rows(bytes, &mut fit, None)?;
@@ -4213,9 +4741,51 @@ fn ferx_rust_bundle_with_sdtab(bundle: Raw, sdtab: List) -> Raw {
                     .ok_or_else(|| format!("internal: sdtab column `{name}` is not numeric"))
             })
             .collect::<std::result::Result<Vec<_>, _>>()?;
+        // A time-to-event row's NPDE (ferx-core #1889) also goes where core keeps
+        // it, `TteObsDiagnostic::npde`, so core's own `predictions_tte.csv` carries
+        // it as a fit with `npde_nsim > 0` writes it, for core's reader and the CLI.
+        #[cfg(feature = "survival")]
+        let base = match tte_npde_into_fit(&mut fit, &columns) {
+            true => std::borrow::Cow::Owned(rewritten_bundle(&fit, &read)?),
+            false => std::borrow::Cow::Borrowed(bytes),
+        };
+        #[cfg(not(feature = "survival"))]
+        let base = std::borrow::Cow::Borrowed(bytes);
         let changes = sdtab_entries(&fit, &columns)?;
-        Ok(Raw::from_bytes(&bundle_with_entries(bytes, &changes)?))
+        Ok(Raw::from_bytes(&bundle_with_entries(&base, &changes)?))
     })
+}
+
+/// Copy the sdtab's `NPDE` cells on the time-to-event rows into the fit's
+/// `tte_rows` (ferx-core #1889). Those rows come after every Gaussian and
+/// discrete row, each subject's in `tte_rows` order, as `sdtab_entries` lays
+/// them out. False, and nothing changed, when the table has no `NPDE` column,
+/// no time-to-event row, or the same scores the fit already holds.
+#[cfg(feature = "survival")]
+fn tte_npde_into_fit(fit: &mut FitResult, columns: &[(String, Vec<f64>)]) -> bool {
+    let Some((_, npde)) = columns.iter().find(|(name, _)| name == "NPDE") else {
+        return false;
+    };
+    let mut at: usize = fit
+        .subjects
+        .iter()
+        .map(|s| s.ipred.len() + s.discrete_rows.len())
+        .sum();
+    let mut changed = false;
+    for subject in &mut fit.subjects {
+        for row in &mut subject.tte_rows {
+            let Some(&v) = npde.get(at) else { return false };
+            // Any NaN is "no score": R's NA_real_ is a NaN with its own payload,
+            // which never equals core's bit for bit (#754 review, finding 4).
+            let same = v.to_bits() == row.npde.to_bits() || (v.is_nan() && row.npde.is_nan());
+            if !same {
+                row.npde = v;
+                changed = true;
+            }
+            at += 1;
+        }
+    }
+    changed
 }
 
 /// `bundle` rewritten with a NaN in the fit's gradient, which no test can get from a
@@ -6072,6 +6642,20 @@ impl CoreDiag for ferx_core::PredictionOutput {
 }
 
 impl CoreDiag for ferx_core::TteVpc {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+/// `W_VPC_RTTE_ENDS_ON_EVENT`, then the simulator's bundle (ferx-core #1886 PR2).
+impl CoreDiag for ferx_core::RtteVpc {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+/// `W_VPC_KMMC_TIME_VARYING_COVARIATE`, then the simulator's bundle (#1886 PR3).
+impl CoreDiag for ferx_core::KmmcVpc {
     fn warnings(&self) -> &[String] {
         &self.warnings
     }
@@ -15491,6 +16075,8 @@ extendr_module! {
     fn ferx_rust_predict_survival_from_fit;
     fn ferx_rust_vpc_tte;
     fn ferx_rust_vpc_tte_from_fit;
+    fn ferx_rust_vpc_kmmc;
+    fn ferx_rust_vpc_kmmc_from_fit;
     fn ferx_rust_npde_from_fit;
     fn ferx_rust_sir;
     fn ferx_rust_covariance;
