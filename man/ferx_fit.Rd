@@ -432,7 +432,9 @@ administration, or \code{"time(24, 48)"} for time-window breakpoints.
 warning). Supported by FOCE, FOCEI, Laplace and SAEM -- not IMP/IMPMAP.}
 \item{\code{npde_nsim}}{(default 0, i.e. disabled) Monte-Carlo replicates
 per subject for the simulation-based NPDE/NPD diagnostics computed after
-the fit; with 0 no NPDE/NPD columns are produced. A typical value is
+the fit, along with the \code{EPRED} and \code{PWRES}/\code{EWRES}
+columns from the same simulation (see \code{\link{ferx_calc_npde}});
+with 0 none of these columns are produced. A typical value is
 1000, and cost scales linearly. See also \code{\link{ferx_calc_npde}}
 to add them post hoc.}
 \item{\code{npde_seed}}{RNG seed for the NPDE/NPD simulation. Unset, a
@@ -1647,6 +1649,23 @@ was recorded, whose overrides then have no rows in
 \code{fit$estimates} or \code{print()}, also after
 \code{\link{ferx_covariance}} or \code{\link{ferx_sir}}; refit to get
 them.}
+\item{starts}{Data frame with one row per start of a multi-start fit
+(\code{n_starts > 1}), in start order (ferx-core #2867); zero rows for
+a single-start fit. Columns: \code{start} (the engine's index;
+\code{0} is the model file's own initial values, as the
+\code{Multi-start:} line \code{print()} shows numbers the starts),
+\code{ofv}, \code{penalized} (\code{TRUE} when the start was ranked on
+\code{objective}, its OFV plus an active \code{nn_l2} /
+\code{nn_smooth} penalty), \code{objective}, \code{converged},
+\code{status} (\code{"converged"}, \code{"converged_with_issues"} or
+\code{"not_converged"}), \code{status_reasons} (list column),
+\code{n_iterations}, \code{wall_time_secs} (this start alone; the
+starts run in parallel, so these do not add up to the fit's),
+\code{theta} (list column, the start's final theta named as
+\code{theta}), \code{selected} (\code{TRUE} on the start the fit
+returned), \code{error} and \code{error_code} (a start that failed
+before it returned a result; its \code{ofv}, \code{status} and
+\code{theta} are then empty). Kept by \code{\link{ferx_save_fit}}.}
 \item{imp_seed}{Numeric scalar (or \code{NULL}) giving the importance
 sampling seed. \code{NULL} when IS was not run.}
 \item{bloq_method_label}{Character string describing the LOQ-censoring

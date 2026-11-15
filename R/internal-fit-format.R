@@ -633,6 +633,64 @@
   result
 }
 
+# `fit$starts` as its data frame (ferx-core #2867), from the glue's parallel
+# columns or a frame already built: one row per start of a multi-start fit, in
+# start order, zero rows for a single-start fit. `start` is the engine's index
+# (0 = the model file's initial values), as the `multi_start` warning line
+# numbers the starts. `status_reasons` and `theta` are list columns; each
+# `theta` is named by `theta_names` and empty for a start that failed.
+.ferx_starts_frame <- function(s, theta_names = character(0)) {
+  start <- as.integer(s$start %||% integer(0))
+  n <- length(start)
+  per_start <- function(x, as) {
+    x <- x %||% vector("list", n)
+    if (length(x) != n) x <- vector("list", n)
+    lapply(x, function(v) as(unlist(v, use.names = FALSE) %||% as(NULL)))
+  }
+  theta <- lapply(per_start(s$theta, as.numeric), function(v) {
+    if (length(v) > 0L && length(v) == length(theta_names)) names(v) <- theta_names
+    v
+  })
+  column <- function(x, as, na) {
+    if (length(x) != n) rep(na, n) else as(x)
+  }
+  out <- data.frame(
+    start = start,
+    ofv = column(s$ofv, as.numeric, NA_real_),
+    penalized = column(s$penalized, as.logical, NA),
+    objective = column(s$objective, as.numeric, NA_real_),
+    converged = column(s$converged, as.logical, NA),
+    status = column(s$status, as.character, NA_character_),
+    n_iterations = column(s$n_iterations, as.integer, NA_integer_),
+    wall_time_secs = column(s$wall_time_secs, as.numeric, NA_real_),
+    selected = column(s$selected, as.logical, NA),
+    error = column(s$error, as.character, NA_character_),
+    error_code = column(s$error_code, as.character, NA_character_),
+    stringsAsFactors = FALSE
+  )
+  out$status_reasons <- I(per_start(s$status_reasons, as.character))
+  out$theta <- I(theta)
+  out[c("start", "ofv", "penalized", "objective", "converged", "status",
+        "status_reasons", "n_iterations", "wall_time_secs", "theta",
+        "selected", "error", "error_code")]
+}
+
+# The engine's `Multi-start: N starts, M converged; ...` line (ferx-core #2867)
+# from a multi-start fit's warnings, which says whether its starts agree. The
+# engine words it from `fit$starts`; R only finds it. It is matched by its own
+# opening, not by the `Multi-start:` prefix alone: a fit with a failed start
+# also carries `Multi-start: k of n starts failed: <messages>`, pushed before
+# it (core `api/fit.rs`). When a fit has start rows but no such line (a fit
+# object edited by hand), a count. NULL for a single-start fit.
+.ferx_multi_start_line <- function(fit) {
+  s <- fit$starts
+  if (!is.data.frame(s) || nrow(s) == 0L) return(NULL)
+  w <- as.character(unlist(fit$warnings, use.names = FALSE) %||% character(0))
+  line <- w[grepl("^Multi-start: [0-9]+ starts, ", w)]
+  if (length(line) > 0L) return(line[[1L]])
+  sprintf("Multi-start: %d starts", nrow(s))
+}
+
 # The `[mixture]` per-class override rows every R surface shows (ferx-core
 # #2833), in `fit$mixture_overrides` order: `fit$mixture_override_params` with
 # each override's `estimate` (a class variance for an omega override, a class
@@ -1015,6 +1073,9 @@
   # The `[mixture]` per-class overrides (ferx-core #2833): one descriptor row
   # per value, which names the values and their standard errors.
   result <- .ferx_name_mixture_overrides(result)
+  # What each start of a multi-start fit did (ferx-core #2867); zero rows for
+  # a single-start fit.
+  result$starts <- .ferx_starts_frame(result$starts, result$theta_names)
   # The engine's verdict (ferx-core #2799): reasons as a character vector,
   # empty for a clean fit.
   result$status_reasons <- as.character(unlist(result$status_reasons, use.names = FALSE) %||% character(0))

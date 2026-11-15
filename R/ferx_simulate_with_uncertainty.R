@@ -60,12 +60,20 @@
 #' @param n_sim_per_draw Number of eta/eps replicates per parameter draw
 #' @param method Either \code{"asymptotic"} (default) or \code{"sir"}
 #' @param seed Random seed for reproducibility
+#' @param horizon Optional administrative censoring time for time-to-event
+#'   (TTE) endpoints, applied to every draw, as in \code{\link{ferx_simulate}}
+#'   (ferx-core #2003). A finite, positive \code{horizon} is required to
+#'   simulate a repeated-event (\code{type = rtte}) or drug-driven (joint
+#'   PK-TTE) model; without one such a model is refused
+#'   (\code{E_SIMULATE_HORIZON}). Purely-Gaussian models ignore it. \code{NULL}
+#'   (default) leaves it unset.
 #'
 #' @return A data.frame with columns: DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
-#'   OBSERVED. \code{CMT} is the observation compartment; \code{OBSERVED} is
-#'   \code{NA} throughout (this path is Gaussian-only - a drug-driven ODE-TTE
-#'   endpoint is not supported here, and \code{OBSERVED} never echoes the input
-#'   \code{DV}; see \code{\link{ferx_simulate}} for what each column holds).
+#'   OBSERVED, each holding what it holds in \code{\link{ferx_simulate}}:
+#'   \code{CMT} is the observation compartment, and \code{OBSERVED} is the
+#'   event indicator of a TTE row (1 = the event fired before \code{horizon},
+#'   0 = censored) and \code{NA} on every other row. It never echoes the input
+#'   \code{DV}.
 #'   A \code{[mixture]} model adds an integer \code{MIXNUM} column, the class
 #'   each subject was drawn into for that \code{DRAW} and \code{SIM}; it is
 #'   absent for any other model.
@@ -124,10 +132,17 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
                                            n_uncertainty_draws = 100L,
                                            n_sim_per_draw = 1L,
                                            method = c("asymptotic", "sir"),
-                                           seed = 42L) {
+                                           seed = 42L,
+                                           horizon = NULL) {
   data <- .ferx_data_arg(data)
   stopifnot(file.exists(model), file.exists(data))
   method <- match.arg(method)
+  if (!is.null(horizon) &&
+      (length(horizon) != 1L || !is.numeric(horizon) || !is.finite(horizon) ||
+         horizon <= 0)) {
+    stop("`horizon` must be a single finite positive number (or NULL).",
+         call. = FALSE)
+  }
 
   # Check the cheap, user-facing arg constraints before the fit-object
   # validation so callers passing `n_uncertainty_draws = 0` see the obvious
@@ -142,8 +157,11 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
   fit_pieces <- validate_fit_for_params(fit)
   unc_pieces <- validate_fit_for_uncertainty(fit, method)
 
-  # A refusal is an R error, classed like a refused `ferx_fit()` (#385).
-  res <- .ferx_engine_call(
+  # A refusal is an R error, classed like a refused `ferx_fit()` (#385). A
+  # horizon refusal names the engine's option, backticked when it is missing
+  # and bare when a value is refused (one below a subject's entry time); here
+  # it is this argument either way, so the bare name is swapped.
+  res <- .ferx_engine_spelling(.ferx_engine_call(
     ferx_rust_simulate_with_uncertainty(
       model_path           = normalizePath(model),
       data_path            = normalizePath(data),
@@ -168,10 +186,12 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
       iov_occasion         = fit_pieces$iov_occasion,
       n_uncertainty_draws  = as.integer(n_uncertainty_draws),
       n_sim_per_draw       = as.integer(n_sim_per_draw),
-      seed                 = as.integer(seed)
+      seed                 = as.integer(seed),
+      # -1 is the glue's "unset", as in `ferx_simulate()`.
+      horizon              = if (is.null(horizon)) -1 else as.numeric(horizon)
     ),
     model, data
-  )
+  ), "E_SIMULATE_HORIZON", "SimulateUncertaintyOptions.horizon", "horizon")
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run, skipped draws included (ferx-r #426).

@@ -11,7 +11,8 @@ ferx_simulate_with_uncertainty(
   n_uncertainty_draws = 100L,
   n_sim_per_draw = 1L,
   method = c("asymptotic", "sir"),
-  seed = 42L
+  seed = 42L,
+  horizon = NULL
 )
 }
 \arguments{
@@ -42,13 +43,22 @@ uncertainty distribution}
 \item{method}{Either \code{"asymptotic"} (default) or \code{"sir"}}
 
 \item{seed}{Random seed for reproducibility}
+
+\item{horizon}{Optional administrative censoring time for time-to-event
+(TTE) endpoints, applied to every draw, as in \code{\link{ferx_simulate}}
+(ferx-core #2003). A finite, positive \code{horizon} is required to
+simulate a repeated-event (\code{type = rtte}) or drug-driven (joint
+PK-TTE) model; without one such a model is refused
+(\code{E_SIMULATE_HORIZON}). Purely-Gaussian models ignore it. \code{NULL}
+(default) leaves it unset.}
 }
 \value{
 A data.frame with columns: DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
-OBSERVED. \code{CMT} is the observation compartment; \code{OBSERVED} is
-\code{NA} throughout (this path is Gaussian-only - a drug-driven ODE-TTE
-endpoint is not supported here, and \code{OBSERVED} never echoes the input
-\code{DV}; see \code{\link{ferx_simulate}} for what each column holds).
+OBSERVED, each holding what it holds in \code{\link{ferx_simulate}}:
+\code{CMT} is the observation compartment, and \code{OBSERVED} is the
+event indicator of a TTE row (1 = the event fired before \code{horizon},
+0 = censored) and \code{NA} on every other row. It never echoes the input
+\code{DV}.
 A \code{[mixture]} model adds an integer \code{MIXNUM} column, the class
 each subject was drawn into for that \code{DRAW} and \code{SIM}; it is
 absent for any other model.

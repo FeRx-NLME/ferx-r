@@ -148,14 +148,16 @@ test_that("a missing section is the engine's E_MISSING_BLOCK, marked in the repo
 test_that("a retired section is labelled retired, not unknown", {
   # `ferx_rust_known_blocks()` lists only what this build *accepts*, so a
   # retired name lands in the R-side `unknown` set. Printing `[unknown section]`
-  # for it contradicts the engine's own E_DEPRECATED_BLOCK line right below,
-  # which says the block was retired and should be deleted.
+  # for it contradicts the engine's own W_DEPRECATED_BLOCK line right below,
+  # which says the block was retired and is ignored. Since ferx-core #2913 the
+  # block is a warning, not a parse error, so the model is still valid.
   lines <- c(VALID_WARFARIN_SECTIONS, "", "[initial_values]", "  TVCL = 0.134")
   path  <- write_ferx(lines)
   on.exit(unlink(path))
   out <- capture.output(res <- ferx_model_validate(path))
-  expect_false(isTRUE(res$ok))
-  expect_true("E_DEPRECATED_BLOCK" %in% res$diagnostics$code)
+  expect_true(isTRUE(res$ok))
+  expect_true("W_DEPRECATED_BLOCK" %in% res$diagnostics$code)
+  expect_false("E_DEPRECATED_BLOCK" %in% res$diagnostics$code)
   expect_true(any(grepl("initial_values +\\[retired section\\]", out)))
   expect_false(any(grepl("unknown section", out, fixed = TRUE)))
 })
