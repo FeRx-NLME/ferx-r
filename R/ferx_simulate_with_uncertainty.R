@@ -158,7 +158,9 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
   unc_pieces <- validate_fit_for_uncertainty(fit, method)
 
   # A refusal is an R error, classed like a refused `ferx_fit()` (#385). A
-  # missing horizon names the engine's option; here it is this argument.
+  # horizon refusal names the engine's option, backticked when it is missing
+  # and bare when a value is refused (one below a subject's entry time); here
+  # it is this argument either way, so the bare name is swapped.
   res <- .ferx_engine_spelling(.ferx_engine_call(
     ferx_rust_simulate_with_uncertainty(
       model_path           = normalizePath(model),
@@ -189,7 +191,7 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
       horizon              = if (is.null(horizon)) -1 else as.numeric(horizon)
     ),
     model, data
-  ), "E_SIMULATE_HORIZON", "`SimulateUncertaintyOptions.horizon`", "`horizon`")
+  ), "E_SIMULATE_HORIZON", "SimulateUncertaintyOptions.horizon", "horizon")
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run, skipped draws included (ferx-r #426).

@@ -593,3 +593,28 @@ test_that("horizon reaches every draw of a drug-driven TTE model (ferx-core #200
     "`horizon` must be a single finite positive number"
   )
 })
+
+test_that("a horizon below an entry time names `horizon`, not the engine option (#753 review, 2)", {
+  # core's entry-time check names the option unbackticked; the R swap covers it.
+  # Left truncation needs an analytic TTE endpoint (joint PK-TTE refuses it first),
+  # and the entry time must not pass the record's own TIME (core skips that row).
+  ex  <- ferx_example("tte_exponential")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, covariance = TRUE,
+                                   verbose = FALSE))
+  skip_if(is.null(fit$cov_matrix), "covariance step failed")
+  d <- utils::read.csv(ex$data)
+  d$TENTRY <- 0
+  row <- which(d$CMT == 2)[1L]
+  d$TENTRY[row] <- d$TIME[row]
+  h <- d$TIME[row] / 2
+  e <- tryCatch(
+    ferx_simulate_with_uncertainty(ex$model, d, fit, n_uncertainty_draws = 2L,
+                                   n_sim_per_draw = 1L, horizon = h),
+    error = function(e) e
+  )
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_SIMULATE_HORIZON")
+  expect_match(conditionMessage(e), sprintf("horizon (%s) is below subject", h),
+               fixed = TRUE)
+  expect_false(grepl("SimulateUncertaintyOptions", conditionMessage(e), fixed = TRUE))
+})
