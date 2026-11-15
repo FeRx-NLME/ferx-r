@@ -200,6 +200,25 @@ test_that("max_order is refused on a single-event endpoint, and checked in R", {
   expect_identical(e$code, "E_VPC_TTE_INPUT")
 })
 
+test_that("an endpoint that does not resolve gets core's reason, with or without max_order", {
+  # #754 review, finding 1: `max_order` used to be refused as "single-event"
+  # whenever the endpoint did not resolve, hiding what was wrong.
+  ex <- ferx_example("tte_exponential")
+  for (mo in list(NULL, 2L)) {
+    e <- tryCatch(ferx_vpc_tte(ex$model, ex$data, n_sim = 20L, cmt = 3L,
+                               max_order = mo), error = function(e) e)
+    expect_s3_class(e, "ferx_engine_error")
+    expect_identical(e$code, "E_VPC_TTE_INPUT")
+    expect_match(conditionMessage(e), "`cmt = 3` is not a TTE endpoint", fixed = TRUE)
+    expect_false(grepl("single-event", conditionMessage(e), fixed = TRUE))
+  }
+  w <- ferx_example("warfarin")
+  e <- tryCatch(ferx_vpc_tte(w$model, w$data, n_sim = 20L, max_order = 2L),
+                error = function(e) e)
+  expect_identical(e$code, "E_VPC_TTE_INPUT")
+  expect_match(conditionMessage(e), "declares no TTE endpoint")
+})
+
 test_that("plot() draws the MCF and the curves by order", {
   v <- rtte_vpc(rtte_data(), n_sim = 20L, seed = 1L, max_order = 2)
   pdf(NULL)

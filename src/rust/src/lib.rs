@@ -2211,7 +2211,8 @@ fn ferx_rust_vpc_tte_from_fit(
 
 /// Kaplan-Meier mean covariate (KMMC) VPC for a single-event TTE endpoint at
 /// the model file's initial values (ferx-core #1886 PR3, `vpc_kmmc`). The
-/// arguments are those of `ferx_rust_vpc_tte`, plus:
+/// arguments are those of `ferx_rust_vpc_tte` without `max_order`, then
+/// `covariate`, `level` and `min_at_risk`.
 ///
 /// @param model_path Path to .ferx model file
 /// @param data_path Path to NONMEM-format CSV with the observed TTE records
@@ -2423,16 +2424,18 @@ impl VpcRun {
     /// Core's `vpc_tte` for a single-event endpoint, `vpc_rtte` for a
     /// repeated-events one (#1886 PR2). Which one is core's own endpoint rule,
     /// read off the endpoint `opts.cmt` names or the model's only TTE endpoint;
-    /// any other case (no TTE endpoint, several and no `cmt`) goes to `vpc_tte`,
-    /// whose refusal says what is wrong.
+    /// an endpoint that does not resolve (no TTE endpoint, several and no `cmt`,
+    /// a `cmt` that is not a TTE endpoint) goes to `vpc_tte`, whose refusal says
+    /// what is wrong, with or without `max_order` (#754 review, finding 1).
     fn km_or_rtte(
         self,
         opts: ferx_core::VpcTteOptions,
         max_order: i32,
     ) -> std::result::Result<Robj, String> {
         let model = &self.parsed.model;
-        if !is_rtte_endpoint(model, opts.cmt) {
-            if max_order > 0 {
+        let repeated = tte_endpoint_is_repeated(model, opts.cmt);
+        if repeated != Some(true) {
+            if repeated == Some(false) && max_order > 0 {
                 return Err(argument_refusal(
                     "ferx_vpc_tte: `max_order` applies to a repeated-events (RTTE) endpoint; \
                      this one is single-event."
@@ -2466,29 +2469,25 @@ impl VpcRun {
     }
 }
 
-/// Whether the endpoint a TTE VPC checks is a repeated-events one: the endpoint
-/// `cmt` names, else the model's only TTE endpoint, by the endpoint kind core's
-/// own `vpc_tte` / `vpc_rtte` check (`TteRecurrence::Repeated`).
-#[cfg(feature = "survival")]
-fn is_rtte_endpoint(model: &CompiledModel, cmt: Option<usize>) -> bool {
+/// The kind of the endpoint a TTE VPC checks, the endpoint `cmt` names or else
+/// the model's only TTE endpoint: `Some(true)` for a repeated-events one,
+/// `Some(false)` for a single-event one, by the endpoint kind core's own
+/// `vpc_tte` / `vpc_rtte` check (`TteRecurrence::Repeated`). `None` when that
+/// is no TTE endpoint (a `cmt` that names none, no TTE endpoint, several and no
+/// `cmt`), which core's `vpc_tte` refuses with the reason.
+fn tte_endpoint_is_repeated(model: &CompiledModel, cmt: Option<usize>) -> Option<bool> {
     let tte = model.tte_cmts();
     let c = match (cmt, tte.as_slice()) {
         (Some(c), _) => c,
         (None, [only]) => *only,
-        _ => return false,
+        _ => return None,
     };
-    matches!(
-        model.endpoints.get(&c),
-        Some(ferx_core::EndpointLikelihood::Tte {
-            recurrence: ferx_core::TteRecurrence::Repeated { .. },
-            ..
-        })
-    )
-}
-
-#[cfg(not(feature = "survival"))]
-fn is_rtte_endpoint(_model: &CompiledModel, _cmt: Option<usize>) -> bool {
-    false
+    match model.endpoints.get(&c) {
+        Some(ferx_core::EndpointLikelihood::Tte { recurrence, .. }) => {
+            Some(matches!(recurrence, ferx_core::TteRecurrence::Repeated { .. }))
+        }
+        _ => None,
+    }
 }
 
 /// `VpcKmmcOptions` from the Kaplan-Meier VPC options and the R arguments; a
@@ -4776,7 +4775,10 @@ fn tte_npde_into_fit(fit: &mut FitResult, columns: &[(String, Vec<f64>)]) -> boo
     for subject in &mut fit.subjects {
         for row in &mut subject.tte_rows {
             let Some(&v) = npde.get(at) else { return false };
-            if v.to_bits() != row.npde.to_bits() {
+            // Any NaN is "no score": R's NA_real_ is a NaN with its own payload,
+            // which never equals core's bit for bit (#754 review, finding 4).
+            let same = v.to_bits() == row.npde.to_bits() || (v.is_nan() && row.npde.is_nan());
+            if !same {
                 row.npde = v;
                 changed = true;
             }
