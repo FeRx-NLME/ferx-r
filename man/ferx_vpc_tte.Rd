@@ -16,7 +16,8 @@ ferx_vpc_tte(
   cmt = NULL,
   horizon = NULL,
   probs = c(0.05, 0.5, 0.95),
-  grid = "auto"
+  grid = "auto",
+  max_order = NULL
 )
 }
 \arguments{
@@ -60,9 +61,17 @@ the lower bound, the middle line and the upper bound.}
 stratum's observed times and 101 evenly spaced points up to \code{H}),
 \code{"all_steps"} (also every step of every replicate curve: exact step
 ribbons, on a large grid), or a numeric vector of times.}
+
+\item{max_order}{For a repeated-events endpoint, the highest event order
+\eqn{K}: absolute-time curves for orders 1 to \eqn{K} and gap-time curves
+for 2 to \eqn{K}, the same \eqn{K} in every stratum. \code{NULL}
+(default) takes the largest order at least 10 observed subjects (across
+strata) reached, and at least 1. Refused, as an R error without a code,
+on a single-event endpoint.}
 }
 \value{
-An object of class \code{ferx_vpc_tte}, a list with:
+On a single-event endpoint, an object of class \code{ferx_vpc_tte},
+a list with:
 \describe{
 \item{\code{observed}}{The observed Kaplan-Meier curve, one row per
 distinct time per stratum: \code{STRATUM}, \code{time},
@@ -86,14 +95,71 @@ reader's, also raised as an R warning.}
 }
 \code{STRATUM} is a factor whose levels are in the engine's stratum order
 (ascending value).
+
+On a repeated-events endpoint, an object of class \code{ferx_vpc_rtte},
+a list with \code{strata}, \code{cmt}, \code{horizon}, \code{n_sim},
+\code{probs}, \code{censoring} and \code{warnings} as above, and:
+\describe{
+\item{\code{max_order}}{The highest event order returned.}
+\item{\code{mcf}}{The observed mean cumulative function, one row per
+event time per stratum: \code{STRATUM}, \code{time}, \code{n_risk}
+(subjects still under follow-up), \code{n_event} and \code{mcf}.}
+\item{\code{mcf_band}}{Its band on the grid, laid out as \code{band}
+above.}
+\item{\code{absolute}, \code{gap}}{The observed Kaplan-Meier curves by
+event order on absolute and on gap time: \code{STRATUM}, \code{order},
+\code{time}, \code{n_risk}, \code{n_event}, \code{n_censor} and
+\code{surv}.}
+\item{\code{absolute_band}, \code{gap_band}}{Their bands, laid out as
+\code{band} with an \code{order} column. A gap-time order no observed
+subject reached in a stratum has no observed rows and an \code{NA}
+band.}
+\item{\code{orders}}{One row per stratum, clock (\code{"absolute"} or
+\code{"gap"}) and order, with the observed subjects in that curve.}
+}
 }
 \description{
 Simulates the observed design \code{n_sim} times and returns, per stratum,
 the observed Kaplan-Meier curve beside the pointwise band of the replicate
 Kaplan-Meier curves, for one single-event time-to-event (TTE) endpoint.
-Everything is computed by ferx-core (\code{vpc_tte()}, ferx-core #1886);
-this function only carries the result into R. It never refits.
+On a repeated-events (RTTE) endpoint it returns the RTTE VPC instead: the
+mean cumulative function and Kaplan-Meier curves by event order (see the
+section below). Everything is computed by ferx-core (\code{vpc_tte()} and
+\code{vpc_rtte()}, ferx-core #1886); this function only carries the result
+into R. It never refits.
 }
+\section{Repeated-events endpoints}{
+
+When the endpoint (\code{cmt}, or the model's only TTE endpoint) is declared
+\code{type = rtte}, the result is a \code{ferx_vpc_rtte} object with three
+families of observed curves, each beside the pointwise band of the same
+curve over the replicates:
+\itemize{
+\item the mean cumulative function (MCF), the expected number of events
+per subject by time \eqn{t}, with every subject at risk while it is
+under follow-up;
+\item the Kaplan-Meier curve of the time to the \eqn{k}-th event
+(absolute time), orders 1 to \code{max_order}: the probability of fewer
+than \eqn{k} events by \eqn{t};
+\item the Kaplan-Meier curve of the time from the \eqn{(k-1)}-th event to
+the \eqn{k}-th (gap time), orders 2 to \code{max_order}, over the
+subjects that had \eqn{k - 1} events. Those are selected by their
+earlier events, so this is a predictive check, not an estimate of the
+marginal gap-time distribution.
+}
+A subject's follow-up ends at its last record on the endpoint, event or
+censoring. Under \code{censoring = "observed"} each replicate subject is
+cut at its own observed follow-up end (a recurrent subject's end is always
+observed, so nothing is drawn); \code{"horizon"} follows every replicate
+subject to \code{H}. The observed data are read on \code{[0, H]} only, as
+the replicates are. The observed curves match \code{survival::survfit} row
+for row, and \code{max_order} defaults to the largest order at least 10
+observed subjects reached. A subject whose last record is an event raises
+\code{W_VPC_RTTE_ENDS_ON_EVENT}: it has an event exactly at its follow-up
+end, which a replicate almost never has, so add a censoring record at its
+real end of follow-up.
+}
+
 \section{The curve and the band}{
 
 The observed curve uses \code{survival::survfit}'s tie convention (at a
@@ -122,6 +188,12 @@ censored like the data, which is what makes the observed curve comparable
 with the band. \code{censoring = "horizon"} censors every replicate at
 \code{H} only, which gives too narrow a band when the data are censored
 before \code{H}. The draws are seeded by \code{seed}.
+
+The observed records are read on \code{[0, H]} only (ferx-core #2950): with
+a \code{horizon} below the data's follow-up, a record after it is a
+censoring at \code{H}. The curve and its band up to \code{H} are unchanged,
+\code{observed} ends at \code{H}, and the observed value at a \code{grid}
+time past \code{H} is \code{NA}.
 }
 
 \section{What it refuses}{
@@ -132,7 +204,7 @@ without a TTE endpoint; several TTE endpoints and no \code{cmt} (under
 competing risks one minus the Kaplan-Meier curve of one cause is not its
 cumulative incidence; with \code{cmt} set, the curve is that cause's
 survival with the other causes as censoring); a \code{cmt} that is not a TTE
-endpoint; a repeated-events endpoint; left truncation (delayed entry); an
+endpoint; left truncation (delayed entry); an
 interval-censored record; more than one record per subject on the endpoint;
 a subject id that appears in two separate runs of rows; no record on the
 endpoint at all; band probabilities not strictly increasing inside (0, 1),
@@ -147,9 +219,34 @@ vpc <- ferx_vpc_tte(ex$model, ex$data, n_sim = 50L, seed = 1L)
 vpc
 plot(vpc)
 
+\donttest{
+# A repeated-events endpoint: simulate a dataset from an RTTE model, then
+# check the model against it.
+m <- tempfile(fileext = ".ferx")
+writeLines(c(
+  "[parameters]",
+  "  theta TVLAMBDA(0.1, 0.001, 10.0)",
+  "  omega ETA_LAMBDA ~ 0.09",
+  "[event_model]",
+  "  cmt    = 2",
+  "  type   = rtte",
+  "  family = exponential",
+  "  scale  = TVLAMBDA * exp(ETA_LAMBDA)"
+), m)
+design <- data.frame(ID = 1:60, TIME = 30, DV = 0, EVID = 0L, AMT = 0,
+                     CMT = 2L, MDV = 0L)
+sim <- ferx_simulate(m, design, n_sim = 1L, seed = 2L, horizon = 30)
+obs <- data.frame(ID = sim$ID, TIME = sim$TIME, DV = sim$OBSERVED,
+                  EVID = 0L, AMT = 0, CMT = 2L, MDV = 0L)
+rv <- ferx_vpc_tte(m, obs, n_sim = 50L, seed = 1L)
+rv
+plot(rv)
+}
+
 }
 \seealso{
-\code{\link{plot.ferx_vpc_tte}}, \code{\link{ferx_predict_survival}}
+\code{\link{plot.ferx_vpc_tte}}, \code{\link{plot.ferx_vpc_rtte}},
+\code{\link{ferx_vpc_kmmc}}, \code{\link{ferx_predict_survival}}
 
 Other simulation:
 \code{\link[=ferx_calc_npde]{ferx_calc_npde()}},
@@ -159,6 +256,7 @@ Other simulation:
 \code{\link[=ferx_sim_parameters]{ferx_sim_parameters()}},
 \code{\link[=ferx_simulate]{ferx_simulate()}},
 \code{\link[=ferx_simulate_adaptive]{ferx_simulate_adaptive()}},
-\code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}}
+\code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}},
+\code{\link[=ferx_vpc_kmmc]{ferx_vpc_kmmc()}}
 }
 \concept{simulation}

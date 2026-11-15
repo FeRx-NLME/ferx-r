@@ -16,7 +16,8 @@ ferx_rust_vpc_tte(
   stratify,
   strata_covariate,
   cmt,
-  horizon
+  horizon,
+  max_order
 )
 }
 \description{

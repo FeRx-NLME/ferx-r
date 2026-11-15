@@ -3,8 +3,41 @@
 #' Simulates the observed design \code{n_sim} times and returns, per stratum,
 #' the observed Kaplan-Meier curve beside the pointwise band of the replicate
 #' Kaplan-Meier curves, for one single-event time-to-event (TTE) endpoint.
-#' Everything is computed by ferx-core (\code{vpc_tte()}, ferx-core #1886);
-#' this function only carries the result into R. It never refits.
+#' On a repeated-events (RTTE) endpoint it returns the RTTE VPC instead: the
+#' mean cumulative function and Kaplan-Meier curves by event order (see the
+#' section below). Everything is computed by ferx-core (\code{vpc_tte()} and
+#' \code{vpc_rtte()}, ferx-core #1886); this function only carries the result
+#' into R. It never refits.
+#'
+#' @section Repeated-events endpoints:
+#' When the endpoint (\code{cmt}, or the model's only TTE endpoint) is declared
+#' \code{type = rtte}, the result is a \code{ferx_vpc_rtte} object with three
+#' families of observed curves, each beside the pointwise band of the same
+#' curve over the replicates:
+#' \itemize{
+#'   \item the mean cumulative function (MCF), the expected number of events
+#'     per subject by time \eqn{t}, with every subject at risk while it is
+#'     under follow-up;
+#'   \item the Kaplan-Meier curve of the time to the \eqn{k}-th event
+#'     (absolute time), orders 1 to \code{max_order}: the probability of fewer
+#'     than \eqn{k} events by \eqn{t};
+#'   \item the Kaplan-Meier curve of the time from the \eqn{(k-1)}-th event to
+#'     the \eqn{k}-th (gap time), orders 2 to \code{max_order}, over the
+#'     subjects that had \eqn{k - 1} events. Those are selected by their
+#'     earlier events, so this is a predictive check, not an estimate of the
+#'     marginal gap-time distribution.
+#' }
+#' A subject's follow-up ends at its last record on the endpoint, event or
+#' censoring. Under \code{censoring = "observed"} each replicate subject is
+#' cut at its own observed follow-up end (a recurrent subject's end is always
+#' observed, so nothing is drawn); \code{"horizon"} follows every replicate
+#' subject to \code{H}. The observed data are read on \code{[0, H]} only, as
+#' the replicates are. The observed curves match \code{survival::survfit} row
+#' for row, and \code{max_order} defaults to the largest order at least 10
+#' observed subjects reached. A subject whose last record is an event raises
+#' \code{W_VPC_RTTE_ENDS_ON_EVENT}: it has an event exactly at its follow-up
+#' end, which a replicate almost never has, so add a censoring record at its
+#' real end of follow-up.
 #'
 #' @section The curve and the band:
 #' The observed curve uses \code{survival::survfit}'s tie convention (at a
@@ -32,6 +65,12 @@
 #' \code{H} only, which gives too narrow a band when the data are censored
 #' before \code{H}. The draws are seeded by \code{seed}.
 #'
+#' The observed records are read on \code{[0, H]} only (ferx-core #2950): with
+#' a \code{horizon} below the data's follow-up, a record after it is a
+#' censoring at \code{H}. The curve and its band up to \code{H} are unchanged,
+#' \code{observed} ends at \code{H}, and the observed value at a \code{grid}
+#' time past \code{H} is \code{NA}.
+#'
 #' @section What it refuses:
 #' An input the curve or the band would be wrong on is an R error of class
 #' \code{ferx_engine_error} with \code{e$code == "E_VPC_TTE_INPUT"}: a model
@@ -39,7 +78,7 @@
 #' competing risks one minus the Kaplan-Meier curve of one cause is not its
 #' cumulative incidence; with \code{cmt} set, the curve is that cause's
 #' survival with the other causes as censoring); a \code{cmt} that is not a TTE
-#' endpoint; a repeated-events endpoint; left truncation (delayed entry); an
+#' endpoint; left truncation (delayed entry); an
 #' interval-censored record; more than one record per subject on the endpoint;
 #' a subject id that appears in two separate runs of rows; no record on the
 #' endpoint at all; band probabilities not strictly increasing inside (0, 1),
@@ -76,8 +115,15 @@
 #'   stratum's observed times and 101 evenly spaced points up to \code{H}),
 #'   \code{"all_steps"} (also every step of every replicate curve: exact step
 #'   ribbons, on a large grid), or a numeric vector of times.
+#' @param max_order For a repeated-events endpoint, the highest event order
+#'   \eqn{K}: absolute-time curves for orders 1 to \eqn{K} and gap-time curves
+#'   for 2 to \eqn{K}, the same \eqn{K} in every stratum. \code{NULL}
+#'   (default) takes the largest order at least 10 observed subjects (across
+#'   strata) reached, and at least 1. Refused, as an R error without a code,
+#'   on a single-event endpoint.
 #'
-#' @return An object of class \code{ferx_vpc_tte}, a list with:
+#' @return On a single-event endpoint, an object of class \code{ferx_vpc_tte},
+#'   a list with:
 #'   \describe{
 #'     \item{\code{observed}}{The observed Kaplan-Meier curve, one row per
 #'       distinct time per stratum: \code{STRATUM}, \code{time},
@@ -102,21 +148,87 @@
 #'   \code{STRATUM} is a factor whose levels are in the engine's stratum order
 #'   (ascending value).
 #'
+#'   On a repeated-events endpoint, an object of class \code{ferx_vpc_rtte},
+#'   a list with \code{strata}, \code{cmt}, \code{horizon}, \code{n_sim},
+#'   \code{probs}, \code{censoring} and \code{warnings} as above, and:
+#'   \describe{
+#'     \item{\code{max_order}}{The highest event order returned.}
+#'     \item{\code{mcf}}{The observed mean cumulative function, one row per
+#'       event time per stratum: \code{STRATUM}, \code{time}, \code{n_risk}
+#'       (subjects still under follow-up), \code{n_event} and \code{mcf}.}
+#'     \item{\code{mcf_band}}{Its band on the grid, laid out as \code{band}
+#'       above.}
+#'     \item{\code{absolute}, \code{gap}}{The observed Kaplan-Meier curves by
+#'       event order on absolute and on gap time: \code{STRATUM}, \code{order},
+#'       \code{time}, \code{n_risk}, \code{n_event}, \code{n_censor} and
+#'       \code{surv}.}
+#'     \item{\code{absolute_band}, \code{gap_band}}{Their bands, laid out as
+#'       \code{band} with an \code{order} column. A gap-time order no observed
+#'       subject reached in a stratum has no observed rows and an \code{NA}
+#'       band.}
+#'     \item{\code{orders}}{One row per stratum, clock (\code{"absolute"} or
+#'       \code{"gap"}) and order, with the observed subjects in that curve.}
+#'   }
+#'
 #' @examples
 #' ex <- ferx_example("tte_weibull")
 #' vpc <- ferx_vpc_tte(ex$model, ex$data, n_sim = 50L, seed = 1L)
 #' vpc
 #' plot(vpc)
 #'
-#' @seealso \code{\link{plot.ferx_vpc_tte}}, \code{\link{ferx_predict_survival}}
+#' \donttest{
+#' # A repeated-events endpoint: simulate a dataset from an RTTE model, then
+#' # check the model against it.
+#' m <- tempfile(fileext = ".ferx")
+#' writeLines(c(
+#'   "[parameters]",
+#'   "  theta TVLAMBDA(0.1, 0.001, 10.0)",
+#'   "  omega ETA_LAMBDA ~ 0.09",
+#'   "[event_model]",
+#'   "  cmt    = 2",
+#'   "  type   = rtte",
+#'   "  family = exponential",
+#'   "  scale  = TVLAMBDA * exp(ETA_LAMBDA)"
+#' ), m)
+#' design <- data.frame(ID = 1:60, TIME = 30, DV = 0, EVID = 0L, AMT = 0,
+#'                      CMT = 2L, MDV = 0L)
+#' sim <- ferx_simulate(m, design, n_sim = 1L, seed = 2L, horizon = 30)
+#' obs <- data.frame(ID = sim$ID, TIME = sim$TIME, DV = sim$OBSERVED,
+#'                   EVID = 0L, AMT = 0, CMT = 2L, MDV = 0L)
+#' rv <- ferx_vpc_tte(m, obs, n_sim = 50L, seed = 1L)
+#' rv
+#' plot(rv)
+#' }
+#'
+#' @seealso \code{\link{plot.ferx_vpc_tte}}, \code{\link{plot.ferx_vpc_rtte}},
+#'   \code{\link{ferx_vpc_kmmc}}, \code{\link{ferx_predict_survival}}
 #' @family simulation
 #' @export
 ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
                          fit = NULL, strata = NULL, by_dose = FALSE,
                          censoring = c("observed", "horizon"), cmt = NULL,
                          horizon = NULL, probs = c(0.05, 0.5, 0.95),
-                         grid = "auto") {
+                         grid = "auto", max_order = NULL) {
   censoring <- match.arg(censoring)
+  if (!is.null(max_order)) .ferx_vpc_tte_count(max_order, "max_order", min = 1)
+  args <- .ferx_vpc_args(model, data, fit, n_sim, seed, strata, by_dose,
+                         censoring, cmt, horizon, probs, grid)
+  # 0 is the glue's "let the engine choose".
+  extra <- list(max_order = if (is.null(max_order)) 0L else as.integer(max_order))
+  res <- .ferx_vpc_call(args, fit, ferx_rust_vpc_tte, ferx_rust_vpc_tte_from_fit,
+                        extra, "ferx_vpc_tte")
+  if (identical(res$kind, "rtte")) {
+    .ferx_vpc_rtte_object(res)
+  } else {
+    .ferx_vpc_tte_object(res)
+  }
+}
+
+# The arguments every TTE VPC shares, checked, and the glue's spelling of them
+# (`shared`), with the model and data paths. The engine checks the values it
+# owns (the probabilities, the grid times) and refuses with E_VPC_TTE_INPUT.
+.ferx_vpc_args <- function(model, data, fit, n_sim, seed, strata, by_dose,
+                           censoring, cmt, horizon, probs, grid) {
   if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
@@ -171,37 +283,47 @@ ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
          call. = FALSE)
   }
 
-  shared <- list(
-    n_sim = as.integer(n_sim),
-    seed = as.integer(seed),
-    probs = as.numeric(probs),
-    grid = grid_mode,
-    grid_times = grid_times,
-    censoring = censoring,
-    stratify = stratify,
-    strata_covariate = if (is.null(strata)) "" else strata,
-    cmt = if (is.null(cmt)) 0L else as.integer(cmt),
-    # -1 is the "unset" sentinel the glue reads as the latest recorded time.
-    horizon = if (is.null(horizon)) -1 else as.numeric(horizon)
+  list(
+    model = model,
+    data = data,
+    paths = list(model_path = normalizePath(model),
+                 data_path = normalizePath(data)),
+    shared = list(
+      n_sim = as.integer(n_sim),
+      seed = as.integer(seed),
+      probs = as.numeric(probs),
+      grid = grid_mode,
+      grid_times = grid_times,
+      censoring = censoring,
+      stratify = stratify,
+      strata_covariate = if (is.null(strata)) "" else strata,
+      cmt = if (is.null(cmt)) 0L else as.integer(cmt),
+      # -1 is the "unset" sentinel the glue reads as the latest recorded time.
+      horizon = if (is.null(horizon)) -1 else as.numeric(horizon)
+    )
   )
-  paths <- list(model_path = normalizePath(model),
-                data_path = normalizePath(data))
-  # A refusal is an R error, classed like a refused `ferx_fit()` (#385).
+}
+
+# One VPC glue call, at the model file's values (`at_file`) or at `fit`'s
+# parameters (`at_fit`), with `extra` arguments after the shared ones. A
+# refusal is an R error, classed like a refused `ferx_fit()` (#385); the
+# engine's warnings are raised as an R warning and kept on the result.
+.ferx_vpc_call <- function(args, fit, at_file, at_fit, extra, fn) {
   res <- if (is.null(fit)) {
-    .ferx_engine_call(do.call(ferx_rust_vpc_tte, c(paths, shared)), model, data)
+    .ferx_engine_call(do.call(at_file, c(args$paths, args$shared, extra)),
+                      args$model, args$data)
   } else {
     fit_pieces <- validate_fit_for_params(fit)
     .ferx_engine_call(
-      do.call(ferx_rust_vpc_tte_from_fit, c(paths, fit_pieces[c(
+      do.call(at_fit, c(args$paths, fit_pieces[c(
         "theta", "omega_flat", "omega_dim", "sigma", "omega_iov_flat",
         "omega_iov_dim", "residual_rho", "residual_rho_pairs",
         "mixture_overrides", "fit_bindings", "iov_occasion"
-      )], shared)),
-      model, data
+      )], args$shared, extra)),
+      args$model, args$data
     )
   }
-  res <- .ferx_surface_sim_warnings(res, "ferx_vpc_tte")
-  .ferx_vpc_tte_object(res)
+  .ferx_surface_sim_warnings(res, fn)
 }
 
 # A single whole number >= `min`, for the integer arguments the glue takes.
@@ -213,30 +335,50 @@ ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
   }
 }
 
-# The glue's per-stratum lists as long tables with a STRATUM factor. Only a
-# reshape: every number is core's.
-.ferx_vpc_tte_object <- function(res) {
-  strata <- res$strata
+# One table per stratum, stacked, with a STRATUM factor in the engine's
+# stratum order. Only a reshape: every number is core's.
+.ferx_vpc_stack <- function(strata, field) {
   labels <- vapply(strata, function(s) s$label, character(1))
-  tag <- function(field) {
-    out <- do.call(rbind, lapply(strata, function(s) {
-      d <- s[[field]]
-      cbind(data.frame(STRATUM = rep(s$label, nrow(d)),
-                       stringsAsFactors = FALSE), d)
-    }))
-    out$STRATUM <- factor(out$STRATUM, levels = labels)
-    rownames(out) <- NULL
-    out
+  out <- do.call(rbind, lapply(strata, function(s) {
+    d <- s[[field]]
+    cbind(data.frame(STRATUM = rep(s$label, nrow(d)),
+                     stringsAsFactors = FALSE), d)
+  }))
+  out$STRATUM <- factor(out$STRATUM, levels = labels)
+  rownames(out) <- NULL
+  out
+}
+
+# One row per stratum: its label, its covariate or dose value and its subjects.
+.ferx_vpc_strata <- function(strata) {
+  labels <- vapply(strata, function(s) s$label, character(1))
+  data.frame(
+    STRATUM = factor(labels, levels = labels),
+    value = vapply(strata, function(s) as.numeric(s$value), numeric(1)),
+    n_subjects = vapply(strata, function(s) s$n_subjects, integer(1))
+  )
+}
+
+# The engine's warnings as the print methods list them: each one, and under it
+# the R-side guidance for its code when there is any.
+.ferx_vpc_print_warnings <- function(w) {
+  if (!length(w)) return(invisible())
+  cat("  ", length(w), " warning", if (length(w) > 1L) "s" else "",
+      " (see `$warnings`)\n", sep = "")
+  for (msg in w) {
+    g <- .ferx_vpc_warning_guidance(msg)
+    if (!is.null(g)) cat("    ", sub(":.*$", "", msg), ": ", g, "\n", sep = "")
   }
+  invisible()
+}
+
+# The glue's per-stratum lists as long tables with a STRATUM factor.
+.ferx_vpc_tte_object <- function(res) {
   structure(
     list(
-      observed = tag("observed"),
-      band = tag("band"),
-      strata = data.frame(
-        STRATUM = factor(labels, levels = labels),
-        value = vapply(strata, function(s) as.numeric(s$value), numeric(1)),
-        n_subjects = vapply(strata, function(s) s$n_subjects, integer(1))
-      ),
+      observed = .ferx_vpc_stack(res$strata, "observed"),
+      band = .ferx_vpc_stack(res$strata, "band"),
+      strata = .ferx_vpc_strata(res$strata),
       cmt = res$cmt,
       horizon = res$horizon,
       n_sim = res$n_sim,
@@ -262,11 +404,7 @@ print.ferx_vpc_tte <- function(x, ...) {
     cat(sprintf("  %s: %d subjects, %d events\n", s, x$strata$n_subjects[i],
                 sum(obs$n_event)))
   }
-  if (length(x$warnings)) {
-    cat("  ", length(x$warnings), " warning",
-        if (length(x$warnings) > 1L) "s" else "",
-        " (see `$warnings`)\n", sep = "")
-  }
+  .ferx_vpc_print_warnings(x$warnings)
   invisible(x)
 }
 

@@ -386,6 +386,38 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   paste(parts, collapse = " ")
 }
 
+# Guidance for the warnings a TTE VPC carries (ferx_vpc_tte(), ferx_vpc_kmmc()),
+# keyed on the engine's code at the start of the message: they reach R on the
+# VPC object, not on a fit, so they never pass through .ferx_warning_guidance()'s
+# categories. The VPC print methods show it under the warning. NULL for any
+# other message.
+#
+# W_VPC_RTTE_HORIZON_BELOW_FOLLOW_UP has no entry: ferx-core #2908 cuts the
+# observed streams at the horizon instead, and no longer raises it.
+.ferx_vpc_warning_guidance <- function(message) {
+  if (!is.character(message) || length(message) != 1L || is.na(message)) {
+    return(NULL)
+  }
+  if (startsWith(message, "W_VPC_RTTE_ENDS_ON_EVENT")) {
+    return(paste0(
+      "A subject whose last record on the endpoint is an event has its ",
+      "follow-up end there, which a simulated subject almost never has, so the ",
+      "late band is drawn from more follow-up than the observed curve. If those ",
+      "subjects were followed on, add one DV = 0 (censoring) record per subject ",
+      "on the endpoint's CMT at its end of follow-up, then rerun ferx_vpc_tte()."
+    ))
+  }
+  if (startsWith(message, "W_VPC_KMMC_TIME_VARYING_COVARIATE")) {
+    return(paste0(
+      "The curve uses each subject's first value of the covariate, not its ",
+      "value at the risk time. Check it against a baseline column of its own ",
+      "(the first value per subject), or pick a covariate that does not change ",
+      "within a subject."
+    ))
+  }
+  NULL
+}
+
 # Does this warning belong to the covariance family?
 #
 # Four categories carry covariance-step messages, not one: ferx-core's

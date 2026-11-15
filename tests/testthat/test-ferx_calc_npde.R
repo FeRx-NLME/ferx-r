@@ -386,3 +386,98 @@ test_that("a fit with npde_nsim carries EPRED/PWRES that ferx_calc_npde reproduc
   expect_equal(post$sdtab$EPRED, fit$sdtab$EPRED)
   expect_equal(post$sdtab$PWRES, fit$sdtab$PWRES)
 })
+
+# --- single-event time-to-event records (ferx-core #1889) --------------------
+#
+# The oracle is the engine's own fit-time score: a fit with npde_nsim / npde_seed
+# writes `TteObsDiagnostic::npde`, and ferx_calc_npde() at the same nsim and seed
+# must put the same numbers on the same rows.
+
+pktte_npde_fits <- local({
+  cache <- NULL
+  function() {
+    if (is.null(cache)) {
+      ex <- ferx_example("pktte_joint")
+      plain <- suppressWarnings(ferx_fit(ex$model, ex$data, covariance = FALSE,
+                                         verbose = FALSE))
+      at_fit <- suppressWarnings(ferx_fit(
+        ex$model, ex$data, covariance = FALSE, verbose = FALSE,
+        settings = list(npde_nsim = 300L, npde_seed = 5L)
+      ))
+      cache <<- list(plain = plain, at_fit = at_fit)
+    }
+    cache
+  }
+})
+
+test_that("ferx_calc_npde scores the TTE rows as a fit-time npde run does", {
+  fits <- pktte_npde_fits()
+  post <- ferx_calc_npde(fits$plain, nsim = 300L, seed = 5L)
+  b <- ferx:::.fitrx_sdtab_blocks(post)
+  expect_gt(length(b$tte), 0L)
+  sd <- post$sdtab
+  # Every TTE record scored, NPDE == NPD there, and finite.
+  expect_true(all(is.finite(sd$NPDE[b$tte])))
+  expect_identical(sd$NPD[b$tte], sd$NPDE[b$tte])
+  # A single event has no moment to weight: EPRED / PWRES stay NA there,
+  # while the Gaussian rows carry them.
+  expect_true(all(is.na(sd$EPRED[b$tte])))
+  expect_true(all(is.na(sd$PWRES[b$tte])))
+  expect_true(all(is.finite(sd$EPRED[b$gaussian])))
+  # The engine's own fit-time scores, row for row.
+  ref <- fits$at_fit$sdtab
+  bref <- ferx:::.fitrx_sdtab_blocks(fits$at_fit)
+  expect_identical(bref$tte, b$tte)
+  expect_equal(sd$NPDE[b$tte], ref$NPDE[bref$tte], tolerance = 1e-12)
+  expect_equal(sd$NPDE[b$gaussian], ref$NPDE[bref$gaussian], tolerance = 1e-12)
+})
+
+test_that("TTE NPDE survives save/load and reaches core's predictions_tte.csv", {
+  post <- ferx_calc_npde(pktte_npde_fits()$plain, nsim = 300L, seed = 5L)
+  b <- ferx:::.fitrx_sdtab_blocks(post)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(post, path)
+  back <- ferx_load_fit(path)
+  expect_identical(back$sdtab$NPDE, post$sdtab$NPDE)
+  # Core's own TTE table (read by core's loader and the CLI) carries the
+  # scores too, in TTE-row order.
+  staging <- withr::local_tempdir()
+  utils::unzip(path, files = "predictions_tte.csv", exdir = staging)
+  tte <- utils::read.csv(file.path(staging, "predictions_tte.csv"))
+  expect_true("NPDE" %in% names(tte))
+  expect_equal(tte$NPDE, post$sdtab$NPDE[b$tte], tolerance = 1e-12)
+})
+
+test_that(".ferx_attach_tte_npde puts the scores on the TTE rows, checked by ID/TIME", {
+  attach_tte <- getFromNamespace(".ferx_attach_tte_npde", "ferx")
+  sd <- data.frame(ID = c(1, 1, 2, 1, 2), TIME = c(1, 2, 1, 7, 9),
+                   NPDE = c(0.1, 0.2, 0.3, NA, NA), NPD = c(0.4, 0.5, 0.6, NA, NA))
+  tbl <- data.frame(ID = c(1, 2), TIME = c(7, 9), CMT = 3L, NPDE = c(-1, 1.5))
+  out <- attach_tte(sd, tbl, 4:5)
+  expect_identical(out$NPDE, c(0.1, 0.2, 0.3, -1, 1.5))
+  expect_identical(out$NPD, c(0.4, 0.5, 0.6, -1, 1.5))
+  # Nothing to attach leaves the table alone.
+  expect_identical(attach_tte(sd, NULL, 4:5), sd)
+  expect_error(attach_tte(sd, tbl, 5L), "cannot align")
+  bad <- tbl
+  bad$TIME[2] <- 8
+  expect_error(attach_tte(sd, bad, 4:5), "do not line up")
+})
+
+test_that("an RTTE endpoint is skipped with W_NPDE_TTE_SKIPPED, Gaussian rows still scored", {
+  m <- tempfile(fileext = ".ferx")
+  writeLines(c("[parameters]", "  theta TVLAMBDA(0.1, 0.001, 10.0)",
+               "  omega ETA_LAMBDA ~ 0.09", "[event_model]", "  cmt    = 2",
+               "  type   = rtte", "  family = exponential",
+               "  scale  = TVLAMBDA * exp(ETA_LAMBDA)"), m)
+  design <- data.frame(ID = 1:30, TIME = 30, DV = 0, EVID = 0L, AMT = 0,
+                       CMT = 2L, MDV = 0L)
+  sim <- suppressWarnings(ferx_simulate(m, design, n_sim = 1L, seed = 2L,
+                                        horizon = 30))
+  d <- data.frame(ID = as.integer(sim$ID), TIME = sim$TIME, DV = sim$OBSERVED,
+                  EVID = 0L, AMT = 0, CMT = 2L, MDV = 0L)
+  fit <- suppressWarnings(ferx_fit(m, d, covariance = FALSE, verbose = FALSE))
+  expect_warning(post <- ferx_calc_npde(fit, nsim = 100L, seed = 1L),
+                 "W_NPDE_TTE_SKIPPED: the time-to-event records were not scored")
+  expect_true(all(is.na(post$sdtab$NPDE)))
+})
