@@ -2258,7 +2258,7 @@ fn ferx_rust_vpc_kmmc(
             horizon,
         )?;
         let run = VpcRun::at_model_file(model_path, data_path)?;
-        run.kmmc(vpc_kmmc_options(vpc, covariate, level, min_at_risk))
+        run.kmmc(vpc, covariate, level, min_at_risk)
     })
 }
 
@@ -2346,7 +2346,7 @@ fn ferx_rust_vpc_kmmc_from_fit(
             &fit_bindings,
             iov_occasion,
         )?;
-        run.kmmc(vpc_kmmc_options(vpc, covariate, level, min_at_risk))
+        run.kmmc(vpc, covariate, level, min_at_risk)
     })
 }
 
@@ -2455,14 +2455,29 @@ impl VpcRun {
             cmt: opts.cmt,
             max_order: (max_order > 0).then_some(max_order as usize),
             sim: opts.sim,
+            // Every field is set today; the spread keeps a field core adds later
+            // additive here (ferx-core #529, the CI options-literal check).
+            ..Default::default()
         };
         let vpc = ferx_core::vpc_rtte(model, &self.population, &self.params, &rtte)
             .map_err(|e| engine_refusal("Error simulating: ", e))?;
         Ok(attach_sim_warnings(vpc_rtte_to_list(&vpc), self.notes, &vpc))
     }
 
-    /// Core's `vpc_kmmc` (#1886 PR3).
-    fn kmmc(self, opts: ferx_core::VpcKmmcOptions) -> std::result::Result<Robj, String> {
+    /// Core's `vpc_kmmc` (#1886 PR3), with the Kaplan-Meier VPC options `vpc` and
+    /// the R arguments; a NaN `level` is the mean. `VpcKmmcOptions` is
+    /// `#[non_exhaustive]`: built from `new` and assigned.
+    fn kmmc(
+        self,
+        vpc: ferx_core::VpcTteOptions,
+        covariate: &str,
+        level: f64,
+        min_at_risk: i32,
+    ) -> std::result::Result<Robj, String> {
+        let mut opts = ferx_core::VpcKmmcOptions::new(covariate);
+        opts.vpc = vpc;
+        opts.level = (!level.is_nan()).then_some(level);
+        opts.min_at_risk = min_at_risk.max(0) as usize;
         let vpc = ferx_core::vpc_kmmc(&self.parsed.model, &self.population, &self.params, &opts)
             .map_err(|e| engine_refusal("Error simulating: ", e))?;
         Ok(attach_sim_warnings(vpc_kmmc_to_list(&vpc), self.notes, &vpc))
@@ -2488,21 +2503,6 @@ fn tte_endpoint_is_repeated(model: &CompiledModel, cmt: Option<usize>) -> Option
         }
         _ => None,
     }
-}
-
-/// `VpcKmmcOptions` from the Kaplan-Meier VPC options and the R arguments; a
-/// NaN `level` is the mean.
-fn vpc_kmmc_options(
-    vpc: ferx_core::VpcTteOptions,
-    covariate: &str,
-    level: f64,
-    min_at_risk: i32,
-) -> ferx_core::VpcKmmcOptions {
-    let mut opts = ferx_core::VpcKmmcOptions::new(covariate);
-    opts.vpc = vpc;
-    opts.level = (!level.is_nan()).then_some(level);
-    opts.min_at_risk = min_at_risk.max(0) as usize;
-    opts
 }
 
 /// The observed population a Kaplan-Meier VPC is drawn against. Unlike
