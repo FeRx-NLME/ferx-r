@@ -4359,9 +4359,12 @@ fn recorded_rows(
         // MIXNUM there with the class a `[simulation]` population was drawn under,
         // which no fit this package makes has, or, under `[output] MIXNUM` on a
         // `[mixture]` model, the subject's fitted MIXEST (ferx-core #2784): the class
-        // that column carries on the subject's Gaussian rows. A MIXNUM column here is
-        // that `[output]` column, so it takes the fitted class, and is blank on a
-        // model without classes.
+        // that column carries on the subject's Gaussian rows in a bundle written since
+        // #2784. A MIXNUM column here is that `[output]` column, so it takes the
+        // fitted class, and is blank on a model without classes. (A bundle written
+        // before #2784 echoes the data column on its Gaussian rows, so its rebuilt
+        // rows can disagree with them; only one development build wrote such a
+        // bundle without this entry.)
         let mixnum = |sr: &SubjectResult| sr.mixest.map_or(f64::NAN, |k| k as f64);
         if column(&cols, "CMT").is_none() {
             // Each Gaussian row's compartment, as core's sdtab takes it from the

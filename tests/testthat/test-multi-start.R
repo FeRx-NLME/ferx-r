@@ -90,6 +90,28 @@ test_that("fit$starts survives ferx_save_fit() / ferx_load_fit()", {
   expect_identical(back$starts, fit$starts)
 })
 
+test_that("print() shows the summary line, not a failed start's line (#753 review, 1)", {
+  # Core pushes `Multi-start: k of n starts failed: ...` before the summary line
+  # when a start fails (api/fit.rs); both start with `Multi-start:`.
+  line_of <- getFromNamespace(".ferx_multi_start_line", "ferx")
+  starts <- getFromNamespace(".ferx_starts_frame", "ferx")(list(
+    start = 0:2, ofv = c(-10, NA, -9), converged = c(TRUE, FALSE, TRUE),
+    selected = c(TRUE, FALSE, FALSE)
+  ))
+  summary <- paste0("Multi-start: 3 starts, 2 converged, 1 failed; best OFV ",
+                    "-10.0000 (start 0); all 2 converged starts within 1.0 of ",
+                    "best (range 1.0000)")
+  fit <- list(starts = starts, warnings = c(
+    "Multi-start: 1 of 3 starts failed: start 1: E_X something broke",
+    "some other warning",
+    summary
+  ))
+  expect_identical(line_of(fit), summary)
+  # No summary line: the count, never the failure list.
+  fit$warnings <- fit$warnings[1:2]
+  expect_identical(line_of(fit), "Multi-start: 3 starts")
+})
+
 test_that(".ferx_starts_frame keeps a failed start's empty fields NA", {
   frame <- getFromNamespace(".ferx_starts_frame", "ferx")
   s <- frame(list(

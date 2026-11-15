@@ -355,6 +355,12 @@ test_that(".ferx_attach_npde carries EPRED/EWRES/PWRES, and only the columns the
   out4 <- .attach(sd4, np3, gaussian_rows = c(1L, 2L, 4L))
   expect_identical(out4$EPRED, c(5.5, 4.5, NA, 5.0))
   expect_identical(out4$PWRES, c(0.7, NA, NA, -0.2))
+  # The split path with an older engine's table attaches only what it has
+  # (#753 review, 5).
+  old4 <- .attach(sd4, np3[, c("ID", "TIME", "NPDE", "NPD")],
+                  gaussian_rows = c(1L, 2L, 4L))
+  expect_false(any(c("EPRED", "EWRES", "PWRES") %in% names(old4)))
+  expect_identical(old4$NPD, c(0.4, 0.5, NA, 0.6))
 })
 
 test_that("ferx_calc_npde adds EPRED and PWRES/EWRES from the same simulation", {

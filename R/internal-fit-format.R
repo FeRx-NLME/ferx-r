@@ -675,15 +675,18 @@
         "selected", "error", "error_code")]
 }
 
-# The engine's `Multi-start: ...` line (ferx-core #2867) from a multi-start
-# fit's warnings, which say whether its starts agree. The engine words it from
-# `fit$starts`; R only finds it. When a fit has start rows but no such line (a
-# fit object edited by hand), a count. NULL for a single-start fit.
+# The engine's `Multi-start: N starts, M converged; ...` line (ferx-core #2867)
+# from a multi-start fit's warnings, which says whether its starts agree. The
+# engine words it from `fit$starts`; R only finds it. It is matched by its own
+# opening, not by the `Multi-start:` prefix alone: a fit with a failed start
+# also carries `Multi-start: k of n starts failed: <messages>`, pushed before
+# it (core `api/fit.rs`). When a fit has start rows but no such line (a fit
+# object edited by hand), a count. NULL for a single-start fit.
 .ferx_multi_start_line <- function(fit) {
   s <- fit$starts
   if (!is.data.frame(s) || nrow(s) == 0L) return(NULL)
   w <- as.character(unlist(fit$warnings, use.names = FALSE) %||% character(0))
-  line <- w[startsWith(w, "Multi-start:")]
+  line <- w[grepl("^Multi-start: [0-9]+ starts, ", w)]
   if (length(line) > 0L) return(line[[1L]])
   sprintf("Multi-start: %d starts", nrow(s))
 }
