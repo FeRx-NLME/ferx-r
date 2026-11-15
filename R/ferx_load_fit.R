@@ -375,7 +375,7 @@ ferx_load_fit <- function(path) {
 # naming the engine's text and code, and return the record the loaded fit
 # carries as `unavailable_theta_levels`. The code is the one validation ties
 # to the failure (`.ferx_engine_error()`), so a model this engine no longer
-# parses gets its parse code (`E_UNKNOWN_BLOCK`, `E_DEPRECATED_BLOCK`, ...).
+# parses gets its parse code (`E_UNKNOWN_BLOCK`, `E_MISSING_BLOCK`, ...).
 # `model_path` is NULL when there is no model to validate, or when the hash is
 # what refused it (the caller tells): an edited file's own errors are not why
 # the layout was refused. An edited file arrives already coded

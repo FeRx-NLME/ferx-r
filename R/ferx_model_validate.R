@@ -106,8 +106,12 @@ ferx_model_validate <- function(path, data = NULL) {
   # was TRUE for a model carrying a block the engine would ignore - the exact
   # silent-drop ferx-core #1040 closes. A current engine already errors on it
   # (`E_UNKNOWN_BLOCK`), which is what `rust_result$ok` carries; folding it in
-  # here keeps the status honest against an older pinned engine too.
-  ok <- isTRUE(rust_result$ok) && length(unknown) == 0L
+  # here keeps the status honest against an older pinned engine too. A retired
+  # block the engine parses and ignores with `W_DEPRECATED_BLOCK` (ferx-core
+  # #2913) is not in the known list either, but the engine has accepted it, so
+  # it does not count.
+  retired <- unique(diag$block[diag$code == "W_DEPRECATED_BLOCK" & !is.na(diag$block)])
+  ok <- isTRUE(rust_result$ok) && length(setdiff(unknown, retired)) == 0L
 
   cat("Validating:", basename(path), "\n")
   if (!is.null(data)) cat("       data:", basename(data), "\n")
@@ -121,7 +125,8 @@ ferx_model_validate <- function(path, data = NULL) {
     cat(sprintf("  %-30s [MISSING]\n", s))
   }
   # `ferx_rust_known_blocks()` is build-dependent and omits names the engine
-  # still recognises: a retired block (`E_DEPRECATED_BLOCK`) and one gated
+  # still recognises: a retired block (`W_DEPRECATED_BLOCK` since ferx-core
+  # #2913, which parses and ignores it; `E_DEPRECATED_BLOCK` before) and one gated
   # behind a cargo feature this binary lacks (`E_BLOCK_FEATURE_DISABLED`) both
   # land in `unknown`. Printing `[unknown section]` for those contradicts the
   # engine's own diagnostic two lines further down, which correctly says the
@@ -131,7 +136,7 @@ ferx_model_validate <- function(path, data = NULL) {
   if (length(unknown) > 0L) {
     for (s in unknown) {
       codes <- diag$code[!is.na(diag$block) & diag$block == s]
-      label <- if ("E_DEPRECATED_BLOCK" %in% codes) {
+      label <- if (any(c("W_DEPRECATED_BLOCK", "E_DEPRECATED_BLOCK") %in% codes)) {
         "[retired section]"
       } else if ("E_BLOCK_FEATURE_DISABLED" %in% codes) {
         "[feature not enabled]"

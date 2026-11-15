@@ -26,7 +26,8 @@ ferx_rust_simulate_with_uncertainty(
   iov_occasion,
   n_uncertainty_draws,
   n_sim_per_draw,
-  seed
+  seed,
+  horizon
 )
 }
 \description{

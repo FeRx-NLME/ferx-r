@@ -546,3 +546,50 @@ test_that("a [mixture] fit with per-class overrides simulates each class under i
   expect_equal(mean(lk$MIXNUM == 1L), stats::plogis(th[["MIXL"]]),
                tolerance = 0.03)
 })
+
+test_that("horizon reaches every draw of a drug-driven TTE model (ferx-core #2003)", {
+  ex  <- ferx_example("pktte_joint")
+  fit <- suppressWarnings(ferx_fit(ex$model, ex$data, method = "focei",
+                                   covariance = TRUE, verbose = FALSE,
+                                   settings = list(maxiter = 10L)))
+  skip_if(is.null(fit$cov_matrix), "covariance step failed on the short fit")
+  # Draws on the estimate: this test is about the horizon, not the spread.
+  fit <- unsealed_fit(fit)
+  fit$cov_matrix <- fit$cov_matrix * 1e-8
+
+  # Without a horizon the model is refused, and the refusal names this
+  # function's argument, not the engine's option.
+  e <- tryCatch(
+    ferx_simulate_with_uncertainty(ex$model, ex$data, fit,
+                                   n_uncertainty_draws = 2L, n_sim_per_draw = 1L),
+    error = function(e) e
+  )
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_SIMULATE_HORIZON")
+  expect_match(conditionMessage(e), "`horizon`", fixed = TRUE)
+  expect_false(grepl("SimulateUncertaintyOptions", conditionMessage(e), fixed = TRUE))
+
+  s <- suppressWarnings(ferx_simulate_with_uncertainty(
+    ex$model, ex$data, fit, n_uncertainty_draws = 2L, n_sim_per_draw = 2L,
+    horizon = 24, seed = 3L
+  ))
+  tte <- s[!is.na(s$OBSERVED), ]
+  # One TTE row per subject, SIM and DRAW, each an event or a censoring at H.
+  n_id <- length(unique(utils::read.csv(ex$data)$ID))
+  expect_identical(nrow(tte), 2L * 2L * n_id)
+  expect_true(all(tte$OBSERVED %in% c(0, 1)))
+  expect_true(all(tte$TIME <= 24))
+  expect_true(all(tte$TIME[tte$OBSERVED == 0] == 24))
+  # A shorter horizon censors more.
+  s8 <- suppressWarnings(ferx_simulate_with_uncertainty(
+    ex$model, ex$data, fit, n_uncertainty_draws = 2L, n_sim_per_draw = 2L,
+    horizon = 8, seed = 3L
+  ))
+  expect_true(all(s8$TIME[!is.na(s8$OBSERVED)] <= 8))
+  expect_gte(sum(s8$OBSERVED == 0, na.rm = TRUE), sum(tte$OBSERVED == 0))
+
+  expect_error(
+    ferx_simulate_with_uncertainty(ex$model, ex$data, fit, horizon = -1),
+    "`horizon` must be a single finite positive number"
+  )
+})
