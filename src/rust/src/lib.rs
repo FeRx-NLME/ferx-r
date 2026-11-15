@@ -3827,11 +3827,14 @@ fn recorded_rows(
         }
     } else if fit.subjects.iter().any(|s| !s.discrete_rows.is_empty() || has_tte_rows(s)) {
         // The discrete and time-to-event rows below are filled as core's
-        // `append_discrete_rows` / `append_tte_rows` fill them. Core's sdtab also
-        // fills MIXNUM there, from `Population::simulated_mixnum`, which only a fit of
-        // data drawn from a `[simulation]` block has; a fit from a data file, every
-        // one this package makes, has none, so a MIXNUM column here is the user's
-        // `[output]` column and is blank on these rows, as every `[output]` column is.
+        // `append_discrete_rows` / `append_tte_rows` fill them. Core's sdtab fills
+        // MIXNUM there with the class a `[simulation]` population was drawn under,
+        // which no fit this package makes has, or, under `[output] MIXNUM` on a
+        // `[mixture]` model, the subject's fitted MIXEST (ferx-core #2784): the class
+        // that column carries on the subject's Gaussian rows. A MIXNUM column here is
+        // that `[output]` column, so it takes the fitted class, and is blank on a
+        // model without classes.
+        let mixnum = |sr: &SubjectResult| sr.mixest.map_or(f64::NAN, |k| k as f64);
         if column(&cols, "CMT").is_none() {
             // Each Gaussian row's compartment, as core's sdtab takes it from the
             // data's `obs_cmts`; 1, core's own fallback, without the data.
@@ -3862,6 +3865,7 @@ fn recorded_rows(
                         "IPRED" => d.ipred,
                         "IWRES" => d.iwres,
                         "EBE_OFV" => sr.ofv_contribution,
+                        "MIXNUM" => mixnum(sr),
                         _ => f64::NAN,
                     });
                 }
@@ -3886,6 +3890,7 @@ fn recorded_rows(
                             "TIME" => t.time,
                             "DV" => t.dv,
                             "EBE_OFV" => sr.ofv_contribution,
+                            "MIXNUM" => mixnum(sr),
                             "COXSNELL" => t.coxsnell,
                             "MARTINGALE" => t.martingale,
                             "DEVIANCE" => t.deviance,

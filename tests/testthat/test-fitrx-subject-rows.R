@@ -278,11 +278,11 @@ test_that("a bundle ferx-core wrote alone rebuilds its binary rows as core's sdt
 })
 
 # fixtures/mixture_override.ferx on mixture_iv.csv with three binary records
-# per subject on CMT 3, and a per-subject data covariate called MIXNUM that the
-# model's [output] block lists: a user column, blank on the binary rows as
-# every [output] column is. The engine's own MIXNUM (the class a subject was
-# simulated under, ferx-core #2372) is only on a fit of data drawn from a
-# [simulation] block, which ferx_fit() never makes.
+# per subject on CMT 3, a per-subject data column called MIXNUM, and MIXNUM in
+# the model's [output] block. On a [mixture] model `[output] MIXNUM` tables the
+# subject's class (ferx-core #2784): the fitted MIXEST, on every row, Gaussian
+# and binary alike, never the data column of that name, which draws
+# W_OUTPUT_MIXNUM_IS_CLASS.
 mixnum_output_case <- local({
   cache <- new.env(parent = emptyenv())
   function() {
@@ -318,17 +318,28 @@ mixnum_output_case <- local({
   }
 })
 
-test_that("an [output] MIXNUM column stays blank on binary rows rebuilt from core's", {
+# The class each sdtab row's subject was fitted into: the engine's MIXEST on
+# the subject's Gaussian rows (blank on its binary and TTE rows), the oracle
+# for `[output] MIXNUM` (ferx-core #2784).
+fitted_class_by_row <- function(fit) {
+  sd <- fit$sdtab
+  g <- sd[!is.nan(sd$MIXEST), , drop = FALSE]
+  as.numeric(g$MIXEST[match(sd$ID, g$ID)])
+}
+
+test_that("an [output] MIXNUM column tables the fitted class on binary rows rebuilt from core's", {
   skip_if(!nzchar(Sys.which("zip")), "needs a zip binary")
   fit <- mixnum_output_case()$fit
   summ <- fit$subject_summary
   n_gauss <- sum(summ$n_obs)
   disc <- n_gauss + seq_len(sum(summ$n_obs_discrete))
   expect_identical(summ$n_obs_discrete, rep(3L, nrow(summ)))
-  # The live fit: the covariate on the Gaussian rows, both values among them,
-  # and blank on the binary rows.
-  expect_setequal(unique(fit$sdtab$MIXNUM[seq_len(n_gauss)]), c(1, 2))
-  expect_true(all(is.nan(fit$sdtab$MIXNUM[disc])))
+  # The live fit: the subject's fitted class on every row, the binary rows
+  # included, and not the data column of that name.
+  cls <- fitted_class_by_row(fit)
+  expect_false(anyNA(cls))
+  expect_identical(fit$sdtab$MIXNUM, cls)
+  expect_true(any(grepl("W_OUTPUT_MIXNUM_IS_CLASS", fit$warnings, fixed = TRUE)))
 
   path <- withr::local_tempfile(fileext = ".fitrx")
   ferx_save_fit(fit, path)
@@ -336,8 +347,8 @@ test_that("an [output] MIXNUM column stays blank on binary rows rebuilt from cor
   # without the glue's sdtab_endpoint_rows.csv, as the R writer saved them in
   # the one development build between format_version "2" (#716) and the glue's
   # entry (#717); older bundles are format "1", which the loader refuses. The
-  # glue rebuilds the binary rows from core's, and used to fill MIXNUM on them
-  # from the Gaussian rows.
+  # glue rebuilds the binary rows from core's, and fills MIXNUM on them with
+  # the fitted class, as core's own sdtab does.
   status <- utils::zip(path, "sdtab_endpoint_rows.csv", flags = "-qd")
   skip_if(status != 0L, "zip -d failed")
   expect_false("sdtab_endpoint_rows.csv" %in% utils::unzip(path, list = TRUE)$Name)
@@ -380,7 +391,7 @@ mixnum_output_tte_case <- local({
   }
 })
 
-test_that("an [output] MIXNUM column stays blank on TTE rows rebuilt from core's", {
+test_that("an [output] MIXNUM column tables the fitted class on TTE rows rebuilt from core's", {
   skip_if(!nzchar(Sys.which("zip")), "needs a zip binary")
   fit <- mixnum_output_tte_case()
   summ <- fit$subject_summary
@@ -388,8 +399,9 @@ test_that("an [output] MIXNUM column stays blank on TTE rows rebuilt from core's
   tte <- n_gauss + seq_len(sum(summ$n_obs_tte))
   expect_identical(summ$n_obs_tte, rep(1L, nrow(summ)))
   expect_identical(nrow(fit$sdtab), max(tte))
-  expect_setequal(unique(fit$sdtab$MIXNUM[seq_len(n_gauss)]), c(1, 2))
-  expect_true(all(is.nan(fit$sdtab$MIXNUM[tte])))
+  cls <- fitted_class_by_row(fit)
+  expect_false(anyNA(cls))
+  expect_identical(fit$sdtab$MIXNUM, cls)
 
   path <- withr::local_tempfile(fileext = ".fitrx")
   ferx_save_fit(fit, path)
