@@ -363,6 +363,12 @@ ferx_runlog <- function(fit, gradient_tol = 0.1, show_iterations = TRUE, verbose
     sprintf("  OFV   = %.6g", ofv_num(fit$ofv)),
     sprintf("  AIC   = %.6g", ofv_num(fit$aic)),
     sprintf("  BIC   = %.6g", ofv_num(fit$bic)),
+    # What a SAEM fit's OFV is (ferx-core #2973), in print()'s words: the SAEM
+    # objective is not a likelihood, which is why AIC/BIC above are NA.
+    local({
+      sl <- .ferx_saem_objective_lines(fit)
+      if (is.null(sl)) character() else paste0("  ", sl)
+    }),
     sprintf("  Convergence: %s", if (isTRUE(fit$converged)) "YES" else "NO"),
     # The engine's verdict (ferx-core #2799) and its reasons.
     local({

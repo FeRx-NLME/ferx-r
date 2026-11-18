@@ -444,8 +444,10 @@ test_that("a non-finite or out-of-range fitted rho is refused", {
   }
   expect_error(fitrx_edit_fit(case$fit, rho_of(1)),
                "invalid sigma residual correlation (1, 0, rho=1)", fixed = TRUE)
+  # A `null` reads as NaN since ferx-core #2786 (the spelling it writes a
+  # non-finite value in), and NaN is refused by the same range check.
   expect_error(fitrx_edit_fit(case$fit, rho_of(NULL)),
-               "invalid type: null, expected f64", fixed = TRUE)
+               "invalid sigma residual correlation (1, 0, rho=NaN)", fixed = TRUE)
 })
 
 test_that("the refusal names the correlation and the remedy", {

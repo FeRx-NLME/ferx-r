@@ -1535,7 +1535,8 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "ebe_convergence_warnings", "max_unconverged_subjects",
     "total_ebe_fallbacks", "model_structure", "profiled_blocks",
     "call_settings",
-    "model_file_settings", "sir_ess", "importance_sampling", "bayes", "vi",
+    "model_file_settings", "sir_ess", "importance_sampling", "saem_objective",
+    "bayes", "vi",
     "warnings",
     "uses_sde", "ode_linear_exact", "dw_statistic", "iwres_lag1_r",
     "saem_n_subjects_hmc", "mixture_overrides", "se_mixture_overrides"
@@ -1703,9 +1704,10 @@ test_that("print.ferx_summary omits Structure line when model_structure is NULL"
 })
 test_that(".ferx_short_gradient_label maps engine labels to short tokens", {
   # The labels are whatever ferx-core's `GradientKind::as_str` emits, and it has
-  # no AD variant: the Enzyme path was retired in favour of the analytic `Dual2`
-  # sensitivities, so "Enzyme AD" can never arrive and "analytic (Dual2)" is what
-  # an analytic-gradient fit actually reports. Mapping the dead string but not the
+  # no AD variant: the Enzyme path was retired in favour of analytic
+  # sensitivities, so "Enzyme AD" can never arrive. An analytic-gradient fit
+  # reports "analytic" (ferx-core #2949), and bundles saved by earlier engines
+  # carry "analytic (Dual2)". Mapping a dead string but not the
   # live one is why `fit$gradient_used == "ad"` was permanently FALSE and the raw
   # engine string leaked unmapped into print() / summary().
   expect_identical(ferx:::.ferx_short_gradient_label("analytic (Dual2)"), "analytic")
@@ -3646,4 +3648,13 @@ test_that("warfarin_iov FOCE matches NONMEM METHOD=1 (ferx-core #1747)", {
   # Today's worst is TVKA at 0.18 %; the old pin's is TVKA at 6.3 %.
   rel <- abs(unname(fit$theta) / c(0.315410, 8.38248, 2.64431) - 1)
   expect_lt(max(rel), 0.005)
+})
+
+test_that(".ferx_short_gradient_label maps today's and legacy engine labels (core #2949)", {
+  expect_identical(ferx:::.ferx_short_gradient_label("analytic"), "analytic")
+  expect_identical(ferx:::.ferx_short_gradient_label("analytic (Dual2)"), "analytic")
+  expect_identical(ferx:::.ferx_short_gradient_label("finite differences (compiled plan failed)"), "fd")
+  # The partial-fallback label passes through as documented.
+  mixed <- "analytic \u00d738, FD \u00d72"
+  expect_identical(ferx:::.ferx_short_gradient_label(mixed), mixed)
 })

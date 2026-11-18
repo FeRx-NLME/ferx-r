@@ -5796,6 +5796,33 @@ fn build_fit_result_for_uncertainty(
     ))
 }
 
+/// `FitResult::saem_objective` (ferx-core #2973) as a named list, or NULL.
+/// `kind` names the evaluator that produced `ofv`, spelled as its `saem_ofv`
+/// value (`saem`, `imp`, `agq`): `imp` also after the engine's fallback or a
+/// `[saem, imp]` eval-only chain. `is_likelihood` is `kind != saem`, the
+/// engine's rule for whether AIC/BIC exist. The counts are doubles so a large
+/// `saem_ofv_samples` cannot wrap in R's 32-bit integers.
+fn saem_objective_to_r(o: Option<&ferx_core::SaemObjective>) -> Robj {
+    let Some(o) = o else { return Robj::from(()) };
+    let kind = match o.kind {
+        ferx_core::SaemOfv::Saem => "saem",
+        ferx_core::SaemOfv::Imp => "imp",
+        ferx_core::SaemOfv::Agq => "agq",
+        // Never stored (core documents `kind` is never Focei); spelled anyway.
+        ferx_core::SaemOfv::Focei => "focei",
+    };
+    let na = || Robj::from(Rfloat::na());
+    list!(
+        kind = kind,
+        is_likelihood = !matches!(o.kind, ferx_core::SaemOfv::Saem),
+        mc_standard_error = o.mc_standard_error.map_or_else(na, Robj::from),
+        n_samples = o.n_samples.map_or_else(na, |k| Robj::from(k as f64)),
+        n_nodes = o.n_nodes.map_or_else(na, |k| Robj::from(k as f64)),
+        foce_ofv = o.foce_ofv
+    )
+    .into()
+}
+
 // Build a defaulted FitResult populated with the fields that
 // fitted_params_from_result / simulate_with_uncertainty actually read. Other
 // fields get neutral defaults — none of them are inspected on this path.
@@ -5877,8 +5904,11 @@ fn default_fit_result(
         ofv_data: 0.0,
         ofv_prior: 0.0,
         prior_summary: Vec::new(),
-        aic: 0.0,
-        bic: 0.0,
+        // ferx-core #2973: information criteria are `None` unless the reported
+        // objective is a likelihood; this scaffold reports none.
+        aic: None,
+        bic: None,
+        saem_objective: None,
         theta,
         theta_names: model.theta_names.clone(),
         eta_names: template.omega.eta_names.clone(),
@@ -8086,8 +8116,14 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         ofv_data = result.ofv_data,
         ofv_prior = result.ofv_prior,
         prior_summary = prior_summary,
-        aic = result.aic,
-        bic = result.bic,
+        // ferx-core #2973: `None` (NA here) when the reported objective is not a
+        // likelihood - a SAEM fit under the default `saem_ofv = saem`, a VI fit
+        // with no final OFV - or is not finite.
+        aic = result.aic.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
+        bic = result.bic.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
+        // What a SAEM fit's `ofv` is (ferx-core #2973); NULL when `ofv` is the
+        // FOCE/Laplace objective (`saem_ofv = focei`, every other method).
+        saem_objective = saem_objective_to_r(result.saem_objective.as_ref()),
         bic_inputs = bic_inputs,
         left_init = result.left_init,
         stationary_start = result.stationary_start,

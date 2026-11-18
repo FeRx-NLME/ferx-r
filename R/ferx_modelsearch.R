@@ -38,6 +38,16 @@
 #' \code{\link{ferx_search_space}} / \code{\link{ferx_search_coverage}} first:
 #' both answer without fitting anything.
 #'
+#' @section SAEM models:
+#' Every search (this one, \code{\link{ferx_covsearch}},
+#' \code{\link{ferx_iivsearch}}, \code{\link{ferx_iovsearch}},
+#' \code{\link{ferx_ruvsearch}}, \code{\link{ferx_globalsearch}} and
+#' \code{\link{ferx_amd}}) ranks candidates on a likelihood. A SAEM fit
+#' reports NONMEM's SAEM objective by default, which is not one, so the run
+#' stops with an error on the first such candidate (ferx-core #2973). Set
+#' \code{saem_ofv = imp} (or \code{agq} / \code{focei}) in the model's
+#' \code{[fit_options]} to search a SAEM model.
+#'
 #' @param model Path to a \code{.ferx} model, or a \code{ferx_model} object.
 #'   Omit when \code{config} is given.
 #' @param data Path to the dataset, or a data.frame (see \code{\link{ferx_fit}}). Defaults to the model's \code{[data]}

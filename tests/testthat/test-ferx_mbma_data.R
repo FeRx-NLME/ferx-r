@@ -493,8 +493,9 @@ test_that("the counted form on LEVEL_IDX fits like the data-driven form", {
   f_cnt <- fit(counted)
   # The #1628 guard holds only on the analytic outer gradient: on FD both
   # forms reach the closed form below whether or not the fix is in.
-  expect_identical(f_col$gradient_method_outer, "analytic (Dual2)")
-  expect_identical(f_cnt$gradient_method_outer, "analytic (Dual2)")
+  # ferx-core #2949 / #2786 dropped the "(Dual2)" suffix from the label.
+  expect_identical(f_col$gradient_method_outer, "analytic")
+  expect_identical(f_cnt$gradient_method_outer, "analytic")
   # A gathered theta counts as used: before #1628 each fit listed every
   # level as "declared in [parameters] but not referenced".
   expect_false(any(grepl("not referenced", c(f_col$warnings, f_cnt$warnings),

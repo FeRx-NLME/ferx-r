@@ -161,8 +161,8 @@
 #'   One of \code{"auto"} or \code{"fd"}, or \code{NULL} (the default) to use the
 #'   model file's \code{[fit_options] gradient} (engine default \code{"auto"}
 #'   when unset). \code{"ad"} is \strong{no longer supported}: the Enzyme
-#'   automatic-differentiation path was retired in favour of the analytic
-#'   \code{Dual2} sensitivities, so a model file (or call) carrying
+#'   automatic-differentiation path was retired in favour of the engine's
+#'   analytic sensitivities, so a model file (or call) carrying
 #'   \code{gradient = ad} now fails validation with \code{E_AD_RETIRED} rather
 #'   than being tolerated.
 #'
@@ -439,12 +439,11 @@
 #'       exact outer gradient covers, for every objective: \code{"foce"}
 #'       (including its frozen-variance EBE), \code{"focei"},
 #'       \code{"laplace"} and AGQ (\code{n_agq > 1}) under either anchor, on
-#'       closed-form and ODE models, with or without IOV, for up to 48 random
-#'       effects per subject (the stacked \code{[eta, kappa]} under IOV;
-#'       Laplace's exact Hessian anchor up to 8). It is unavailable for SDE
-#'       models, non-Gaussian (TTE / categorical / Markov) endpoints and
-#'       \code{gradient = "fd"}, which keep the finite-difference stencil for
-#'       the whole fit. A subject outside the scope does not: the in-scope
+#'       closed-form and ODE models, with or without IOV, at any number of
+#'       random effects (ferx-core #2786 removed the earlier width limits).
+#'       Its scope is the exact gradient's, TTE, binary and CTMM endpoints
+#'       included. A mixture under Laplace or AGQ and \code{gradient = "fd"}
+#'       keep the finite-difference stencil for the whole fit. A subject outside the scope does not: the in-scope
 #'       subjects keep their exact terms, only the declining subjects' own
 #'       terms are differenced into the same information sum, and the fit
 #'       says so with a \code{W_COV_ANALYTIC_SALVAGE} note; when at least half
@@ -455,8 +454,10 @@
 #'       \code{$COV MATRIX=}: \code{"r"} (inverse Hessian, the default),
 #'       \code{"s"} (score cross-product), or \code{"rsr"} (the Huber-White
 #'       sandwich, robust to model misspecification). \code{"s"} and \code{"rsr"} are
-#'       supported for FOCEI, FOCE and IOV fits alike, all three anchored against
-#'       NONMEM \code{$COV MATRIX=S}/\code{RSR} within about 10 percent. Note ferx defaults
+#'       supported for FOCEI, FOCE and IOV fits alike. Each subject's score is
+#'       the exact total derivative of its objective with the EBEs re-estimated
+#'       (ferx-core #2974), so at a common point \code{"s"} reproduces NONMEM
+#'       \code{$COV MATRIX=S}. Note ferx defaults
 #'       to \code{"r"} while NONMEM's \code{$COVARIANCE} default is
 #'       \code{"rsr"} -- set \code{"rsr"} when reconciling against a NONMEM run
 #'       that used the default \code{$COV}. No effect when
@@ -719,6 +720,42 @@
 #'     \item{\code{n_leapfrog} / \code{saem_n_leapfrog}}{Leapfrog steps for
 #'       HMC proposals (default \code{0} = Metropolis-Hastings). A positive
 #'       value replaces MH with one HMC proposal per subject per iteration.}
+#'     \item{\code{saem_ofv}}{(default \code{"saem"}) Which objective a SAEM
+#'       fit reports as \code{ofv} (ferx-core #2973). \code{"saem"} is NONMEM's
+#'       SAEM objective (SAEMOBJ), accumulated over the convergence phase at no
+#'       extra cost; it is \emph{not a likelihood}, so \code{aic} and
+#'       \code{bic} are \code{NA} and it must not be compared across models.
+#'       \code{"imp"} is the importance-sampled -2 log L at the final estimates
+#'       (NONMEM \code{IMP EONLY=1}), with its Monte-Carlo SE; \code{"agq"}
+#'       is adaptive Gauss-Hermite quadrature, deterministic, for up to three
+#'       random effects; \code{"focei"} (aliases \code{"foce"},
+#'       \code{"laplace"}) is the FOCE/Laplace value, as before ferx-core
+#'       #2973. \code{"saemobj"} is an alias of \code{"saem"}. The readout runs
+#'       only when \code{"saem"} is the last stage of the chain. Where a
+#'       readout does not apply the engine falls back to \code{"imp"} with a
+#'       warning: \code{"saem"} on a mixture model, or when the SAEM objective
+#'       is not finite or the run had no convergence-phase draw; \code{"agq"}
+#'       beyond three random effects, on a mixture, with no random effects or
+#'       over its IOV grid limit. If the importance-sampled readout fails too,
+#'       the FOCE/Laplace value is kept, with a warning. A
+#'       \code{c("saem", "imp")} chain with \code{imp_eval_only = TRUE} under
+#'       \code{saem_ofv = "saem"} or \code{"imp"} reports that stage's
+#'       importance-sampled value instead, as NONMEM's last \code{$EST} does;
+#'       under \code{"agq"} or \code{"focei"} it keeps the FOCE/Laplace value.
+#'       Which evaluator produced \code{ofv} is in \code{fit$saem_objective}.
+#'       Every model search
+#'       (\code{\link{ferx_modelsearch}} and the other \code{ferx_*search()}
+#'       functions, \code{\link{ferx_amd}}) stops with an error on a candidate
+#'       fit that reports the SAEM objective: set \code{saem_ofv = "imp"},
+#'       \code{"agq"} or \code{"focei"} in the model's \code{[fit_options]}
+#'       to rank SAEM candidates.}
+#'     \item{\code{saem_ofv_samples}}{Importance samples per subject for
+#'       \code{saem_ofv = "imp"} (default 3000).}
+#'     \item{\code{saem_ofv_pilot_samples}}{Samples per proposal-fitting pilot
+#'       pass for \code{saem_ofv = "imp"} (default 300; \code{0} uses
+#'       full-size pilots).}
+#'     \item{\code{saem_ofv_nodes}}{Quadrature nodes per random effect for
+#'       \code{saem_ofv = "agq"} (default 11).}
 #'   }
 #'
 #'   \strong{Bayes (\code{"bayes"})}
@@ -856,6 +893,14 @@
 #'       marginal's proposal keeps at least \code{0.1} of the prior whatever
 #'       \code{imp_defensive_alpha} says. \code{0} keeps the single Laplace
 #'       proposal, which reads high on sparse subjects.}
+#'     \item{\code{imp_adapt_samples}}{(default \code{0}) Draws per pilot pass
+#'       of that adaptation. \code{0} runs every pilot at the full
+#'       \code{imp_samples}, as NONMEM's \code{EONLY=1} iterations do; a
+#'       smaller value (clamped to \code{2..imp_samples}) fits the proposal from
+#'       fewer draws and keeps the final readout at \code{imp_samples}, so the
+#'       estimate stays unbiased at a fraction of the cost. Not read by the
+#'       estimating \code{imp} iterations. A SAEM \code{saem_ofv = "imp"}
+#'       readout uses \code{saem_ofv_pilot_samples} instead.}
 #'     \item{\code{imp_defensive_alpha} / \code{impmap_defensive_alpha}}{(default
 #'       \code{0}, i.e. off for the MCEM iterations; a reported marginal keeps
 #'       at least \code{0.1} while \code{imp_adapt_passes} is above \code{0})
@@ -1066,17 +1111,27 @@
 #'     on any parameter, i.e. \code{ofv_data + ofv_prior}. After an
 #'     estimating \code{"imp"} or \code{"impmap"} stage it is a final Laplace
 #'     objective (AIC and BIC follow it); after a trailing
-#'     \code{imp_eval_only} stage it is the previous estimator's objective.
+#'     \code{imp_eval_only} stage it is the previous estimator's objective,
+#'     except after \code{"saem"} (below, and the \code{saem_ofv} setting).
 #'     Compare NONMEM \code{METHOD=IMP} objectives with the
 #'     importance-sampling marginal,
 #'     \code{importance_sampling$minus2_log_likelihood}, not with \code{ofv}.
+#'     After a \code{"saem"} stage it is NONMEM's SAEM objective by default,
+#'     which is not a likelihood, or the likelihood the \code{saem_ofv}
+#'     setting asks for; after \code{c("saem", "imp")} with
+#'     \code{imp_eval_only = TRUE} (under \code{saem_ofv = "saem"} or
+#'     \code{"imp"}) it is the importance-sampled -2 log L.
+#'     \code{saem_objective} says which.
 #'     \code{NaN} after a \code{method = "vi"} fit under the default
-#'     \code{vi_final_ofv = "none"} (as are \code{aic} and \code{bic}): VI
-#'     reports a bound, \code{vi$neg_two_elbo}, not an objective value.}
+#'     \code{vi_final_ofv = "none"} (\code{aic} and \code{bic} are then
+#'     \code{NA}): VI reports a bound, \code{vi$neg_two_elbo}, not an
+#'     objective value.}
 #'   \item{ofv_data}{The data half of \code{ofv} - the -2 log-likelihood the
 #'     AIC and BIC are computed from, and the value to compare against an
 #'     unpriored fit of the same model. Equal to \code{ofv} when no prior is
-#'     declared.}
+#'     declared. For a SAEM fit it is the data half of whichever objective
+#'     \code{saem_objective} names, so under the SAEM objective it is not a
+#'     likelihood either.}
 #'   \item{ofv_prior}{The prior half of \code{ofv}: the penalty summed over
 #'     the priored coordinates. Exactly 0 when no prior is declared.}
 #'   \item{prior_summary}{Per-parameter prior report, or \code{NULL} when the
@@ -1089,8 +1144,27 @@
 #'     \code{prior_lower_95} / \code{prior_upper_95}. When this is non-NULL the
 #'     standard errors in \code{se_theta} and friends are the curvature of the
 #'     \emph{penalized} objective - MAP / penalized-ML SEs, not posterior SDs.}
-#'   \item{aic}{Akaike Information Criterion}
-#'   \item{bic}{Bayesian Information Criterion}
+#'   \item{aic}{Akaike Information Criterion. \code{NA} when the reported
+#'     \code{ofv} is not a likelihood or not finite: a SAEM fit that reports
+#'     the SAEM objective (\code{saem_objective$kind == "saem"}, the default
+#'     \code{saem_ofv = "saem"} unless the engine fell back to \code{"imp"}),
+#'     or a VI fit with no OFV.}
+#'   \item{bic}{Bayesian Information Criterion. \code{NA} where \code{aic}
+#'     is.}
+#'   \item{saem_objective}{What a SAEM fit's \code{ofv} is (ferx-core
+#'     #2973), or \code{NULL} when the SAEM readout did not set it: every
+#'     other method, SAEM under \code{saem_ofv = "focei"}, a SAEM stage that
+#'     is not the last one (a later stage reports \code{ofv}), and a readout
+#'     that failed and kept the FOCE/Laplace value with a warning. A list
+#'     with \code{kind} (the evaluator that produced \code{ofv}, spelled as
+#'     its \code{saem_ofv} value: \code{"saem"}, \code{"imp"} or
+#'     \code{"agq"}; \code{"imp"} also after a fallback or a
+#'     \code{c("saem", "imp")} eval-only chain), \code{is_likelihood}
+#'     (\code{kind != "saem"}; whether AIC and BIC exist),
+#'     \code{mc_standard_error} and \code{n_samples} (\code{"imp"} only),
+#'     \code{n_nodes} (\code{"agq"} only; \code{NA} otherwise) and
+#'     \code{foce_ofv}, the FOCE/Laplace objective at the same estimates - the
+#'     value SAEM fits reported before, comparable with a FOCE/FOCEI fit.}
 #'   \item{theta}{Named numeric vector of fixed effect estimates. A free level
 #'     of a \code{theta NAME[COL, ...]} level block is named
 #'     \code{NAME[COL=value,...]}, e.g. \code{PLACEBO[STUDY=1,TIME=4]}.}
@@ -1312,8 +1386,13 @@
 #'     \code{lower} and \code{upper} (NULL if SIR not run or the model has
 #'     no IOV)}
 #'   \item{importance_sampling}{Importance-sampling marginal log-likelihood
-#'     diagnostics, populated only when the method chain ends with an
-#'     \code{"imp"} or \code{"impmap"} stage (\code{NULL} otherwise). A list
+#'     diagnostics, populated when the method chain ends with an
+#'     \code{"imp"} or \code{"impmap"} stage, or when a SAEM fit's
+#'     \code{ofv} is the importance-sampled readout
+#'     (\code{saem_objective$kind == "imp"}; its sample count is then
+#'     \code{saem_ofv_samples}, or the \code{imp} stage's \code{imp_samples}
+#'     after a \code{c("saem", "imp")} eval-only chain); \code{NULL}
+#'     otherwise. A list
 #'     with \code{minus2_log_likelihood} (the IS estimate of \eqn{-2 \log L},
 #'     comparable across models in the same nesting family, and the number
 #'     to compare with a NONMEM \code{METHOD=IMP} objective; see \code{ofv}),
@@ -1442,7 +1521,11 @@
 #'     \code{gradient} argument.}
 #'   \item{gradient_used}{The inner-loop gradient method the engine actually
 #'     used: \code{"analytic"}, \code{"fd"}, or \code{"N/A"} (derivative-free /
-#'     sampling step). When \code{gradient = "auto"} this records which
+#'     sampling step). When the compiled derivative plans of some subjects
+#'     failed (\code{W_PLAN_FD_FALLBACK}) and only those fell back to finite
+#'     differences, the engine's mixed label naming both counts (for example
+#'     \code{"analytic x38, FD x2"}, with a multiplication sign) is passed
+#'     through unchanged. When \code{gradient = "auto"} this records which
 #'     branch resolved at fit time. \code{NA} on older engine binaries that
 #'     did not populate this field.}
 #'   \item{gradient_method_inner}{Engine label for the inner-loop gradient
@@ -2009,8 +2092,9 @@
 #'   \item Each diffusion parameter appears in \code{fit$theta} as
 #'         \code{DIFF_<STATE>} (e.g. \code{DIFF_CENTRAL}). Standard errors and
 #'         \code{fit$estimates} treat them as regular thetas.
-#'   \item SDE models use finite differences for the EKF covariance
-#'         propagation.
+#'   \item The EKF takes the exact tangent of the \code{[odes]} right-hand
+#'         side, so SDE fits get exact gradients like ODE fits (ferx-core
+#'         #2786); before, it finite-differenced the state Jacobian.
 #'   \item \code{sdtab} \code{IWRES} is scaled by the residual error alone, so
 #'         it reads over-dispersed on a \code{[diffusion]} fit; the process
 #'         variance the objective adds never reaches it.
@@ -3064,8 +3148,12 @@ ferx_fit <- function(model, data = NULL,
 .ferx_short_gradient_label <- function(kind) {
   if (is.null(kind) || !nzchar(kind)) return(NA_character_)
   switch(kind,
+    "analytic"           = "analytic",
+    # The label engines before ferx-core #2949 wrote; bundles saved by them keep it.
     "analytic (Dual2)"   = "analytic",
     "finite differences" = "fd",
+    # Every subject's compiled plan failed (ferx-core #2949, W_PLAN_FD_FALLBACK).
+    "finite differences (compiled plan failed)" = "fd",
     "N/A"                = "N/A",
     kind
   )
@@ -3272,6 +3360,49 @@ ferx_fit <- function(model, data = NULL,
   }
 }
 
+# -- The objective a SAEM fit reports (ferx-core #2973) ----------------------
+#
+# A SAEM fit's `ofv` is NONMEM's SAEM objective (SAEMOBJ) by default, which is
+# not a likelihood, so `aic` and `bic` are NA. `saem_ofv = "imp"` / `"agq"`
+# report a -2 log L instead, and `"focei"` the FOCE/Laplace value (with no
+# `saem_objective` element). print() and summary() say which, in the same words.
+
+# An information criterion for the console: "n/a" when the engine reports none.
+.ferx_ic_str <- function(v) {
+  v <- suppressWarnings(as.numeric(v %||% NA_real_))
+  if (length(v) != 1L || !is.finite(v)) "n/a" else sprintf("%.4f", v)
+}
+
+# The lines under the OFV naming what it is; NULL when it is the FOCE/Laplace
+# objective (every non-SAEM fit, and SAEM under `saem_ofv = "focei"`).
+.ferx_saem_objective_lines <- function(fit) {
+  so <- fit$saem_objective
+  if (is.null(so)) return(NULL)
+  num <- function(v) suppressWarnings(as.numeric(v %||% NA_real_))
+  kind <- so$kind %||% NA_character_
+  head <- switch(kind,
+    saem = paste0(
+      "OFV is the SAEM objective (NONMEM SAEMOBJ convention; not a likelihood). ",
+      "No AIC/BIC: use settings = list(saem_ofv = \"imp\") for -2 log L."
+    ),
+    imp = {
+      se <- num(so$mc_standard_error)
+      k <- num(so$n_samples)
+      sprintf("OFV is the importance-sampled -2 log L (MC SE %s%s).",
+              if (is.finite(se)) sprintf("%.4f", se) else "n/a",
+              if (is.finite(k)) sprintf(", %.0f samples/subject", k) else "")
+    },
+    agq = {
+      n <- num(so$n_nodes)
+      sprintf("OFV is the adaptive Gauss-Hermite -2 log L%s.",
+              if (is.finite(n)) sprintf(" (%.0f nodes per random effect)", n) else "")
+    },
+    sprintf("OFV type: %s.", kind)
+  )
+  foce <- num(so$foce_ofv)
+  c(head, if (is.finite(foce)) sprintf("FOCE/Laplace OFV at these estimates: %.4f", foce))
+}
+
 #' @export
 print.ferx_fit <- function(x, ...) {
   # Format the OMEGA and OMEGA_IOV rows before the first cat(): their field
@@ -3349,7 +3480,10 @@ print.ferx_fit <- function(x, ...) {
 
   # OFV / AIC / BIC on a single line, with the parameter-prior split under it
   # when the model declares one (the OFV above is then the penalized total).
-  cat(sprintf(" OFV: %.4f    AIC: %.4f    BIC: %.4f\n", x$ofv, x$aic, x$bic))
+  cat(sprintf(" OFV: %.4f    AIC: %s    BIC: %s\n", x$ofv,
+              .ferx_ic_str(x$aic), .ferx_ic_str(x$bic)))
+  saem_lines <- .ferx_saem_objective_lines(x)
+  if (!is.null(saem_lines)) cat(paste0(" ", saem_lines, "\n"), sep = "")
   prior_line <- .ferx_prior_ofv_line(x)
   if (!is.null(prior_line)) cat(prior_line, "\n", sep = "")
   # A multi-start fit (ferx-core #2867): the engine's one line on whether the
@@ -3996,6 +4130,8 @@ summary.ferx_fit <- function(object, ...) {
     model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
     importance_sampling = x$importance_sampling,
+    # What a SAEM fit's OFV is (ferx-core #2973); NULL for a FOCE/Laplace OFV.
+    saem_objective = x$saem_objective,
     bayes = x$bayes,
     # The VI result (#507), for the VI block print.ferx_summary() shows.
     vi = x$vi,
@@ -4094,7 +4230,10 @@ print.ferx_summary <- function(x, ...) {
                 ms$residual))
   }
 
-  cat(sprintf("\nOFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
+  cat(sprintf("\nOFV: %.4f  AIC: %s  BIC: %s\n", x$ofv,
+              .ferx_ic_str(x$aic), .ferx_ic_str(x$bic)))
+  saem_lines <- .ferx_saem_objective_lines(x)
+  if (!is.null(saem_lines)) cat(paste0(saem_lines, "\n"), sep = "")
   prior_line <- .ferx_prior_ofv_line(x)
   if (!is.null(prior_line)) cat(prior_line, "\n", sep = "")
   vi_lines <- .ferx_vi_report_lines(x)

@@ -3,7 +3,7 @@ library(ferx)
 # One-compartment model with Savic transit-compartment absorption as a fast
 # ANALYTIC closed form -- `pk one_cpt_transit(cl, v, n, mtt)` (ferx-core #611).
 # The dose's absorption time is Gamma(N+1, KTR), KTR = (N+1)/MTT, fed straight
-# into central; the whole model is closed form (no ODE solve), with exact Dual2
+# into central; the whole model is closed form (no ODE solve), with exact analytic
 # FOCE/FOCEI sensitivities and a continuous, estimable N. With N = 0 it reduces
 # to first-order (Bateman) oral absorption.
 #

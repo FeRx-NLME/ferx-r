@@ -12,7 +12,7 @@
 #   ca = (alpha-k21)/(alpha-beta),  cb = (k21-beta)/(alpha-beta)   (ca + cb = 1).
 #
 # (M = the Gamma MGF, P = the regularized lower incomplete gamma.) It is evaluated
-# with exact Dual2 sensitivities -- the same gradients FOCE/FOCEI use -- with no
+# with exact analytic sensitivities -- the same gradients FOCE/FOCEI use -- with no
 # finite differences and no ODE solver. With N = 0 it reduces exactly to 2-cpt
 # first-order (Bateman) oral absorption with ka = 1/MTT.
 #

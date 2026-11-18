@@ -24,7 +24,9 @@ A variational-inference fit with no OFV (\code{method = "vi"} under the
 default \code{vi_final_ofv = "none"}, whose \code{fit$ofv} is \code{NaN})
 gives \code{NA_real_} with a warning that points at
 \code{vi_final_ofv = "laplace"} or a \code{c("vi", "laplace")} chain with
-\code{agq_eval_only = TRUE}.
+\code{agq_eval_only = TRUE}. So does a SAEM fit whose OFV is the SAEM
+objective (the default \code{saem_ofv = "saem"}), which is not a
+likelihood; refit with \code{saem_ofv = "imp"} for one.
 }
 \description{
 The four BIC conventions an automated model search ranks candidates on, as
