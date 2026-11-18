@@ -562,7 +562,13 @@ PK model (if needed) run separately.
 
 ### References
 
+- Garnett C, Bonate PL, Dang Q, et al. Scientific white paper on
+  concentration-QTc modeling. J Pharmacokinet Pharmacodyn. 2018;45(3):383-397.
+  doi:10.1007/s10928-017-9558-5
 - Johannesen L, Vicente J, Gray RA, et al. ECG data from the
   Concentration-QTc study. PhysioNet, 2014. doi:10.13026/C2HP4K
+- Parkinson J, Hamelin B, Dang Q, et al. A tutorial on
+  concentration-QTc analysis: methodology and practical application using
+  R. J Pharmacokinet Pharmacodyn. 2025. doi:10.1007/s10928-024-09944-7
 - ICH E14/S7B Q&A. Clinical and nonclinical evaluation of QT/QTc interval
   prolongation. 2022.
