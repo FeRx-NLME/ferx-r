@@ -1554,8 +1554,15 @@
   } else {
     "prior"
   }
+  # Under a SAEM fit's SAEM objective (ferx-core #2973) the data half is not a
+  # likelihood either, and there is no AIC/BIC to build from it.
+  ic <- if (identical(x$saem_objective$kind, "saem")) {
+    "no AIC/BIC: not a likelihood"
+  } else {
+    "AIC/BIC use the data half"
+  }
   sprintf(
-    "  (%s: data OFV %.4f + prior penalty %.4f; AIC/BIC use the data half)",
-    what, as.numeric(x$ofv_data %||% NA_real_), penalty
+    "  (%s: data OFV %.4f + prior penalty %.4f; %s)",
+    what, as.numeric(x$ofv_data %||% NA_real_), penalty, ic
   )
 }

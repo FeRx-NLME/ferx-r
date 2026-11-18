@@ -1704,9 +1704,10 @@ test_that("print.ferx_summary omits Structure line when model_structure is NULL"
 })
 test_that(".ferx_short_gradient_label maps engine labels to short tokens", {
   # The labels are whatever ferx-core's `GradientKind::as_str` emits, and it has
-  # no AD variant: the Enzyme path was retired in favour of the analytic `Dual2`
-  # sensitivities, so "Enzyme AD" can never arrive and "analytic (Dual2)" is what
-  # an analytic-gradient fit actually reports. Mapping the dead string but not the
+  # no AD variant: the Enzyme path was retired in favour of analytic
+  # sensitivities, so "Enzyme AD" can never arrive. An analytic-gradient fit
+  # reports "analytic" (ferx-core #2949), and bundles saved by earlier engines
+  # carry "analytic (Dual2)". Mapping a dead string but not the
   # live one is why `fit$gradient_used == "ad"` was permanently FALSE and the raw
   # engine string leaked unmapped into print() / summary().
   expect_identical(ferx:::.ferx_short_gradient_label("analytic (Dual2)"), "analytic")

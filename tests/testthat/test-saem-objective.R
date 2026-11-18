@@ -71,3 +71,51 @@ test_that("saem_ofv = 'imp' reports an importance-sampled -2 log L", {
 test_that("non-SAEM fits carry no saem_objective", {
   expect_null(warfarin_fit()$saem_objective)
 })
+
+test_that("saem_ofv = 'agq' reports a quadrature -2 log L", {
+  fit <- saem_obj_fit(saem_ofv = "agq", saem_ofv_nodes = 5L)
+  so <- fit$saem_objective
+  expect_identical(so$kind, "agq")
+  expect_true(so$is_likelihood)
+  expect_equal(so$n_nodes, 5)
+  expect_true(is.na(so$mc_standard_error))
+  expect_true(is.na(so$n_samples))
+  expect_true(is.finite(fit$aic))
+  out <- paste(capture.output(print(fit)), collapse = "\n")
+  expect_match(out, "adaptive Gauss-Hermite -2 log L (5 nodes per random effect)",
+               fixed = TRUE)
+})
+
+test_that("a c('saem', 'imp') eval-only chain reports that stage's IS value", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin_saem")
+  fit <- ferx_fit(
+    ex$model, ex$data,
+    method = c("saem", "imp"), verbose = FALSE, covariance = FALSE,
+    settings = list(n_exploration = 20L, n_convergence = 20L, seed = 42L,
+                    imp_eval_only = TRUE, imp_samples = 150L)
+  )
+  so <- fit$saem_objective
+  expect_identical(so$kind, "imp")
+  # The stage's own sample count, not saem_ofv_samples.
+  expect_equal(so$n_samples, 150)
+  expect_equal(fit$ofv, fit$importance_sampling$minus2_log_likelihood)
+  expect_true(is.finite(fit$aic))
+})
+
+test_that("a bundle written before saem_objective existed loads without it", {
+  fit <- saem_obj_fit(saem_ofv = "focei")
+  # A pre-#2973 fit.json: no `saem_objective` key, numeric aic / bic.
+  old <- fitrx_edit_fit(fit, function(w) {
+    w$saem_objective <- NULL
+    w$aic <- 123.5
+    w$bic <- 456.5
+    w
+  })
+  expect_null(old$saem_objective)
+  expect_identical(old$aic, 123.5)
+  expect_identical(old$bic, 456.5)
+  out <- paste(capture.output(print(old)), collapse = "\n")
+  expect_match(out, "AIC: 123.5000    BIC: 456.5000", fixed = TRUE)
+  expect_false(grepl("SAEM objective", out, fixed = TRUE))
+})
