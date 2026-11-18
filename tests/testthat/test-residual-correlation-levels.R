@@ -105,7 +105,7 @@ test_that("auto takes L-BFGS on car1 + kappa and reaches one optimum from every 
   # kappa axes were past the analytic path's 24-axis cap. The adjoint has no
   # theta cap, so neither warning applies.
   for (fit in list(low, high)) {
-    expect_identical(fit$gradient_method_outer, "analytic (Dual2)")
+    expect_identical(fit$gradient_method_outer, "analytic")
     w <- fit$warnings
     expect_false(any(grepl("together with kappa", w, fixed = TRUE)))
     expect_false(any(grepl("24-axis cap", w, fixed = TRUE)))
@@ -165,7 +165,7 @@ test_that("car1 by OCC fits with a profiled PLACEBO block, to the unprofiled opt
   # The route the measurement above was taken on; the header records where
   # BOBYQA stopped on this model.
   expect_identical(p$optimizer, "auto (nlopt_lbfgs)")
-  expect_identical(p$gradient_method_outer, "analytic (Dual2)")
+  expect_identical(p$gradient_method_outer, "analytic")
 
   expect_lt(abs(p$ofv - b$ofv), 1e-5)
   expect_lt(abs(p$ofv - 89.451278), 1e-4)

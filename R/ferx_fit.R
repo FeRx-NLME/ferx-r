@@ -719,6 +719,24 @@
 #'     \item{\code{n_leapfrog} / \code{saem_n_leapfrog}}{Leapfrog steps for
 #'       HMC proposals (default \code{0} = Metropolis-Hastings). A positive
 #'       value replaces MH with one HMC proposal per subject per iteration.}
+#'     \item{\code{saem_ofv}}{(default \code{"saem"}) Which objective a SAEM
+#'       fit reports as \code{ofv} (ferx-core #2973). \code{"saem"} is NONMEM's
+#'       SAEM objective (SAEMOBJ), accumulated over the convergence phase at no
+#'       extra cost; it is \emph{not a likelihood}, so \code{aic} and
+#'       \code{bic} are \code{NA} and it must not be compared across models.
+#'       \code{"imp"} is the importance-sampled -2 log L at the final estimates
+#'       (NONMEM \code{IMP EONLY=1}), with its Monte-Carlo SE; \code{"agq"}
+#'       is adaptive Gauss-Hermite quadrature (up to three random effects,
+#'       otherwise it falls back to \code{"imp"} with a warning);
+#'       \code{"focei"} is the FOCE/Laplace value, as before ferx-core #2973.
+#'       Which one was reported is in \code{fit$saem_objective}.}
+#'     \item{\code{saem_ofv_samples}}{Importance samples per subject for
+#'       \code{saem_ofv = "imp"} (default 3000).}
+#'     \item{\code{saem_ofv_pilot_samples}}{Samples per proposal-fitting pilot
+#'       pass for \code{saem_ofv = "imp"} (default 300; \code{0} uses
+#'       full-size pilots).}
+#'     \item{\code{saem_ofv_nodes}}{Quadrature nodes per random effect for
+#'       \code{saem_ofv = "agq"} (default 11).}
 #'   }
 #'
 #'   \strong{Bayes (\code{"bayes"})}
@@ -856,6 +874,14 @@
 #'       marginal's proposal keeps at least \code{0.1} of the prior whatever
 #'       \code{imp_defensive_alpha} says. \code{0} keeps the single Laplace
 #'       proposal, which reads high on sparse subjects.}
+#'     \item{\code{imp_adapt_samples}}{(default \code{0}) Draws per pilot pass
+#'       of that adaptation. \code{0} runs every pilot at the full
+#'       \code{imp_samples}, as NONMEM's \code{EONLY=1} iterations do; a
+#'       smaller value (clamped to \code{2..imp_samples}) fits the proposal from
+#'       fewer draws and keeps the final readout at \code{imp_samples}, so the
+#'       estimate stays unbiased at a fraction of the cost. Not read by the
+#'       estimating \code{imp} iterations. A SAEM \code{saem_ofv = "imp"}
+#'       readout uses \code{saem_ofv_pilot_samples} instead.}
 #'     \item{\code{imp_defensive_alpha} / \code{impmap_defensive_alpha}}{(default
 #'       \code{0}, i.e. off for the MCEM iterations; a reported marginal keeps
 #'       at least \code{0.1} while \code{imp_adapt_passes} is above \code{0})
@@ -1070,6 +1096,9 @@
 #'     Compare NONMEM \code{METHOD=IMP} objectives with the
 #'     importance-sampling marginal,
 #'     \code{importance_sampling$minus2_log_likelihood}, not with \code{ofv}.
+#'     After a \code{"saem"} fit it is NONMEM's SAEM objective by default,
+#'     which is not a likelihood; see \code{saem_objective} and the
+#'     \code{saem_ofv} setting.
 #'     \code{NaN} after a \code{method = "vi"} fit under the default
 #'     \code{vi_final_ofv = "none"} (as are \code{aic} and \code{bic}): VI
 #'     reports a bound, \code{vi$neg_two_elbo}, not an objective value.}
@@ -1089,8 +1118,20 @@
 #'     \code{prior_lower_95} / \code{prior_upper_95}. When this is non-NULL the
 #'     standard errors in \code{se_theta} and friends are the curvature of the
 #'     \emph{penalized} objective - MAP / penalized-ML SEs, not posterior SDs.}
-#'   \item{aic}{Akaike Information Criterion}
-#'   \item{bic}{Bayesian Information Criterion}
+#'   \item{aic}{Akaike Information Criterion. \code{NA} when the reported
+#'     \code{ofv} is not a likelihood: a SAEM fit under the default
+#'     \code{saem_ofv = "saem"}, or a VI fit with no OFV.}
+#'   \item{bic}{Bayesian Information Criterion. \code{NA} where \code{aic}
+#'     is.}
+#'   \item{saem_objective}{What a SAEM fit's \code{ofv} is (ferx-core
+#'     #2973), or \code{NULL} when \code{ofv} is the FOCE/Laplace objective
+#'     (every other method, and SAEM under \code{saem_ofv = "focei"}). A list
+#'     with \code{kind} (the \code{saem_ofv} value that produced \code{ofv}:
+#'     \code{"saem"}, \code{"imp"} or \code{"agq"}), \code{is_likelihood},
+#'     \code{mc_standard_error} and \code{n_samples} (\code{"imp"} only),
+#'     \code{n_nodes} (\code{"agq"} only; \code{NA} otherwise) and
+#'     \code{foce_ofv}, the FOCE/Laplace objective at the same estimates - the
+#'     value SAEM fits reported before, comparable with a FOCE/FOCEI fit.}
 #'   \item{theta}{Named numeric vector of fixed effect estimates. A free level
 #'     of a \code{theta NAME[COL, ...]} level block is named
 #'     \code{NAME[COL=value,...]}, e.g. \code{PLACEBO[STUDY=1,TIME=4]}.}
@@ -3272,6 +3313,49 @@ ferx_fit <- function(model, data = NULL,
   }
 }
 
+# -- The objective a SAEM fit reports (ferx-core #2973) ----------------------
+#
+# A SAEM fit's `ofv` is NONMEM's SAEM objective (SAEMOBJ) by default, which is
+# not a likelihood, so `aic` and `bic` are NA. `saem_ofv = "imp"` / `"agq"`
+# report a -2 log L instead, and `"focei"` the FOCE/Laplace value (with no
+# `saem_objective` element). print() and summary() say which, in the same words.
+
+# An information criterion for the console: "n/a" when the engine reports none.
+.ferx_ic_str <- function(v) {
+  v <- suppressWarnings(as.numeric(v %||% NA_real_))
+  if (length(v) != 1L || !is.finite(v)) "n/a" else sprintf("%.4f", v)
+}
+
+# The lines under the OFV naming what it is; NULL when it is the FOCE/Laplace
+# objective (every non-SAEM fit, and SAEM under `saem_ofv = "focei"`).
+.ferx_saem_objective_lines <- function(fit) {
+  so <- fit$saem_objective
+  if (is.null(so)) return(NULL)
+  num <- function(v) suppressWarnings(as.numeric(v %||% NA_real_))
+  kind <- so$kind %||% NA_character_
+  head <- switch(kind,
+    saem = paste0(
+      "OFV is the SAEM objective (NONMEM SAEMOBJ convention; not a likelihood). ",
+      "No AIC/BIC: use settings = list(saem_ofv = \"imp\") for -2 log L."
+    ),
+    imp = {
+      se <- num(so$mc_standard_error)
+      k <- num(so$n_samples)
+      sprintf("OFV is the importance-sampled -2 log L (MC SE %s%s).",
+              if (is.finite(se)) sprintf("%.4f", se) else "n/a",
+              if (is.finite(k)) sprintf(", %d samples/subject", as.integer(k)) else "")
+    },
+    agq = {
+      n <- num(so$n_nodes)
+      sprintf("OFV is the adaptive Gauss-Hermite -2 log L%s.",
+              if (is.finite(n)) sprintf(" (%d nodes per random effect)", as.integer(n)) else "")
+    },
+    sprintf("OFV type: %s.", kind)
+  )
+  foce <- num(so$foce_ofv)
+  c(head, if (is.finite(foce)) sprintf("FOCE/Laplace OFV at these estimates: %.4f", foce))
+}
+
 #' @export
 print.ferx_fit <- function(x, ...) {
   # Format the OMEGA and OMEGA_IOV rows before the first cat(): their field
@@ -3349,7 +3433,10 @@ print.ferx_fit <- function(x, ...) {
 
   # OFV / AIC / BIC on a single line, with the parameter-prior split under it
   # when the model declares one (the OFV above is then the penalized total).
-  cat(sprintf(" OFV: %.4f    AIC: %.4f    BIC: %.4f\n", x$ofv, x$aic, x$bic))
+  cat(sprintf(" OFV: %.4f    AIC: %s    BIC: %s\n", x$ofv,
+              .ferx_ic_str(x$aic), .ferx_ic_str(x$bic)))
+  saem_lines <- .ferx_saem_objective_lines(x)
+  if (!is.null(saem_lines)) cat(paste0(" ", saem_lines, "\n"), sep = "")
   prior_line <- .ferx_prior_ofv_line(x)
   if (!is.null(prior_line)) cat(prior_line, "\n", sep = "")
   # A multi-start fit (ferx-core #2867): the engine's one line on whether the
@@ -3996,6 +4083,8 @@ summary.ferx_fit <- function(object, ...) {
     model_file_settings = x$model_file_settings %||% list(),
     sir_ess = x$sir_ess,
     importance_sampling = x$importance_sampling,
+    # What a SAEM fit's OFV is (ferx-core #2973); NULL for a FOCE/Laplace OFV.
+    saem_objective = x$saem_objective,
     bayes = x$bayes,
     # The VI result (#507), for the VI block print.ferx_summary() shows.
     vi = x$vi,
@@ -4094,7 +4183,10 @@ print.ferx_summary <- function(x, ...) {
                 ms$residual))
   }
 
-  cat(sprintf("\nOFV: %.4f  AIC: %.4f  BIC: %.4f\n", x$ofv, x$aic, x$bic))
+  cat(sprintf("\nOFV: %.4f  AIC: %s  BIC: %s\n", x$ofv,
+              .ferx_ic_str(x$aic), .ferx_ic_str(x$bic)))
+  saem_lines <- .ferx_saem_objective_lines(x)
+  if (!is.null(saem_lines)) cat(paste0(saem_lines, "\n"), sep = "")
   prior_line <- .ferx_prior_ofv_line(x)
   if (!is.null(prior_line)) cat(prior_line, "\n", sep = "")
   vi_lines <- .ferx_vi_report_lines(x)

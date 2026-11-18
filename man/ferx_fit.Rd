@@ -760,6 +760,24 @@ Metropolis-Hastings sampler (default 12345). Independent of
 \item{\code{n_leapfrog} / \code{saem_n_leapfrog}}{Leapfrog steps for
 HMC proposals (default \code{0} = Metropolis-Hastings). A positive
 value replaces MH with one HMC proposal per subject per iteration.}
+\item{\code{saem_ofv}}{(default \code{"saem"}) Which objective a SAEM
+fit reports as \code{ofv} (ferx-core #2973). \code{"saem"} is NONMEM's
+SAEM objective (SAEMOBJ), accumulated over the convergence phase at no
+extra cost; it is \emph{not a likelihood}, so \code{aic} and
+\code{bic} are \code{NA} and it must not be compared across models.
+\code{"imp"} is the importance-sampled -2 log L at the final estimates
+(NONMEM \code{IMP EONLY=1}), with its Monte-Carlo SE; \code{"agq"}
+is adaptive Gauss-Hermite quadrature (up to three random effects,
+otherwise it falls back to \code{"imp"} with a warning);
+\code{"focei"} is the FOCE/Laplace value, as before ferx-core #2973.
+Which one was reported is in \code{fit$saem_objective}.}
+\item{\code{saem_ofv_samples}}{Importance samples per subject for
+\code{saem_ofv = "imp"} (default 3000).}
+\item{\code{saem_ofv_pilot_samples}}{Samples per proposal-fitting pilot
+pass for \code{saem_ofv = "imp"} (default 300; \code{0} uses
+full-size pilots).}
+\item{\code{saem_ofv_nodes}}{Quadrature nodes per random effect for
+\code{saem_ofv = "agq"} (default 11).}
 }
 
 \strong{Bayes (\code{"bayes"})}
@@ -897,6 +915,14 @@ iterations are not affected. Each pass costs one more
 marginal's proposal keeps at least \code{0.1} of the prior whatever
 \code{imp_defensive_alpha} says. \code{0} keeps the single Laplace
 proposal, which reads high on sparse subjects.}
+\item{\code{imp_adapt_samples}}{(default \code{0}) Draws per pilot pass
+of that adaptation. \code{0} runs every pilot at the full
+\code{imp_samples}, as NONMEM's \code{EONLY=1} iterations do; a
+smaller value (clamped to \code{2..imp_samples}) fits the proposal from
+fewer draws and keeps the final readout at \code{imp_samples}, so the
+estimate stays unbiased at a fraction of the cost. Not read by the
+estimating \code{imp} iterations. A SAEM \code{saem_ofv = "imp"}
+readout uses \code{saem_ofv_pilot_samples} instead.}
 \item{\code{imp_defensive_alpha} / \code{impmap_defensive_alpha}}{(default
 \code{0}, i.e. off for the MCEM iterations; a reported marginal keeps
 at least \code{0.1} while \code{imp_adapt_passes} is above \code{0})
@@ -1118,6 +1144,9 @@ objective (AIC and BIC follow it); after a trailing
 Compare NONMEM \code{METHOD=IMP} objectives with the
 importance-sampling marginal,
 \code{importance_sampling$minus2_log_likelihood}, not with \code{ofv}.
+After a \code{"saem"} fit it is NONMEM's SAEM objective by default,
+which is not a likelihood; see \code{saem_objective} and the
+\code{saem_ofv} setting.
 \code{NaN} after a \code{method = "vi"} fit under the default
 \code{vi_final_ofv = "none"} (as are \code{aic} and \code{bic}): VI
 reports a bound, \code{vi$neg_two_elbo}, not an objective value.}
@@ -1137,8 +1166,20 @@ parameter's declared lower bound), and the implied 95\% prior interval
 \code{prior_lower_95} / \code{prior_upper_95}. When this is non-NULL the
 standard errors in \code{se_theta} and friends are the curvature of the
 \emph{penalized} objective - MAP / penalized-ML SEs, not posterior SDs.}
-\item{aic}{Akaike Information Criterion}
-\item{bic}{Bayesian Information Criterion}
+\item{aic}{Akaike Information Criterion. \code{NA} when the reported
+\code{ofv} is not a likelihood: a SAEM fit under the default
+\code{saem_ofv = "saem"}, or a VI fit with no OFV.}
+\item{bic}{Bayesian Information Criterion. \code{NA} where \code{aic}
+is.}
+\item{saem_objective}{What a SAEM fit's \code{ofv} is (ferx-core
+#2973), or \code{NULL} when \code{ofv} is the FOCE/Laplace objective
+(every other method, and SAEM under \code{saem_ofv = "focei"}). A list
+with \code{kind} (the \code{saem_ofv} value that produced \code{ofv}:
+\code{"saem"}, \code{"imp"} or \code{"agq"}), \code{is_likelihood},
+\code{mc_standard_error} and \code{n_samples} (\code{"imp"} only),
+\code{n_nodes} (\code{"agq"} only; \code{NA} otherwise) and
+\code{foce_ofv}, the FOCE/Laplace objective at the same estimates - the
+value SAEM fits reported before, comparable with a FOCE/FOCEI fit.}
 \item{theta}{Named numeric vector of fixed effect estimates. A free level
 of a \code{theta NAME[COL, ...]} level block is named
 \code{NAME[COL=value,...]}, e.g. \code{PLACEBO[STUDY=1,TIME=4]}.}

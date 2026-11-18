@@ -174,9 +174,6 @@ test_that("ferx_load_fit() refuses resamples_packed rows that are not n x dim nu
   corrupt(function(rp) { rp[[2L]] <- rp[[2L]][-1L]; rp })
   # Every row empty (round 1 #7).
   corrupt(function(rp) lapply(rp, function(r) list()))
-  # A `null` cell, as a NaN would be written: same length, one value fewer
-  # after unlist() (round 1 #1).
-  corrupt(function(rp) { rp[[1L]][3L] <- list(NULL); rp })
   # A text cell.
   corrupt(function(rp) { rp[[1L]][[3L]] <- "x"; rp })
 })
@@ -194,13 +191,40 @@ test_that("ferx_load_fit() refuses a sir.ci_* pair list with a hole in it (#557)
     expect_error(ferx_load_fit(p), "cannot read this .fitrx bundle", fixed = TRUE,
                  info = field)
   }
-  # A `null` bound, as a NaN would be written: unlist() would shift every
-  # later row up by one.
-  corrupt("ci_theta", function(ci) { ci[[1L]][2L] <- list(NULL); ci })
   # A pair with one cell.
   corrupt("ci_omega", function(ci) { ci[[1L]] <- ci[[1L]][1L]; ci })
   # A text bound.
   corrupt("ci_sigma", function(ci) { ci[[1L]][[1L]] <- "x"; ci })
+})
+
+test_that("ferx_load_fit() reads a `null` SIR cell as NaN in its place", {
+  # ferx-core reads every `null` float in fit.json as NaN, the spelling it
+  # writes a non-finite value in (core #2786, `22d3184a`); before, a `null`
+  # cell refused the bundle. The cell stays where it was: no row shifts up,
+  # which is what round 1 #1 / #557 guarded against.
+  fit <- sir_res_standalone()
+  skip_if(is.null(fit), sir_res_cov_skip)
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  ferx_save_fit(fit, path, include_data = TRUE)
+
+  p <- fitrx_edit_bundle(path, function(w) {
+    w$sir$resamples_packed[[1L]][3L] <- list(NULL)
+    w
+  })
+  loaded <- ferx_load_fit(p)
+  expect_identical(loaded$sir_resamples_n, fit$sir_resamples_n)
+  expect_identical(loaded$sir_resamples_dim, fit$sir_resamples_dim)
+  expect_identical(length(loaded$sir_resamples), length(fit$sir_resamples))
+  expect_identical(sum(is.nan(unlist(loaded$sir_resamples))), 1L)
+
+  p <- fitrx_edit_bundle(path, function(w) {
+    w$sir$ci_theta[[1L]][2L] <- list(NULL)
+    w
+  })
+  loaded <- ferx_load_fit(p)
+  expect_identical(dim(loaded$sir_ci_theta), dim(fit$sir_ci_theta))
+  expect_true(is.nan(loaded$sir_ci_theta[1L, "upper"]))
+  expect_identical(loaded$sir_ci_theta[-1L, ], fit$sir_ci_theta[-1L, ])
 })
 
 test_that("ferx_sir() without sir_keep_samples drops the input fit's draws", {

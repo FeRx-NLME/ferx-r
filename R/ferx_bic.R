@@ -41,7 +41,9 @@
 #'   default \code{vi_final_ofv = "none"}, whose \code{fit$ofv} is \code{NaN})
 #'   gives \code{NA_real_} with a warning that points at
 #'   \code{vi_final_ofv = "laplace"} or a \code{c("vi", "laplace")} chain with
-#'   \code{agq_eval_only = TRUE}.
+#'   \code{agq_eval_only = TRUE}. So does a SAEM fit whose OFV is the SAEM
+#'   objective (the default \code{saem_ofv = "saem"}), which is not a
+#'   likelihood; refit with \code{saem_ofv = "imp"} for one.
 #' @examples
 #' \dontrun{
 #' ex  <- ferx_example("warfarin")
@@ -64,6 +66,15 @@ ferx_bic <- function(fit, type = c("mixed", "fixed", "iiv", "random")) {
   # why, rather than passing its NaN on as a BIC.
   if (.ferx_vi_ofv_missing(fit)) {
     warning(.ferx_vi_ofv_note(), call. = FALSE)
+    return(NA_real_)
+  }
+  # Likewise a SAEM fit whose OFV is the SAEM objective (ferx-core #2973): not a
+  # likelihood, so there is nothing to build a BIC from.
+  if (identical(fit$saem_objective$kind, "saem")) {
+    warning("The fit's OFV is the SAEM objective (NONMEM SAEMOBJ), not a ",
+            "likelihood, so it has no BIC. Refit with ",
+            "settings = list(saem_ofv = \"imp\") for an importance-sampled -2 log L.",
+            call. = FALSE)
     return(NA_real_)
   }
 
