@@ -3648,3 +3648,12 @@ test_that("warfarin_iov FOCE matches NONMEM METHOD=1 (ferx-core #1747)", {
   rel <- abs(unname(fit$theta) / c(0.315410, 8.38248, 2.64431) - 1)
   expect_lt(max(rel), 0.005)
 })
+
+test_that(".ferx_short_gradient_label maps today's and legacy engine labels (core #2949)", {
+  expect_identical(ferx:::.ferx_short_gradient_label("analytic"), "analytic")
+  expect_identical(ferx:::.ferx_short_gradient_label("analytic (Dual2)"), "analytic")
+  expect_identical(ferx:::.ferx_short_gradient_label("finite differences (compiled plan failed)"), "fd")
+  # The partial-fallback label passes through as documented.
+  mixed <- "analytic \u00d738, FD \u00d72"
+  expect_identical(ferx:::.ferx_short_gradient_label(mixed), mixed)
+})

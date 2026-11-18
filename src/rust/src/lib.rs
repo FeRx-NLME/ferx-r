@@ -5796,12 +5796,11 @@ fn build_fit_result_for_uncertainty(
     ))
 }
 
-// Build a defaulted FitResult populated with the fields that
-// fitted_params_from_result / simulate_with_uncertainty actually read. Other
-// fields get neutral defaults — none of them are inspected on this path.
 /// `FitResult::saem_objective` (ferx-core #2973) as a named list, or NULL.
-/// `kind` is the `saem_ofv` setting value that produced `ofv` (`saem`, `imp`,
-/// `agq`), so it reads back as what to pass; the counts are doubles so a large
+/// `kind` names the evaluator that produced `ofv`, spelled as its `saem_ofv`
+/// value (`saem`, `imp`, `agq`): `imp` also after the engine's fallback or a
+/// `[saem, imp]` eval-only chain. `is_likelihood` is `kind != saem`, the
+/// engine's rule for whether AIC/BIC exist. The counts are doubles so a large
 /// `saem_ofv_samples` cannot wrap in R's 32-bit integers.
 fn saem_objective_to_r(o: Option<&ferx_core::SaemObjective>) -> Robj {
     let Some(o) = o else { return Robj::from(()) };
@@ -5824,6 +5823,9 @@ fn saem_objective_to_r(o: Option<&ferx_core::SaemObjective>) -> Robj {
     .into()
 }
 
+// Build a defaulted FitResult populated with the fields that
+// fitted_params_from_result / simulate_with_uncertainty actually read. Other
+// fields get neutral defaults — none of them are inspected on this path.
 #[allow(clippy::too_many_arguments)]
 fn default_fit_result(
     model: &CompiledModel,

@@ -105,8 +105,9 @@
 # -- Reporting a VI fit (#507) ------------------------------------------------
 #
 # VI estimates a bound, not an objective: under `vi_final_ofv = none` the fit
-# has no OFV, so `fit$ofv`, `fit$aic` and `fit$bic` are NaN by design. Every
-# surface that would show those NaNs - print(), summary(), ferx_bic(),
+# has no OFV, so `fit$ofv` is NaN and `fit$aic` / `fit$bic` are NA by design
+# (NA since ferx-core #2973 made them optional). Every surface that would show
+# those values - print(), summary(), ferx_bic(),
 # ferx_runlog() - says why, in the same words, through these helpers.
 
 # ferx-core's `ElboTightness::IMPLAUSIBLE_RATIO` (src/estimation/vi/elbo.rs):

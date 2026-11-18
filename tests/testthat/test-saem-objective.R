@@ -2,6 +2,7 @@
 # default, with no AIC/BIC; `saem_ofv` picks a likelihood instead.
 
 saem_obj_fit <- function(...) {
+  skip_on_cran()
   ex <- ferx_example("warfarin_saem")
   ferx_fit(
     ex$model, ex$data,
@@ -37,6 +38,11 @@ test_that("a default SAEM fit reports the SAEM objective and no AIC/BIC", {
 
   expect_warning(b <- ferx_bic(fit), "saem_ofv", fixed = TRUE)
   expect_identical(b, NA_real_)
+
+  log <- ferx_runlog(fit, verbose = FALSE)
+  expect_match(log, "AIC   = NA\n", fixed = TRUE)
+  expect_match(log, "  OFV is the SAEM objective (NONMEM SAEMOBJ convention; not a likelihood)",
+               fixed = TRUE)
 })
 
 test_that("saem_ofv = 'focei' keeps the FOCE/Laplace OFV and its AIC/BIC", {
@@ -47,6 +53,7 @@ test_that("saem_ofv = 'focei' keeps the FOCE/Laplace OFV and its AIC/BIC", {
   expect_gt(fit$aic, fit$ofv)
   out <- paste(capture.output(print(fit)), collapse = "\n")
   expect_false(grepl("SAEM objective", out, fixed = TRUE))
+  expect_false(grepl("SAEM objective", ferx_runlog(fit, verbose = FALSE), fixed = TRUE))
 })
 
 test_that("saem_ofv = 'imp' reports an importance-sampled -2 log L", {

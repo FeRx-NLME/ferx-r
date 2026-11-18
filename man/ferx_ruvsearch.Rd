@@ -145,7 +145,10 @@ Pharmpy tests, and \code{skip} is what narrows them.
 SD (\code{ETA_RUV}). Needs an estimation method with eta-epsilon
 interaction (\code{focei}, \code{imp}, \code{impmap}, \code{saem}); on
 a \code{foce} model it is not tested, and the run says so in
-\code{$notes}.}
+\code{$notes}. A \code{saem} model needs \code{saem_ofv = imp} (or
+\code{agq} / \code{focei}) in its \code{[fit_options]}: under the
+default SAEM objective, which is not a likelihood, the search stops
+with an error on the first candidate (ferx-core #2973).}
 \item{\code{power}}{The proportional loading raised to an estimated
 exponent, \code{power(sigma, P)}.}
 \item{\code{combined}}{An additive component beside the proportional
