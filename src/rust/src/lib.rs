@@ -5951,6 +5951,7 @@ fn default_fit_result(
         ebe_kappas: Vec::new(),
         saem_mu_ref_m_step_evals_saved: None,
         saem_n_subjects_hmc: None,
+        mstep_optimizer_used: None,
         gradient_method_inner: String::new(),
         gradient_method_outer: String::new(),
         uses_ode_solver: model.is_ode_based(),
@@ -8313,6 +8314,9 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         uses_ode_solver = result.uses_ode_solver,
         ode_linear_exact = result.ode_linear_exact,
         saem_n_subjects_hmc = result.saem_n_subjects_hmc.map(|n| n as i32),
+        // The numerical M-step optimizer `mstep_optimizer = auto` resolved to
+        // (ferx-core #3001); NULL when no numerical M-step ran.
+        mstep_optimizer_used = result.mstep_optimizer_used.clone().map_or_else(|| Robj::from(()), Robj::from),
         dw_statistic = result.dw_statistic,
         iwres_lag1_r = result.iwres_lag1_r,
         // Per-parameter flag: true when the user wrote `(sd)` in the model

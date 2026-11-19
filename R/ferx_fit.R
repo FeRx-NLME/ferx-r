@@ -697,6 +697,14 @@
 #'       \code{"bobyqa"}) Solver for the numerical theta/sigma M-step:
 #'       \code{"bobyqa"} re-maximises the frozen-eta objective each iteration;
 #'       \code{"score_sa"} takes a stochastic-approximation step on its score.}
+#'     \item{\code{mstep_optimizer}}{(default \code{"auto"}) Optimizer of the
+#'       numerical theta/sigma M-step of \code{"saem"}, \code{"imp"} and
+#'       \code{"impmap"} (ferx-core #3001). \code{"auto"} is \code{"newton"}
+#'       (Fisher scoring on the exact adjoint score) where the model is in
+#'       its scope (a plain Gaussian likelihood served by the adjoint, not a
+#'       mixture) and \code{"bobyqa"} otherwise; \code{"bobyqa"} and
+#'       \code{"lbfgs"} force those solvers. BOBYQA runs to its tolerance.
+#'       What \code{"auto"} resolved to is in \code{fit$mstep_optimizer_used}.}
 #'     \item{\code{mstep_draws} / \code{saem_mstep_draws}}{(default \code{1})
 #'       Number of E-step draws (this iteration's and the previous ones) the
 #'       \code{"bobyqa"} M-step objective is averaged over, which reduces the
@@ -2030,6 +2038,11 @@
 #'     build is active). Subjects that fell back to MH (e.g. ODE models) are
 #'     not counted. \code{NA_integer_} when the method is not SAEM, when
 #'     \code{n_leapfrog = 0} (MH only), or when AD is unavailable.}
+#'   \item{mstep_optimizer_used}{The numerical theta/sigma M-step optimizer a
+#'     SAEM, IMP or IMPMAP fit ran (\code{"newton"}, \code{"bobyqa"} or
+#'     \code{"lbfgs"}): what \code{mstep_optimizer = "auto"} resolved to.
+#'     \code{NULL} for other methods and where no numerical solve runs
+#'     (\code{mstep_solver = "score_sa"}, or a closed-form M-step).}
 #'   \item{saem_mu_ref_m_step_evals_saved}{Number of OFV evaluations saved by
 #'     mu-referencing in the SAEM M-step. Only populated for SAEM fits with
 #'     \code{mu_referencing = TRUE}; \code{NULL} otherwise. A diagnostic for
