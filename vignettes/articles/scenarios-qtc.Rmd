@@ -16,23 +16,41 @@ knitr::opts_chunk$set(
 
 ## Overview
 
-Concentration-QTc (C-QTc) modeling is a standard pharmacometric analysis in
-cardiac safety assessment. The ICH E14/S7B guideline recommends
-exposure-response modeling as the primary analysis method for evaluating a
-drug's effect on cardiac repolarization, measured through the QTc interval.
+Concentration-QTc (C-QTc) modeling is a standard pharmacometric approach
+in cardiac safety assessment. Under the ICH E14/S7B Q&As (R1, 2026),
+C-QTc modeling can serve as an alternative to the by-time-point
+intersection-union test (IUT) for evaluating a drug's potential to prolong
+the QTc interval. The two approaches test different hypotheses: the IUT
+asks whether ΔΔQTc exceeds 10 ms at any scheduled time point; C-QTc asks
+whether ΔΔQTc exceeds 10 ms at a clinically relevant concentration.
 
-This scenario walks through a complete C-QTc analysis using an open-source
-thorough QT (TQT) study dataset. We demonstrate how to:
+This scenario walks through a concentration-ΔΔQTcF analysis using an
+open-source ECG dataset. We demonstrate how to:
 
-1. Prepare ECG and concentration data for modeling
-2. Fit a **linear** mixed-effects concentration-ddQTcF model
-3. Fit a **nonlinear** Emax mixed-effects model
-4. Compare models and extract clinically relevant predictions
+1. Prepare ECG and concentration data, including **placebo correction**
+2. Run the **exploratory checks** required by ICH E14 Q&A 5.1
+3. Fit the **prespecified linear** mixed-effects C-QTc model
+4. Compute the **regulatory prediction** (ΔΔQTcF with 90% CI at geometric-mean Cmax)
+5. Fit a **nonlinear Emax** model on a drug where the relationship saturates
+6. Summarize **categorical outliers**
 
-The dataset comes from the PhysioNet ECG repository
-([Johannesen et al., 2014](https://doi.org/10.13026/C2HP4K)), a five-way
-crossover TQT study in 22 healthy volunteers receiving ranolazine, verapamil,
-quinidine, dofetilide, and placebo.
+The dataset comes from PhysioNet
+([Johannesen et al., 2014](https://doi.org/10.1038/clpt.2014.155);
+[doi:10.13026/C2HP45](https://doi.org/10.13026/C2HP45)), a five-way
+crossover ECG study in 22 healthy volunteers receiving dofetilide,
+quinidine, ranolazine, verapamil, and placebo. This study was designed to
+evaluate multichannel block effects on ECG morphology; we use it here as
+a teaching dataset for the C-QTc workflow.
+
+**Scope and limitations.** A C-QTc upper bound below 10 ms is a claim at
+the exposure covered by the data. These single-dose data do not cover
+steady state, supratherapeutic exposure, or drug interactions. A real
+regulatory assessment would require exposure at approximately 2x the high
+clinical exposure, or the nonclinical "double negative" (E14/S7B Q&A R1,
+5.1), together with a prespecified analysis plan and BLQ handling rule.
+Dofetilide is a selective hERG blocker with a large, well-known QTc
+effect (~70 ms at therapeutic Cmax), so the 10 ms decision criterion is
+here a teaching device rather than a verdict.
 
 ---
 
@@ -40,41 +58,33 @@ quinidine, dofetilide, and placebo.
 
 ### Download and inspect the raw data
 
-The dataset is publicly available from PhysioNet. Each row is a single ECG
-replicate; there are three replicates per time point per subject per treatment
-period.
+Each row is a single ECG replicate; there are three replicates per time
+point per subject per treatment period.
 
 ```{r download, eval = FALSE}
 url <- "https://physionet.org/physiobank/database/ecgrdvq/SCR-002.Clinical.Data.csv"
 raw <- read.csv(url)
-str(raw)
-#> 'data.frame':	5232 obs. of  32 variables:
-#>  $ RANDID  : int  1001 1001 1001 ...
-#>  $ EXTRT   : chr  "Ranolazine" "Ranolazine" ...
-#>  $ EXDOSE  : int  1500 1500 1500 ...
-#>  $ TPT     : num  -0.5 -0.5 -0.5 0.5 ...
-#>  $ BASELINE: chr  "Y" "Y" "Y" "N" ...
-#>  $ PCSTRESN: num  NA NA NA 524 524 ...
-#>  $ RR      : int  902 883 806 875 837 ...
-#>  $ QT      : int  400 400 386 369 368 ...
 ```
 
-### Compute QTcF and ddQTcF
+### Compute QTcF and ΔΔQTcF
 
 The Fridericia correction adjusts QT for heart rate:
 QTcF = QT / (RR / 1000)^(1/3), where RR is in milliseconds.
 
-The change-from-baseline ddQTcF is the analysis endpoint recommended by ICH
-E14. For each subject and treatment period, we subtract the subject's
-pre-dose baseline QTcF from each post-dose QTcF measurement.
+The change-from-baseline ΔQTcF is computed per subject and treatment
+period. The placebo-corrected ΔΔQTcF is then obtained by subtracting the
+time-matched placebo ΔQTcF for each subject (valid in a crossover design;
+Garnett 2018, Table 4).
 
 ```{r prep, eval = FALSE}
 # Fridericia correction
 raw$QTcF <- raw$QT / (raw$RR / 1000)^(1/3)
 
-# Average triplicate ECGs at each time point
+# Average triplicate ECGs at each time point.
+# Note: EXDOSE is intentionally excluded from the grouping formula
+# so that placebo records (where EXDOSE is NA) are retained.
 agg <- aggregate(
-  cbind(QTcF, PCSTRESN) ~ RANDID + EXTRT + EXDOSE + TPT + BASELINE +
+  cbind(QTcF, PCSTRESN, RR) ~ RANDID + EXTRT + TPT + BASELINE +
     SEX + AGE + WGHT,
   data = raw,
   FUN = mean,
@@ -82,117 +92,204 @@ agg <- aggregate(
   na.action = na.pass
 )
 
-# Compute per-subject, per-period baseline QTcF
+# Per-subject, per-period baseline QTcF
 baselines <- agg[agg$BASELINE == "Y",]
 bl_avg <- aggregate(QTcF ~ RANDID + EXTRT, data = baselines, FUN = mean)
 names(bl_avg)[3] <- "BL_QTcF"
 
-# Merge baseline and compute ddQTcF
+# Merge baseline and compute delta QTcF
 agg <- merge(agg, bl_avg, by = c("RANDID", "EXTRT"))
-agg$ddQTcF <- agg$QTcF - agg$BL_QTcF
+agg$dQTcF <- agg$QTcF - agg$BL_QTcF
+
+# Placebo correction: subtract time-matched placebo dQTcF per subject
+placebo <- agg[agg$EXTRT == "Placebo" & agg$BASELINE == "N",
+               c("RANDID", "TPT", "dQTcF")]
+names(placebo)[3] <- "dQTcF_placebo"
+
+active <- agg[agg$EXTRT != "Placebo" & agg$BASELINE == "N" &
+              !is.na(agg$PCSTRESN),]
+active <- merge(active, placebo, by = c("RANDID", "TPT"), all.x = TRUE)
+active$ddQTcF <- active$dQTcF - active$dQTcF_placebo
 ```
 
-### Prepare the modeling dataset
+### Prepare the dofetilide modeling dataset
 
-We focus on dofetilide, the positive control in TQT studies and a classic
-hERG channel blocker. Only post-dose records with measured plasma
-concentration are retained.
+We focus on dofetilide, a selective hERG channel blocker with a large,
+well-characterized QTc effect. Only post-dose records with measured
+plasma concentration are retained.
 
 ```{r filter, eval = FALSE}
-# Filter: dofetilide, post-dose, non-missing concentration
-dof <- agg[agg$EXTRT == "Dofetilide" &
-           agg$BASELINE == "N" &
-           !is.na(agg$PCSTRESN),]
+dof <- active[active$EXTRT == "Dofetilide",]
 
-# Concentration is in pg/mL; convert to ng/mL for readability
+# Concentration is in pg/mL; convert to ng/mL
 dof$CONC <- dof$PCSTRESN / 1000
 
-# Format for ferx: compartment-free model, all observations
+# Centered baseline QTcF (for the model's baseline covariate)
+mean_bl <- mean(dof$BL_QTcF)
+dof$BLc <- dof$BL_QTcF - mean_bl
+
+# Format for ferx
 ferx_data <- data.frame(
   ID   = as.integer(factor(dof$RANDID)),
   TIME = dof$TPT,
-  DV   = dof$ddQTcF,
+  DV   = round(dof$ddQTcF, 4),
   MDV  = 0,
-  CONC = dof$CONC,
-  SEX  = ifelse(dof$SEX == "F", 1, 0),
-  AGE  = dof$AGE,
-  WGHT = dof$WGHT,
-  BL_QTCF = dof$BL_QTcF
+  CONC = round(dof$CONC, 4),
+  BLc  = round(dof$BLc, 4),
+  SEX  = ifelse(dof$SEX == "F", 1, 0)
 )
-
-# Sort by ID and TIME
 ferx_data <- ferx_data[order(ferx_data$ID, ferx_data$TIME),]
+write.csv(ferx_data, "dofetilide_ddqtcf.csv", row.names = FALSE)
 
-# Write CSV
-write.csv(ferx_data, "dofetilide_qtc.csv", row.names = FALSE)
-head(ferx_data)
-#>   ID TIME       DV MDV   CONC SEX AGE WGHT  BL_QTCF
-#> 1  1  0.5  -1.3827   0  0.120   1  25 54.8 395.1891
-#> 2  1  1.0  12.1684   0  1.610   1  25 54.8 395.1891
-#> 3  1  1.5  41.3927   0  1.930   1  25 54.8 395.1891
-#> 4  1  2.0  47.3927   0  2.430   1  25 54.8 395.1891
-#> ...
+# Geometric mean Cmax
+cmax_per_subj <- tapply(dof$CONC, dof$RANDID, max)
+gm_cmax <- exp(mean(log(cmax_per_subj)))
+
+head(ferx_data, 6)
+#>   ID TIME      DV MDV   CONC      BLc SEX
+#> 1  1  0.5  4.3706   0 0.1200 -13.3733   1
+#> 2  1  1.0 18.9475   0 1.6100 -13.3733   1
+#> 3  1  1.5 63.4094   0 1.9300 -13.3733   1
+#> 4  1  2.0 68.1426   0 2.4300 -13.3733   1
+#> 5  1  2.5 66.6889   0 2.9000 -13.3733   1
+#> 6  1  3.0 72.4598   0 2.9400 -13.3733   1
+
+cat("Geometric mean Cmax:", round(gm_cmax, 2), "ng/mL\n")
+#> Geometric mean Cmax: 2.71 ng/mL
 ```
-
-### Exploratory visualization
-
-Before fitting, it helps to visualize the concentration-ddQTcF relationship.
-
-```{r explore, eval = FALSE}
-plot(ferx_data$CONC, ferx_data$DV,
-     xlab = "Dofetilide concentration (ng/mL)",
-     ylab = "ddQTcF (ms)",
-     main = "Concentration-QTc relationship: Dofetilide",
-     pch = 16, col = adjustcolor("steelblue", 0.5))
-abline(h = 0, lty = 2, col = "grey50")
-abline(h = 10, lty = 3, col = "red")  # ICH E14 threshold of concern
-legend("topleft", lty = 3, col = "red", legend = "10 ms threshold (ICH E14)")
-```
-
-The scatter should show a positive concentration-ddQTcF trend for dofetilide.
-The dashed red line marks the 10 ms threshold of regulatory concern from ICH
-E14.
 
 ---
 
-## Linear concentration-ddQTcF model
+## Exploratory checks
 
-The simplest and most common C-QTc model is a linear mixed-effects model.
-This is the standard approach recommended in the ICH E14 Q&A document and
-most regulatory submissions.
+Before fitting a C-QTc model, the ICH E14 Q&As and the Garnett 2018
+white paper require several exploratory assessments.
 
-The structural model is:
+### Heart-rate change
 
-    ddQTcF_ij = intercept + slope * CONC_ij + eta_i + epsilon_ij
+If mean ΔΔHR exceeds approximately 10 bpm, the QTcF correction may be
+inadequate and an alternative correction should be considered.
 
-where `eta_i` captures between-subject variability in baseline ddQTcF and
-`epsilon_ij` is the residual error.
+```{r explore-hr, eval = FALSE}
+# Compute mean delta-delta HR by drug and time
+raw$HR <- 60000 / raw$RR
+agg_hr <- aggregate(HR ~ RANDID + EXTRT + TPT + BASELINE,
+                    data = raw, FUN = mean)
+bl_hr <- agg_hr[agg_hr$BASELINE == "Y",]
+bl_hr_avg <- aggregate(HR ~ RANDID + EXTRT, data = bl_hr, FUN = mean)
+names(bl_hr_avg)[3] <- "BL_HR"
+agg_hr <- merge(agg_hr, bl_hr_avg, by = c("RANDID", "EXTRT"))
+agg_hr$dHR <- agg_hr$HR - agg_hr$BL_HR
+
+plac_hr <- agg_hr[agg_hr$EXTRT == "Placebo" & agg_hr$BASELINE == "N",
+                  c("RANDID", "TPT", "dHR")]
+names(plac_hr)[3] <- "dHR_placebo"
+active_hr <- agg_hr[agg_hr$EXTRT != "Placebo" & agg_hr$BASELINE == "N",]
+active_hr <- merge(active_hr, plac_hr, by = c("RANDID", "TPT"))
+active_hr$ddHR <- active_hr$dHR - active_hr$dHR_placebo
+
+# Mean ddHR by drug and time
+ddhr_means <- aggregate(ddHR ~ EXTRT + TPT, data = active_hr, FUN = mean)
+for (drug in unique(ddhr_means$EXTRT)) {
+  mx <- max(ddhr_means$ddHR[ddhr_means$EXTRT == drug])
+  cat(drug, "max mean ddHR:", round(mx, 1), "bpm\n")
+}
+#> Dofetilide max mean ddHR: 2.2 bpm
+#> Quinidine Sulph max mean ddHR: 9.7 bpm
+#> Verapamil HCL max mean ddHR: 9.4 bpm
+#> Ranolazine max mean ddHR: 7.6 bpm
+```
+
+For dofetilide, the heart-rate effect is small (2.2 bpm), so QTcF is
+adequate. Quinidine and verapamil approach the 10 bpm concern level;
+sensitivity analyses with an alternative correction (e.g., population
+QTcP) would be appropriate for those drugs.
+
+### Concentration-ΔΔQTcF scatter and linearity
+
+A decile plot helps assess whether the relationship is approximately
+linear or shows saturation.
+
+```{r explore-scatter, eval = FALSE}
+# Decile plot for dofetilide
+deciles <- cut(ferx_data$CONC,
+               breaks = quantile(ferx_data$CONC, probs = seq(0, 1, 0.1)),
+               include.lowest = TRUE)
+decile_means <- tapply(ferx_data$DV, deciles, mean)
+decile_conc  <- tapply(ferx_data$CONC, deciles, mean)
+
+plot(ferx_data$CONC, ferx_data$DV,
+     xlab = "Dofetilide concentration (ng/mL)",
+     ylab = expression(paste(Delta, Delta, "QTcF (ms)")),
+     pch = 16, col = adjustcolor("steelblue", 0.3))
+points(decile_conc, decile_means, pch = 18, cex = 2, col = "darkred")
+abline(h = c(0, 10), lty = c(2, 3), col = c("grey50", "red"))
+legend("topleft", pch = 18, col = "darkred", legend = "Decile means")
+```
+
+For dofetilide, the decile means rise approximately linearly from about
+4 ms to 74 ms across the concentration range. This supports a linear
+model. For quinidine, the decile means flatten at higher concentrations,
+motivating an Emax model (see below).
+
+### Hysteresis
+
+Concentration-effect hysteresis (clockwise or counterclockwise loops in a
+concentration-vs-effect plot over time) can indicate delayed drug effect
+or active metabolites. A formal hysteresis assessment would use an effect
+compartment; here we show the exploratory loop plot.
+
+```{r explore-hysteresis, eval = FALSE}
+# Mean concentration and ddQTcF by time for dofetilide
+time_means <- aggregate(cbind(CONC, DV) ~ TIME, data = ferx_data, FUN = mean)
+plot(time_means$CONC, time_means$DV, type = "b", pch = 16,
+     xlab = "Mean concentration (ng/mL)",
+     ylab = expression(paste("Mean ", Delta, Delta, "QTcF (ms)")),
+     main = "Hysteresis loop: Dofetilide")
+text(time_means$CONC, time_means$DV, labels = paste0(time_means$TIME, "h"),
+     pos = 3, cex = 0.7)
+```
+
+---
+
+## Linear C-QTc model
 
 ### Model specification
 
-Create a `.ferx` model file. This is a **compartment-free** model (no ODEs,
-no dosing events) where the prediction equation defines the model directly,
-analogous to NONMEM `$PRED`. Drug concentration enters via the `[covariates]`
-block.
+The model follows the structure recommended by Garnett 2018, adapted for
+a placebo-corrected crossover analysis. Because ΔΔQTcF already accounts
+for treatment and time effects through placebo subtraction, the model
+does not require explicit TRT or categorical TIME terms:
+
+    ΔΔQTcF_ij = (intercept + θ_BL * BLc_i + η_int,i) + (slope + η_slope,i) * CONC_ij + ε_ij
+
+The model includes IIV on both the intercept and the slope (Garnett 2018,
+Eq. 1). The centered baseline QTcF covariate (`BLc = QTcF_baseline -
+mean`) accounts for between-subject differences in baseline
+repolarization.
 
 ```{r linear-model-write, eval = FALSE}
 writeLines("
 [parameters]
   theta TVINTERCEPT(0.0, -50.0, 50.0)
-  theta TVSLOPE(10.0, -50.0, 100.0)
+  theta TVSLOPE(20.0, -50.0, 100.0)
+  theta TBL(0.0, -2.0, 2.0)
 
   omega ETA_INTERCEPT ~ 100.0 (variance)
+  omega ETA_SLOPE ~ 10.0 (variance)
 
   sigma ADD ~ 100.0 (variance)
 
 [individual_parameters]
-  INTERCEPT = TVINTERCEPT + ETA_INTERCEPT
+  INTERCEPT = TVINTERCEPT + TBL * BLc + ETA_INTERCEPT
+  SLOPE = TVSLOPE + ETA_SLOPE
 
 [structural_model]
-  y = INTERCEPT + TVSLOPE * CONC
+  y = INTERCEPT + SLOPE * CONC
 
 [covariates]
   CONC continuous
+  BLc  continuous
 
 [error_model]
   DV ~ additive(ADD)
@@ -203,97 +300,135 @@ writeLines("
 ", "qtc_linear.ferx")
 ```
 
-Key features:
-
-- **Additive IIV** on the intercept (not log-normal, since ddQTcF can be
-  negative).
-- **Additive residual error**, appropriate for QTcF measurements in
-  milliseconds.
-- **`CONC`** is declared as a continuous covariate read from the data CSV.
+This is a **compartment-free** model (no ODEs, no dosing events). The
+prediction equation defines the model directly, analogous to NONMEM
+`$PRED`. Drug concentration enters via the `[covariates]` block.
 
 ### Fit the model
 
 ```{r linear-fit, eval = FALSE}
 library(ferx)
 
-fit_linear <- ferx_fit(model = "qtc_linear.ferx", data = "dofetilide_qtc.csv")
+fit_linear <- ferx_fit(model = "qtc_linear.ferx", data = "dofetilide_ddqtcf.csv")
 fit_linear
 #> Model: qtc_linear  |  Method: FOCEI  |  Subjects: 22  |  Obs: 328
-#> STATUS: CONVERGED   41 iterations   0.0s
-#> OFV: 2086.7258    AIC: 2094.7258
+#> STATUS: CONVERGED   35 iterations   0.0s
+#> OFV: 2028.7943    AIC: 2040.7943
 #>
 #> THETA
 #> Parameter            Estimate           SE       %RSE
-#> TVINTERCEPT        -13.076578     2.549766       19.5
-#> TVSLOPE             29.580442     0.963271        3.3
+#> TVINTERCEPT         -3.812723     1.962962       51.5
+#> TVSLOPE             28.588674     1.468448        5.1
+#> TBL                  0.057602     0.111940      194.3
 #>
 #> OMEGA
-#>   ETA_INTERCEPT  [additive]  = 81.594  (SD = 9.03)  SE = 28.38
+#>   ETA_INTERCEPT  [additive]  = 35.46  (SD = 5.96)   SE = 21.56
+#>   ETA_SLOPE      [additive]  = 30.71  (SD = 5.54)   SE = 12.12
 #>
 #> SIGMA
-#>   ADD  [additive]  = 13.643  (SD = 13.64, var = 186.14)  SE = 0.55
+#>   ADD  [additive]  = 12.07  (SD = 12.07, var = 145.74)  SE = 0.50
 ```
 
-The slope estimate of ~29.6 ms per ng/mL is precisely estimated (%RSE 3.3%)
-and confirms substantial QTc prolongation with dofetilide. The negative
-intercept is expected: at zero concentration, ddQTcF should be near zero,
-and the negative estimate reflects sampling variability.
+With placebo correction, the intercept is -3.8 ms (SE 2.0), close to
+zero as expected. The centered baseline covariate (TBL) is not
+significant here (RSE 194%), consistent with the white paper's
+observation that covariate analysis is not routinely informative in
+healthy-volunteer studies. The slope of 28.6 ms per ng/mL is precisely
+estimated (%RSE 5.1%).
 
 ### Regulatory prediction
 
-A key deliverable in C-QTc analysis is predicting the ddQTcF at the
-geometric mean Cmax of the therapeutic dose, with a two-sided 90% confidence
-interval. If the upper bound of this interval exceeds 10 ms, the drug is
-flagged for further evaluation.
+The regulatory deliverable is the predicted ΔΔQTcF at the geometric-mean
+Cmax with a two-sided 90% confidence interval, computed by the delta
+method. The geometric-mean Cmax is treated as fixed (Garnett 2018,
+Eqs. 3-5).
 
 ```{r linear-predict, eval = FALSE}
-# Extract estimates from the fit object
+# Extract estimates
 ests <- fit_linear$estimates
-intercept <- ests$estimate[ests$param == "TVINTERCEPT"]
-slope     <- ests$estimate[ests$param == "TVSLOPE"]
+int_est   <- ests$estimate[ests$param == "TVINTERCEPT"]
+slope_est <- ests$estimate[ests$param == "TVSLOPE"]
 
-# Predict at a target Cmax (e.g. 2.0 ng/mL)
-cmax <- 2.0
-ddqtc_pred <- intercept + slope * cmax
-cat("Predicted ddQTcF at Cmax =", cmax, "ng/mL:", round(ddqtc_pred, 1), "ms\n")
-#> Predicted ddQTcF at Cmax = 2 ng/mL: 46.1 ms
+# Predicted ddQTcF at geometric-mean Cmax
+ddqtc_pred <- int_est + slope_est * gm_cmax
+
+# Delta-method SE: var(int + slope*C) = var(int) + C^2*var(slope) + 2*C*cov(int,slope)
+cov_mat <- fit_linear$cov_matrix
+idx_int   <- which(rownames(cov_mat) == "TVINTERCEPT")
+idx_slope <- which(rownames(cov_mat) == "TVSLOPE")
+
+var_pred <- cov_mat[idx_int, idx_int] +
+  gm_cmax^2 * cov_mat[idx_slope, idx_slope] +
+  2 * gm_cmax * cov_mat[idx_int, idx_slope]
+se_pred <- sqrt(var_pred)
+
+# Two-sided 90% CI
+z90 <- qnorm(0.95)
+ci_lo <- ddqtc_pred - z90 * se_pred
+ci_hi <- ddqtc_pred + z90 * se_pred
+
+cat("Geometric mean Cmax:", round(gm_cmax, 2), "ng/mL\n")
+cat("Predicted ddQTcF:", round(ddqtc_pred, 1), "ms\n")
+cat("90% CI:", round(ci_lo, 1), "to", round(ci_hi, 1), "ms\n")
+#> Geometric mean Cmax: 2.71 ng/mL
+#> Predicted ddQTcF: 73.7 ms
+#> 90% CI: 67.6 to 79.7 ms
 ```
+
+The upper bound of 79.7 ms is far above the 10 ms threshold, as expected
+for a potent hERG blocker. This confirms dofetilide's known QTc liability
+and demonstrates the analysis workflow.
 
 ---
 
-## Nonlinear Emax concentration-ddQTcF model
+## Nonlinear Emax model (quinidine)
 
-When QTc prolongation plateaus at high concentrations, a nonlinear Emax
-model better characterizes the relationship. This is common for hERG
-blockers like dofetilide, where channel blockade saturates.
+Nonlinear models should be considered when the exploratory linearity
+(decile) plot shows saturation. For dofetilide over 0.04-3.3 ng/mL, the
+relationship is approximately linear and an Emax model is not
+identifiable (TVEMAX hits its upper bound).
 
-The structural model is:
+Quinidine is a better candidate: its decile means flatten at higher
+concentrations. We fit an Emax model with an E0 intercept term:
 
-    ddQTcF_ij = Emax * CONC_ij / (EC50 + CONC_ij) + eta_i + epsilon_ij
+    ΔΔQTcF_ij = (E0 + η_E0,i) + Emax_i * CONC_ij / (EC50 + CONC_ij) + ε_ij
 
-No intercept is needed in the Emax form because ddQTcF is zero when
-concentration is zero by construction (the change from baseline at zero
-exposure should be zero, with any residual offset absorbed by between-subject
-variability).
+```{r emax-quinidine, eval = FALSE}
+# Prepare quinidine data
+quin <- active[active$EXTRT == "Quinidine Sulph",]
+quin$CONC <- quin$PCSTRESN / 1000  # ng/mL to ug/mL
+mean_bl_q <- mean(quin$BL_QTcF)
+quin$BLc <- quin$BL_QTcF - mean_bl_q
 
-### Model specification
+quin_data <- data.frame(
+  ID   = as.integer(factor(quin$RANDID)),
+  TIME = quin$TPT,
+  DV   = round(quin$ddQTcF, 4),
+  MDV  = 0,
+  CONC = round(quin$CONC, 4),
+  BLc  = round(quin$BLc, 4)
+)
+quin_data <- quin_data[order(quin_data$ID, quin_data$TIME),]
+write.csv(quin_data, "quinidine_ddqtcf.csv", row.names = FALSE)
 
-```{r emax-model-write, eval = FALSE}
 writeLines("
 [parameters]
-  theta TVEMAX(50.0, 1.0, 200.0)
-  theta TVEC50(1.5, 0.01, 20.0)
+  theta TVE0(0.0, -50.0, 50.0)
+  theta TVEMAX(80.0, 1.0, 300.0)
+  theta TVEC50(1.0, 0.01, 20.0)
 
+  omega ETA_E0 ~ 100.0 (variance)
   omega ETA_EMAX ~ 0.09
 
   sigma ADD ~ 100.0 (variance)
 
 [individual_parameters]
+  E0   = TVE0 + ETA_E0
   EMAX = TVEMAX * exp(ETA_EMAX)
   EC50 = TVEC50
 
 [structural_model]
-  y = EMAX * CONC / (EC50 + CONC)
+  y = E0 + EMAX * CONC / (EC50 + CONC)
 
 [covariates]
   CONC continuous
@@ -305,183 +440,101 @@ writeLines("
   method     = focei
   covariance = true
 ", "qtc_emax.ferx")
-```
 
-The IIV on Emax is log-normal (the standard parameterization for a positive
-parameter). EC50 is estimated as a fixed effect only; adding IIV on EC50 is
-often not supported by the data in a 22-subject study.
-
-### Fit the model
-
-```{r emax-fit, eval = FALSE}
-fit_emax <- ferx_fit(model = "qtc_emax.ferx", data = "dofetilide_qtc.csv")
+fit_emax <- ferx_fit(model = "qtc_emax.ferx", data = "quinidine_ddqtcf.csv")
 fit_emax
 ```
 
-### Model comparison
-
-Compare the linear and Emax models by their objective function value (OFV)
-and AIC. A lower AIC favors the more parsimonious model when both have the
-same number of observations.
-
-```{r compare, eval = FALSE}
-data.frame(
-  Model   = c("Linear", "Emax"),
-  npar    = c(nrow(fit_linear$estimates), nrow(fit_emax$estimates)),
-  OFV     = c(fit_linear$ofv, fit_emax$ofv),
-  AIC     = c(fit_linear$aic, fit_emax$aic)
-)
-#>    Model npar      OFV      AIC
-#> 1 Linear    4 2086.726 2094.726
-#> 2   Emax    4 2166.958 2174.958
-```
-
-For dofetilide in this concentration range (0.04--3.3 ng/mL), the linear
-model fits substantially better. The Emax model's `TVEMAX` estimate may
-hit its upper bound, indicating that the data covers only the lower,
-approximately linear, portion of a potential saturation curve. When a
-nonlinear model reduces to a near-linear form but introduces estimation
-difficulties, the linear model is preferred for both fit and regulatory
-interpretability.
+An Emax model that estimates well on these data indicates saturation at
+higher quinidine concentrations. For nonlinear models, the delta-method
+CI may be replaced by a bootstrap CI for more robust inference.
 
 ---
 
-## Adding a Hill coefficient
+## Verapamil: a small-effect case
 
-If saturation is steep, the sigmoidal (Hill) Emax model adds flexibility:
+Verapamil combines hERG-channel and calcium-channel blocking, producing
+a small net QTc effect. This makes it useful for demonstrating the
+analysis when the upper bound is near the 10 ms threshold.
 
-    ddQTcF_ij = Emax * CONC_ij^gamma / (EC50^gamma + CONC_ij^gamma)
+```{r verapamil, eval = FALSE}
+ver <- active[active$EXTRT == "Verapamil HCL",]
+ver$CONC <- ver$PCSTRESN  # already in ng/mL
+mean_bl_v <- mean(ver$BL_QTcF)
+ver$BLc <- ver$BL_QTcF - mean_bl_v
 
-```{r hill-model, eval = FALSE}
-writeLines("
-[parameters]
-  theta TVEMAX(50.0, 1.0, 200.0)
-  theta TVEC50(1.5, 0.01, 20.0)
-  theta TVGAMMA(1.0, 0.3, 5.0)
+ver_data <- data.frame(
+  ID = as.integer(factor(ver$RANDID)), TIME = ver$TPT,
+  DV = round(ver$ddQTcF, 4), MDV = 0,
+  CONC = round(ver$CONC, 4), BLc = round(ver$BLc, 4)
+)
+ver_data <- ver_data[order(ver_data$ID, ver_data$TIME),]
+write.csv(ver_data, "verapamil_ddqtcf.csv", row.names = FALSE)
 
-  omega ETA_EMAX ~ 0.09
+fit_ver <- ferx_fit(model = "qtc_linear.ferx", data = "verapamil_ddqtcf.csv")
 
-  sigma ADD ~ 100.0 (variance)
+# Prediction at GM Cmax
+cmax_v <- exp(mean(log(tapply(ver$CONC, ver$RANDID, max))))
+ests_v <- fit_ver$estimates
+int_v <- ests_v$estimate[ests_v$param == "TVINTERCEPT"]
+slope_v <- ests_v$estimate[ests_v$param == "TVSLOPE"]
+ddqtc_v <- int_v + slope_v * cmax_v
 
-[individual_parameters]
-  EMAX  = TVEMAX * exp(ETA_EMAX)
-  EC50  = TVEC50
-  GAMMA = TVGAMMA
+cov_v <- fit_ver$cov_matrix
+idx_i <- which(rownames(cov_v) == "TVINTERCEPT")
+idx_s <- which(rownames(cov_v) == "TVSLOPE")
+var_v <- cov_v[idx_i,idx_i] + cmax_v^2 * cov_v[idx_s,idx_s] +
+  2 * cmax_v * cov_v[idx_i,idx_s]
+se_v <- sqrt(var_v)
+ci_hi_v <- ddqtc_v + qnorm(0.95) * se_v
 
-[structural_model]
-  y = EMAX * CONC^GAMMA / (EC50^GAMMA + CONC^GAMMA)
-
-[covariates]
-  CONC continuous
-
-[error_model]
-  DV ~ additive(ADD)
-
-[fit_options]
-  method     = focei
-  covariance = true
-", "qtc_hill.ferx")
-
-fit_hill <- ferx_fit(model = "qtc_hill.ferx", data = "dofetilide_qtc.csv")
-fit_hill
+cat("Verapamil GM Cmax:", round(cmax_v, 1), "ng/mL\n")
+cat("ddQTcF:", round(ddqtc_v, 1), "ms, 90% CI:",
+    round(ddqtc_v - qnorm(0.95)*se_v, 1), "to", round(ci_hi_v, 1), "ms\n")
+cat("Upper bound < 10 ms:", ci_hi_v < 10, "\n")
+#> Verapamil GM Cmax: 113.6 ng/mL
+#> ddQTcF: 3.6 ms, 90% CI: 0.0 to 7.2 ms
+#> Upper bound < 10 ms: TRUE
 ```
 
-A `GAMMA` estimate near 1.0 suggests the standard Emax is sufficient;
-values above 1.0 indicate steeper saturation.
+The upper bound of 7.2 ms is below 10 ms at this single 120 mg dose's
+Cmax. Note that this does not constitute a full negative QT assessment:
+the verapamil label allows up to 480 mg/day, and these data cover only a
+single 120 mg dose. A complete assessment would require exposure coverage
+at the high clinical exposure.
 
 ---
 
-## Covariate effects
+## Categorical outlier analysis
 
-Covariates commonly tested in C-QTc analyses include sex, baseline QTcF,
-and body weight. This section demonstrates adding a sex effect on the slope
-(linear model) and a baseline QTcF effect on the intercept.
+ICH E14 (Section 3.2.2) requires a categorical analysis alongside the
+central-tendency model. This tabulates the number of subject-time-point
+observations exceeding absolute QTcF thresholds and change-from-baseline
+thresholds.
 
-### Sex effect on the linear slope
-
-Women have longer baseline QTc intervals on average, and some drugs show
-a sex-dependent C-QTc slope. We test this by adding a categorical sex
-covariate:
-
-```{r cov-sex-linear, eval = FALSE}
-writeLines("
-[parameters]
-  theta TVINTERCEPT(0.0, -50.0, 50.0)
-  theta TVSLOPE(10.0, -50.0, 100.0)
-  theta THETA_SEX_SLOPE(0.0, -20.0, 20.0)
-
-  omega ETA_INTERCEPT ~ 100.0 (variance)
-
-  sigma ADD ~ 100.0 (variance)
-
-[individual_parameters]
-  INTERCEPT = TVINTERCEPT + ETA_INTERCEPT
-
-[structural_model]
-  SLOPE = TVSLOPE + THETA_SEX_SLOPE * SEX
-  y = INTERCEPT + SLOPE * CONC
-
-[covariates]
-  CONC continuous
-  SEX  continuous
-
-[error_model]
-  DV ~ additive(ADD)
-
-[fit_options]
-  method     = focei
-  covariance = true
-", "qtc_linear_sex.ferx")
-
-fit_linear_sex <- ferx_fit(
-  model = "qtc_linear_sex.ferx", data = "dofetilide_qtc.csv"
-)
-fit_linear_sex
+```{r outliers, eval = FALSE}
+# Categorical outliers by arm (counts of subject-time-point observations)
+for (drug in c("Dofetilide", "Quinidine Sulph", "Verapamil HCL",
+               "Ranolazine", "Placebo")) {
+  sub <- agg[agg$EXTRT == drug & agg$BASELINE == "N",]
+  cat(sprintf("%-18s QTcF>450: %3d  >480: %3d  >500: %3d  dQTcF>30: %3d  >60: %3d\n",
+      drug,
+      sum(sub$QTcF > 450, na.rm = TRUE),
+      sum(sub$QTcF > 480, na.rm = TRUE),
+      sum(sub$QTcF > 500, na.rm = TRUE),
+      sum(sub$dQTcF > 30, na.rm = TRUE),
+      sum(sub$dQTcF > 60, na.rm = TRUE)))
+}
+#> Dofetilide         QTcF>450:  78  >480:  26  >500:   8  dQTcF>30: 172  >60:  55
+#> Quinidine Sulph    QTcF>450: 106  >480:  50  >500:  22  dQTcF>30: 202  >60:  85
+#> Verapamil HCL      QTcF>450:   0  >480:   0  >500:   0  dQTcF>30:   0  >60:   0
+#> Ranolazine         QTcF>450:   1  >480:   0  >500:   0  dQTcF>30:   3  >60:   0
+#> Placebo            QTcF>450:   0  >480:   0  >500:   0  dQTcF>30:   0  >60:   0
 ```
 
-The `THETA_SEX_SLOPE` estimate quantifies how much the slope differs for
-females (`SEX = 1`) compared to males (`SEX = 0`). A non-significant
-estimate (relative standard error > 50% or confidence interval spanning zero)
-suggests no meaningful sex difference.
-
-### Baseline QTcF as a covariate on the intercept
-
-Subjects with higher baseline QTcF may have different ddQTcF trajectories.
-We can test this with a centered covariate on the intercept:
-
-```{r cov-blqtcf, eval = FALSE}
-writeLines("
-[parameters]
-  theta TVINTERCEPT(0.0, -50.0, 50.0)
-  theta TVSLOPE(10.0, -50.0, 100.0)
-  theta THETA_BL(0.0, -2.0, 2.0)
-
-  omega ETA_INTERCEPT ~ 100.0 (variance)
-
-  sigma ADD ~ 100.0 (variance)
-
-[individual_parameters]
-  INTERCEPT = TVINTERCEPT + THETA_BL * (BL_QTCF - 400) + ETA_INTERCEPT
-
-[structural_model]
-  y = INTERCEPT + TVSLOPE * CONC
-
-[covariates]
-  CONC    continuous
-  BL_QTCF continuous
-
-[error_model]
-  DV ~ additive(ADD)
-
-[fit_options]
-  method     = focei
-  covariance = true
-", "qtc_linear_bl.ferx")
-
-fit_linear_bl <- ferx_fit(
-  model = "qtc_linear_bl.ferx", data = "dofetilide_qtc.csv"
-)
-```
+Dofetilide and quinidine show numerous observations above all thresholds,
+consistent with their known QTc liability. Verapamil, ranolazine, and
+placebo show none or very few.
 
 ---
 
@@ -490,24 +543,19 @@ fit_linear_bl <- ferx_fit(
 After selecting the best model, standard NLME diagnostics apply.
 
 ```{r diagnostics, eval = FALSE}
-# Diagnostic plots (CWRES vs TIME, CWRES vs PRED, observed vs predicted)
+# Diagnostic plots
 plot(fit_linear)
 
-# Numerical diagnostics from the sdtab
+# Conditional weighted residuals vs population prediction
 sdtab <- fit_linear$sdtab
-head(sdtab)
-
-# Conditional weighted residuals should be centered around zero
-# with no trend over time or predicted values
 plot(sdtab$PRED, sdtab$CWRES,
-     xlab = "Population prediction (ms)",
-     ylab = "CWRES",
+     xlab = "Population prediction (ms)", ylab = "CWRES",
      main = "CWRES vs PRED")
 abline(h = 0, lty = 2)
 
 # Individual predictions vs observed
 plot(sdtab$DV, sdtab$IPRED,
-     xlab = "Observed ddQTcF (ms)",
+     xlab = expression(paste("Observed ", Delta, Delta, "QTcF (ms)")),
      ylab = "Individual prediction (ms)",
      main = "IPRED vs DV")
 abline(0, 1, lty = 2)
@@ -515,60 +563,55 @@ abline(0, 1, lty = 2)
 
 ---
 
-## Extending to other drugs in the study
-
-The same workflow applies to other compounds in the dataset. For example,
-to analyze quinidine (a known QTc prolonger):
-
-```{r other-drugs, eval = FALSE}
-# Prepare quinidine data (concentration in ng/mL, no unit conversion needed)
-quin <- agg[agg$EXTRT == "Quinidine Sulph" &
-            agg$BASELINE == "N" &
-            !is.na(agg$PCSTRESN),]
-quin_data <- data.frame(
-  ID   = as.integer(factor(quin$RANDID)),
-  TIME = quin$TPT,
-  DV   = quin$ddQTcF,
-  MDV  = 0,
-  CONC = quin$PCSTRESN / 1000  # ng/mL to ug/mL
-)
-quin_data <- quin_data[order(quin_data$ID, quin_data$TIME),]
-write.csv(quin_data, "quinidine_qtc.csv", row.names = FALSE)
-
-fit_quin <- ferx_fit(model = "qtc_linear.ferx", data = "quinidine_qtc.csv")
-fit_quin
-```
-
-Verapamil is expected to shorten QT (negative slope) due to its combined
-calcium- and hERG-channel blocking properties, providing a useful contrast.
-
----
-
 ## Summary
 
 | Model | Parameters | Use case |
 |---|---|---|
-| Linear | intercept, slope, omega, sigma | Standard ICH E14 analysis; most regulatory submissions |
-| Emax | Emax, EC50, omega, sigma | Saturating drugs (hERG blockers at high exposure) |
-| Sigmoidal Emax | Emax, EC50, gamma, omega, sigma | Steep saturation requiring a Hill coefficient |
-| + Covariates | + sex, baseline QTcF, weight | Subgroup differences and risk stratification |
+| Linear | intercept, slope, baseline, omega(2), sigma | Standard ICH E14 analysis; prespecified primary model |
+| Emax | E0, Emax, EC50, omega(2), sigma | Saturating drugs (when decile plot shows nonlinearity) |
 
-All four models are **compartment-free** in ferx, meaning they use no ODEs
-and no dose records. Drug concentration enters the model directly from the
-data via the `[covariates]` block. This matches the analysis structure
-recommended in regulatory white papers and ICH E14 Q&A guidance: the
-concentration-QTc relationship is modeled as a direct regression, with the
-PK model (if needed) run separately.
+Both models are **compartment-free** in ferx, meaning they use no ODEs
+and no dose records. Drug concentration enters the model directly from
+the data via the `[covariates]` block.
+
+**Key analysis requirements** for a regulatory C-QTc submission:
+
+- **Endpoint:** ΔΔQTcF (placebo-corrected, Fridericia-corrected)
+- **Prespecification:** model, selection criteria, and BLQ rule
+- **Exploratory checks:** heart rate, QT correction adequacy, hysteresis,
+  linearity
+- **Prediction:** at geometric-mean Cmax with a delta-method 90% CI
+  (including the covariance term)
+- **Exposure coverage:** approximately 2x the high clinical exposure, or
+  the nonclinical double negative
+- **Categorical outliers:** QTcF > 450/480/500 ms and ΔQTcF > 30/60 ms
 
 ### References
 
+**Regulatory**
+
+- ICH E14. The clinical evaluation of QT/QTc interval prolongation and
+  proarrhythmic potential for non-antiarrhythmic drugs. 2005.
+- ICH E14/S7B Q&As (R1). Questions and answers on clinical and
+  nonclinical evaluation of QT/QTc interval prolongation. 2026.
+
+**Method**
+
 - Garnett C, Bonate PL, Dang Q, et al. Scientific white paper on
-  concentration-QTc modeling. J Pharmacokinet Pharmacodyn. 2018;45(3):383-397.
-  doi:10.1007/s10928-017-9558-5
-- Johannesen L, Vicente J, Gray RA, et al. ECG data from the
-  Concentration-QTc study. PhysioNet, 2014. doi:10.13026/C2HP4K
-- Parkinson J, Hamelin B, Dang Q, et al. A tutorial on
-  concentration-QTc analysis: methodology and practical application using
-  R. J Pharmacokinet Pharmacodyn. 2025. doi:10.1007/s10928-024-09944-7
-- ICH E14/S7B Q&A. Clinical and nonclinical evaluation of QT/QTc interval
-  prolongation. 2022.
+  concentration-QTc modeling. J Pharmacokinet Pharmacodyn.
+  2018;45(3):383-397. doi:10.1007/s10928-017-9558-5
+- Darpo B, Garnett C, Benson CT, et al. Cardiac safety research
+  consortium: can the thorough clinical QT/QTc study be replaced by
+  early QT assessment in routine clinical pharmacology studies? Clin
+  Pharmacol Ther. 2015;97(4):326-332. doi:10.1002/cpt.60
+
+**This dataset**
+
+- Johannesen L, Vicente J, Gray RA, et al. Improving the assessment of
+  heart toxicity for all new drugs through translational regulatory
+  science. Clin Pharmacol Ther. 2014;96(5):549-558.
+  doi:10.1038/clpt.2014.155
+- PhysioNet ECGRDVQ. doi:10.13026/C2HP45
+- Parkinson J, Dota C, Rekic D. Practical guide to concentration-QTc
+  modeling: a hands-on tutorial. J Pharmacokinet Pharmacodyn.
+  2025;52:43. doi:10.1007/s10928-025-09981-8
