@@ -291,7 +291,14 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
     unc_pieces <- if (is.null(uncertainty)) {
       validate_fit_for_uncertainty(NULL, "none")
     } else {
-      validate_fit_for_uncertainty(fit, uncertainty$method)
+      # Re-raised under this function's name: the helper's own call is
+      # internal and means nothing to the caller.
+      tryCatch(
+        validate_fit_for_uncertainty(fit, uncertainty$method),
+        error = function(e) {
+          stop("ferx_simulate_adaptive: ", conditionMessage(e), call. = FALSE)
+        }
+      )
     }
     # The engine's refusal of supplied etas under parameter uncertainty
     # (ferx-core #946) names the two `AdaptiveInputs` builders; here they
@@ -389,6 +396,11 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
          "\"asymptotic\" or \"sir\".", call. = FALSE)
   }
   n_draws <- uncertainty$n_draws
+  if (is.null(n_draws)) {
+    stop("ferx_simulate_adaptive: `uncertainty$n_draws` is required: the ",
+         "number of parameter draws, e.g. `list(n_draws = 100)`.",
+         call. = FALSE)
+  }
   if (!is.numeric(n_draws) || length(n_draws) != 1L || !is.finite(n_draws) ||
       n_draws != round(n_draws) || n_draws < 1 ||
       n_draws > .Machine$integer.max) {

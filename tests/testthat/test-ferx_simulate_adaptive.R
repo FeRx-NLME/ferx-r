@@ -1195,6 +1195,18 @@ test_that("uncertainty: theta differs across draws, a FIX theta stays at its est
   expect_identical(p$TVV, rep(fit$theta[["TVV"]], 3L))
 })
 
+# The Omega and sigma columns must carry each draw's values, not the model
+# file's (ETA_CL 0.09, PROP 0.1). Mutation that reddens this (#763 review,
+# finding 1): `packed_parameter_entries` reading Omega / sigma from the
+# template instead of the draw.
+test_that("uncertainty: the Omega and sigma columns carry each draw's values", {
+  p <- .run_unc(uncertainty = list(n_draws = 3L))$parameters
+  expect_identical(length(unique(p$ETA_CL)), 3L)
+  expect_identical(length(unique(p$PROP)), 3L)
+  expect_false(any(p$ETA_CL == 0.09))
+  expect_false(any(p$PROP == 0.1))
+})
+
 test_that("uncertainty: method = \"sir\" draws from kept SIR samples, refused without them", {
   fx <- .unc_fixture()
   sir_fit <- ferx_sir(fx$fit, sir_samples = 200L, sir_resamples = 50L,
@@ -1207,6 +1219,24 @@ test_that("uncertainty: method = \"sir\" draws from kept SIR samples, refused wi
   expect_identical(sort(unique(res$metrics$DRAW)), 1:2)
   expect_error(.run_unc(uncertainty = list(method = "sir", n_draws = 2L)),
                "sir_keep_samples = TRUE", fixed = TRUE)
+})
+
+# A fit without a covariance step cannot draw asymptotically. The refusal is
+# this function's, not the internal helper's (#763 review, finding 3).
+test_that("uncertainty: asymptotic on a fit without cov_matrix is refused under this function's name", {
+  model <- .write_fit_adaptive_model(c(2, 10, 0.09, 0.1))
+  data <- .fit_adaptive_data()
+  fit <- ferx_fit(model, data, verbose = FALSE)
+  expect_length(fit$cov_matrix, 0L)
+  err <- tryCatch(
+    ferx_simulate_adaptive(model, data, fit = fit,
+                           uncertainty = list(n_draws = 2L)),
+    error = function(e) e
+  )
+  expect_s3_class(err, "error")
+  expect_match(conditionMessage(err),
+               "^ferx_simulate_adaptive: `fit\\$cov_matrix` is empty")
+  expect_null(conditionCall(err))
 })
 
 test_that("uncertainty without fit, or with etas, is refused", {
@@ -1227,6 +1257,8 @@ test_that("uncertainty without fit, or with etas, is refused", {
 })
 
 test_that("a malformed `uncertainty` is refused in R before the engine", {
+  expect_error(.run_unc(uncertainty = list(method = "sir")),
+               "`uncertainty$n_draws` is required", fixed = TRUE)
   expect_error(.run_unc(uncertainty = list(n_draws = 0L)), "positive whole")
   expect_error(.run_unc(uncertainty = list(n_draws = 1.5)), "positive whole")
   expect_error(.run_unc(uncertainty = list()), "named list")
