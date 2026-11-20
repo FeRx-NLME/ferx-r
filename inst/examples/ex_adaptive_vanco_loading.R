@@ -39,5 +39,5 @@ cat(sprintf("Loading dose (1500 mg) present in $doses? %s\n",
             any(res$doses$AMT == loading_dose)))
 
 # Attainment DOES account for the base regimen (target_window = [10, 15]):
-cat(sprintf("Mean time in 10-15 mg/L window: %.1f%%\n",
-            100 * mean(res$metrics$PCT_TIME_IN_WINDOW, na.rm = TRUE)))
+cat(sprintf("Mean share of troughs in 10-15 mg/L window: %.1f%%\n",
+            100 * mean(res$metrics$PCT_READINGS_IN_WINDOW, na.rm = TRUE)))

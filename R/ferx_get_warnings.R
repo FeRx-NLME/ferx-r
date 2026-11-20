@@ -335,6 +335,27 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
 # carrying neither of the two - including one whose wording is not recognised -
 # gets the solver-setting advice as before.
 .ferx_ode_solver_guidance <- function(message = "") {
+  # ferx-core #2994: the post-fit tolerance check shares the category but is not
+  # about an unclean integration, so it is matched on its own tokens first (the
+  # unchecked note's reason can name clamped or unfinished segments, which the
+  # clause phrases below would otherwise answer).
+  if (grepl("W_ODE_OFV_NOT_SETTLED", message, fixed = TRUE)) {
+    return(paste0(
+      "The OFV moved by more than 0.1 when the EBEs and the objective were ",
+      "re-solved at a tenfold tighter ODE tolerance, so it carries integration ",
+      "error of that size. Estimates are unchanged by this check. Refit with ",
+      "tighter ode_reltol / ode_abstol (the message names the values) until ",
+      "the OFV stops moving, before comparing models by OFV."
+    ))
+  }
+  if (grepl("W_ODE_OFV_SETTLEMENT_UNCHECKED", message, fixed = TRUE)) {
+    return(paste0(
+      "The post-fit check of whether the OFV is settled at the ODE tolerance ",
+      "could not be completed, so that is unknown; the fit itself is ",
+      "unaffected. Refit once with ode_reltol / ode_abstol a decade tighter ",
+      "and compare the OFV before comparing models by it."
+    ))
+  }
   if (grepl("W_ODE_SOLVER_ESCALATION_NOTE", message, fixed = TRUE)) {
     return(paste0(
       "ode_method = \"auto\" escalated to a stiff solver and the stiff ",

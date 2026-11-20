@@ -1417,13 +1417,17 @@ fn simulate_adaptive(
 /// (the realized-dose ledger), `decisions` (one row per decision), and `metrics`
 /// (one row per realized run — the per-subject outcome summary). The single
 /// declarative signal is surfaced as the `SIGNAL` column (the value the
-/// controller actually observed — assay-noised when `with_assay_error`).
+/// controller actually observed — assay-noised when `with_assay_error`) and the
+/// `LATENT` column next to it (the noise-free readout it was drawn from; equal to
+/// `SIGNAL` for an `Ipred` monitor). The outcome metrics are scored on `LATENT`
+/// (ferx-core #946).
 fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj {
     let trajectories = sim_results_to_df(&result.trajectories);
 
     // -- doses: one row per realized dose --
     let l = &result.ledger;
     let first_signal = |sigs: &[ferx_core::ObservedSignal]| sigs.first().map(|s| s.value).unwrap_or(f64::NAN);
+    let first_latent = |sigs: &[ferx_core::ObservedSignal]| sigs.first().map(|s| s.latent).unwrap_or(f64::NAN);
     let doses = data_frame!(
         DRAW = l.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
         SIM = l.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
@@ -1434,6 +1438,7 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         RATE = l.iter().map(|e| e.rate).collect::<Vec<f64>>(),
         DECISION = l.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>(),
         SIGNAL = l.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>(),
+        LATENT = l.iter().map(|e| first_latent(&e.observed_signals)).collect::<Vec<f64>>(),
         RULE = l.iter().map(|e| e.rule_fired.clone()).collect::<Vec<String>>()
     );
 
@@ -1450,6 +1455,7 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         DECISION = d.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>(),
         TIME = d.iter().map(|e| e.time).collect::<Vec<f64>>(),
         SIGNAL = d.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>(),
+        LATENT = d.iter().map(|e| first_latent(&e.observed_signals)).collect::<Vec<f64>>(),
         OUTCOME = d.iter().map(|e| e.outcome.label().to_string()).collect::<Vec<String>>(),
         N_DOSED = d.iter().map(|e| e.outcome.n_dosed() as i32).collect::<Vec<i32>>(),
         // The dosing interval in force after the decision; NA while none is set.
@@ -1478,9 +1484,16 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         SIGNAL_MIN = m.iter().map(|e| e.signal_min).collect::<Vec<Option<f64>>>(),
         SIGNAL_MAX = m.iter().map(|e| e.signal_max).collect::<Vec<Option<f64>>>(),
         SIGNAL_MEAN = m.iter().map(|e| e.signal_mean).collect::<Vec<Option<f64>>>(),
+        // A fraction of decision *readings* (latent value) inside `target_window`,
+        // never a time: ferx-core #946 renamed the field. The old column name is
+        // kept as a deprecated duplicate for one release (see NEWS).
+        PCT_READINGS_IN_WINDOW = m
+            .iter()
+            .map(|e| e.pct_readings_in_window)
+            .collect::<Vec<Option<f64>>>(),
         PCT_TIME_IN_WINDOW = m
             .iter()
-            .map(|e| e.pct_time_in_window)
+            .map(|e| e.pct_readings_in_window)
             .collect::<Vec<Option<f64>>>(),
         AUC_TARGET_ATTAINMENT = m
             .iter()
