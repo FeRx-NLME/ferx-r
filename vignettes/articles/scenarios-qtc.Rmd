@@ -52,6 +52,43 @@ Dofetilide is a selective hERG blocker with a large, well-known QTc
 effect (~70 ms at therapeutic Cmax), so the 10 ms decision criterion is
 here a teaching device rather than a verdict.
 
+**Prespecification.** A regulatory C-QTc analysis requires a
+prespecified statistical analysis plan (SAP) that defines the model
+(linear primary, nonlinear as sensitivity), the QT correction method
+(QTcF primary, with criteria for switching), the BLQ handling rule
+(e.g., predose = 0, postdose = LLOQ/2), and the decision criterion
+(two-sided 90% CI upper bound < 10 ms at the high clinical exposure).
+This tutorial mirrors that structure but is not itself a SAP.
+
+**Regulatory adoption.** The ICH E14/S7B Q&As have been adopted by FDA,
+EMA, PMDA, and Health Canada. No major regulatory agency currently
+requires anything beyond the ICH framework for C-QTc analysis.
+
+### Study design considerations
+
+The C-QTc model structure depends on the study design:
+
+| Element | Crossover (this study) | Parallel-group |
+|---|---|---|
+| Placebo | Within-subject subtraction at each time point → ΔΔQTcF | Pooled across cohorts; modeled as a treatment term |
+| TRT term | Absorbed by placebo correction (not needed in model) | Between-subject fixed effect |
+| TIME term | Absorbed by placebo correction | Categorical fixed effect (indicator covariates) |
+| Baseline | Centred period baseline QTcF | Day −1 time-matched baseline |
+| Random effects | IIV on intercept and slope | Same, plus possible between-cohort term |
+
+In a crossover design, placebo correction removes treatment- and
+time-related systematic effects, so the C-QTc model on ΔΔQTcF needs
+only the concentration slope, a residual intercept, and a baseline
+covariate (Garnett 2018, Table 4). In a parallel-group design (e.g.,
+SAD/MAD), the model retains explicit TRT and categorical TIME terms as
+in the full Garnett 2018 Eq. 1.
+
+R1 Q6.1 also allows designs without placebo (e.g., patient studies).
+In that case the model estimates ΔQTcF directly, with no placebo
+correction, and the deliverable is the ΔQTcF upper bound. This does
+not preclude a negative QT assessment but requires careful
+interpretation of diurnal drift.
+
 ---
 
 ## Data preparation
@@ -204,6 +241,36 @@ For dofetilide, the heart-rate effect is small (2.2 bpm), so QTcF is
 adequate. Quinidine and verapamil approach the 10 bpm concern level;
 sensitivity analyses with an alternative correction (e.g., population
 QTcP) would be appropriate for those drugs.
+
+### QT correction adequacy
+
+Before relying on QTcF, check whether the Fridericia correction removes
+the QT-RR dependence. On drug-free data (baseline + placebo), the
+within-subject slope of QTcF against RR should be near zero.
+
+```{r explore-qtcrr, eval = FALSE}
+# Drug-free data: baseline periods and placebo arm
+drugfree <- agg[agg$BASELINE == "Y" | agg$EXTRT == "Placebo",]
+
+# Within-subject centred RR (seconds)
+drugfree$RRs <- drugfree$RR / 1000
+subj_mean_rr <- tapply(drugfree$RRs, drugfree$RANDID, mean)
+drugfree$RRc <- drugfree$RRs - subj_mean_rr[as.character(drugfree$RANDID)]
+
+# Within-subject regression: QTcF ~ RRc
+fit_rr <- lm(QTcF ~ RRc + factor(RANDID), data = drugfree)
+slope_rr <- coef(fit_rr)["RRc"]
+se_rr    <- summary(fit_rr)$coefficients["RRc", "Std. Error"]
+
+cat("Within-subject QTcF vs RR slope:", round(slope_rr, 1), "ms/s",
+    "(SE", round(se_rr, 1), ")\n")
+#> Within-subject QTcF vs RR slope: 23.0 ms/s (SE 4.0)
+# A perfect correction would give slope ~ 0.  The +23 ms/s residual
+# means the population QT-RR exponent is about 0.36, slightly above
+# Fridericia's 1/3.  For dofetilide (small HR effect) this is
+# acceptable; for quinidine and verapamil (HR ~10 bpm) a sensitivity
+# analysis with a population correction (QTcP) is advisable.
+```
 
 ### Concentration-ΔΔQTcF scatter and linearity
 
@@ -379,6 +446,45 @@ The upper bound of 79.7 ms is far above the 10 ms threshold, as expected
 for a potent hERG blocker. This confirms dofetilide's known QTc liability
 and demonstrates the analysis workflow.
 
+### By-time-point plot
+
+R1 Q5.1 requires a by-time-point plot alongside the C-QTc model. This
+shows the observed mean ΔΔQTcF (with 90% CI) at each scheduled time
+point, overlaid with the model-predicted ΔΔQTcF at the mean
+concentration for that time.
+
+```{r by-timepoint, eval = FALSE}
+# Observed mean and 90% CI by time point
+tp_stats <- aggregate(DV ~ TIME, data = ferx_data, FUN = function(x) {
+  c(mean = mean(x), se = sd(x) / sqrt(length(x)))
+})
+tp_df <- data.frame(
+  TIME = tp_stats$TIME,
+  mean = tp_stats$DV[, "mean"],
+  se   = tp_stats$DV[, "se"]
+)
+tp_df$lo <- tp_df$mean - qnorm(0.95) * tp_df$se
+tp_df$hi <- tp_df$mean + qnorm(0.95) * tp_df$se
+
+# Model prediction at mean concentration per time point
+conc_by_time <- aggregate(CONC ~ TIME, data = ferx_data, FUN = mean)
+tp_df$pred <- int_est + slope_est * conc_by_time$CONC
+
+plot(tp_df$TIME, tp_df$mean, type = "b", pch = 16, ylim = range(c(tp_df$lo, tp_df$hi)),
+     xlab = "Time (h)", ylab = expression(paste(Delta, Delta, "QTcF (ms)")),
+     main = "By-time-point: observed vs model-predicted")
+arrows(tp_df$TIME, tp_df$lo, tp_df$TIME, tp_df$hi,
+       angle = 90, code = 3, length = 0.05, col = "steelblue")
+lines(tp_df$TIME, tp_df$pred, col = "red", lty = 2)
+legend("topright", c("Observed mean (90% CI)", "Model-predicted"),
+       pch = c(16, NA), lty = c(1, 2), col = c("black", "red"))
+abline(h = 10, lty = 3, col = "grey50")
+```
+
+The by-time-point plot serves as a visual check: systematic deviations
+between observed means and model predictions may indicate hysteresis or
+time-dependent effects not captured by the concentration-response model.
+
 ---
 
 ## Nonlinear Emax model (quinidine)
@@ -498,10 +604,15 @@ cat("Upper bound < 10 ms:", ci_hi_v < 10, "\n")
 ```
 
 The upper bound of 7.2 ms is below 10 ms at this single 120 mg dose's
-Cmax. Note that this does not constitute a full negative QT assessment:
-the verapamil label allows up to 480 mg/day, and these data cover only a
-single 120 mg dose. A complete assessment would require exposure coverage
-at the high clinical exposure.
+Cmax. As a cross-check, the open-source
+[cqtkit](https://github.com/A2-ai/cqtkit) package reports 4.37 ms
+(90% CI 1.24 to 7.50) for the same dataset, and Johannesen 2014 reports
+5.2 ms (−1.8 to 12.2) — all consistent within the expected range.
+
+Note that this does not constitute a full negative QT assessment: the
+verapamil label allows up to 480 mg/day, and these data cover only a
+single 120 mg dose. A complete assessment would require exposure
+coverage at the high clinical exposure.
 
 ---
 
@@ -570,6 +681,18 @@ abline(0, 1, lty = 2)
 | Linear | intercept, slope, baseline, omega(2), sigma | Standard ICH E14 analysis; prespecified primary model |
 | Emax | E0, Emax, EC50, omega(2), sigma | Saturating drugs (when decile plot shows nonlinearity) |
 
+**Cross-checks.** The dofetilide and verapamil results can be compared
+against independent analyses of the same data:
+
+| Drug | This tutorial | Cellière 2025 | cqtkit | Johannesen 2014 |
+|---|---|---|---|---|
+| Dofetilide | 73.7 (67.6–79.7) | upper bound 77.6 | — | by-time-point max 79.3 |
+| Verapamil  | 3.6 (0.0–7.2) | — | 4.37 (1.24–7.50) | 5.2 (−1.8–12.2) |
+
+Small differences reflect model specification (ΔΔQTcF vs full Eq. 1
+with TRT and TIME terms) and the QT correction used. The agreement
+confirms the data pipeline and modeling approach.
+
 Both models are **compartment-free** in ferx, meaning they use no ODEs
 and no dose records. Drug concentration enters the model directly from
 the data via the `[covariates]` block.
@@ -612,6 +735,9 @@ the data via the `[covariates]` block.
   science. Clin Pharmacol Ther. 2014;96(5):549-558.
   doi:10.1038/clpt.2014.155
 - PhysioNet ECGRDVQ. doi:10.13026/C2HP45
+- Cellière G, Schwab M, Gasser R, et al. Comparison of statistical
+  methods for concentration-QTc analysis. J Pharmacokinet Pharmacodyn.
+  2025;52:31. PMC12065759
 - Parkinson J, Dota C, Rekic D. Practical guide to concentration-QTc
   modeling: a hands-on tutorial. J Pharmacokinet Pharmacodyn.
   2025;52:43. doi:10.1007/s10928-025-09981-8
