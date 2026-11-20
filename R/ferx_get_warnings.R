@@ -340,12 +340,27 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   # unchecked note's reason can name clamped or unfinished segments, which the
   # clause phrases below would otherwise answer).
   if (grepl("W_ODE_OFV_NOT_SETTLED", message, fixed = TRUE)) {
+    # The token has two arms in ferx-core (not_settled_warning()): a finite
+    # shift above 0.1, or a re-solve whose objective was non-finite, where no
+    # size was measured. Only the first may claim a size.
+    finding <- if (grepl("non-finite objective", message, fixed = TRUE)) {
+      paste0(
+        "Re-solving the EBEs and the objective at a tenfold tighter ODE ",
+        "tolerance gave a non-finite objective, so how much integration error ",
+        "the OFV carries could not be measured. "
+      )
+    } else {
+      paste0(
+        "The OFV moved by more than 0.1 when the EBEs and the objective were ",
+        "re-solved at a tenfold tighter ODE tolerance, so it carries integration ",
+        "error of that size. "
+      )
+    }
     return(paste0(
-      "The OFV moved by more than 0.1 when the EBEs and the objective were ",
-      "re-solved at a tenfold tighter ODE tolerance, so it carries integration ",
-      "error of that size. Estimates are unchanged by this check. Refit with ",
-      "tighter ode_reltol / ode_abstol (the message names the values) until ",
-      "the OFV stops moving, before comparing models by OFV."
+      finding,
+      "Estimates are unchanged by this check. Refit with tighter ",
+      "ode_reltol / ode_abstol (the message names the values) until the OFV ",
+      "stops moving, before comparing models by OFV."
     ))
   }
   if (grepl("W_ODE_OFV_SETTLEMENT_UNCHECKED", message, fixed = TRUE)) {

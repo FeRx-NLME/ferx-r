@@ -1610,12 +1610,42 @@ test_that("the ODE tolerance-settlement warnings get their own guidance", {
     "unaffected; refit once with tighter ode_reltol / ode_abstol and compare the ",
     "OFV before comparing models by it (#2994)."
   )
+  # The non-finite arm of the same token: no shift was measured, so the
+  # guidance must not claim one.
+  not_settled_nonfinite <- paste0(
+    "W_ODE_OFV_NOT_SETTLED: re-solving the EBEs and the objective at the final ",
+    "estimates with ode_reltol = 1e-7 / ode_abstol = 1e-9 instead of the fit's ",
+    "1e-6 / 1e-8 gives a non-finite objective (1203.4410 -> inf), so whether the ",
+    "OFV is settled at the fit's ODE tolerance could not be measured. Refit with ",
+    "ode_reltol / ode_abstol at most 1e-7 / 1e-9 and compare again, tightening ",
+    "until the OFV stops moving (#2994)."
+  )
+  # Every sentence of each guidance is asserted, so deleting one reddens a test.
   g1 <- ferx:::.ferx_warning_guidance("ode_solver", message = not_settled)
   expect_match(g1, "tenfold tighter ODE tolerance", fixed = TRUE)
+  expect_match(g1, "moved by more than 0.1", fixed = TRUE)
+  expect_match(g1, "carries integration error of that size", fixed = TRUE)
+  expect_match(g1, "Estimates are unchanged by this check", fixed = TRUE)
+  expect_match(g1, "Refit with tighter ode_reltol / ode_abstol", fixed = TRUE)
+  expect_match(g1, "(the message names the values)", fixed = TRUE)
+  expect_match(g1, "before comparing models by OFV", fixed = TRUE)
+  expect_false(grepl("could not be measured", g1, fixed = TRUE))
   expect_false(grepl("could not be completed", g1, fixed = TRUE))
   expect_false(grepl("not clean", g1, fixed = TRUE))
+  g1n <- ferx:::.ferx_warning_guidance("ode_solver", message = not_settled_nonfinite)
+  expect_match(g1n, "gave a non-finite objective", fixed = TRUE)
+  expect_match(g1n, "could not be measured", fixed = TRUE)
+  expect_match(g1n, "Estimates are unchanged by this check", fixed = TRUE)
+  expect_match(g1n, "Refit with tighter ode_reltol / ode_abstol", fixed = TRUE)
+  expect_false(grepl("moved by more than 0.1", g1n, fixed = TRUE))
+  expect_false(grepl("of that size", g1n, fixed = TRUE))
   g2 <- ferx:::.ferx_warning_guidance("ode_solver", message = unchecked)
   expect_match(g2, "could not be completed", fixed = TRUE)
+  expect_match(g2, "so that is unknown", fixed = TRUE)
+  expect_match(g2, "the fit itself is unaffected", fixed = TRUE)
+  expect_match(g2, "Refit once with ode_reltol / ode_abstol a decade tighter",
+               fixed = TRUE)
+  expect_match(g2, "compare the OFV before comparing models by it", fixed = TRUE)
   expect_false(grepl("tenfold", g2, fixed = TRUE))
   expect_false(grepl("For the clamped, discarded", g2, fixed = TRUE))
   expect_false(grepl("not clean", g2, fixed = TRUE))
@@ -1631,6 +1661,8 @@ test_that("the ODE tolerance-settlement tokens are still in the engine", {
   ln <- readLines(f, warn = FALSE)
   expect_true(any(grepl('"W_ODE_OFV_NOT_SETTLED"', ln, fixed = TRUE)))
   expect_true(any(grepl('"W_ODE_OFV_SETTLEMENT_UNCHECKED"', ln, fixed = TRUE)))
+  # The phrase the guidance splits the NOT_SETTLED arms on.
+  expect_true(any(grepl("gives a non-finite objective", ln, fixed = TRUE)))
 })
 
 test_that("a real fit over an unorderable ODE timeline prints the timeline guidance", {
