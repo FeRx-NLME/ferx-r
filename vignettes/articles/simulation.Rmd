@@ -280,7 +280,7 @@ res$decisions[res$decisions$SIM == 1, c("DECISION", "TIME", "SIGNAL", "OUTCOME")
 The trough starts sub-therapeutic (the decayed loading dose, ~5.6 mg/L on day 1)
 and climbs as the maintenance dose is titrated up - over this short 6-day run it
 reaches the 10-15 mg/L window only at the final decision (so
-`metrics$PCT_TIME_IN_WINDOW` is modest here; a longer horizon would settle it
+`metrics$PCT_READINGS_IN_WINDOW` is modest here; a longer horizon would settle it
 in-window).
 
 One caveat worth stating explicitly: the dose **ledger holds controller-issued

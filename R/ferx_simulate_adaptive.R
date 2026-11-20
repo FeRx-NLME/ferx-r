@@ -21,7 +21,7 @@
 #' \code{$metrics$N_DOSES} \emph{exclude} the base regimen (e.g. a 1500 mg
 #' loading dose is not counted). The full realized regimen is the union of
 #' \code{$doses} with the input CSV's \code{EVID = 1/4} rows. In contrast
-#' \code{$trajectories}, \code{$decisions}, \code{PCT_TIME_IN_WINDOW}, and the
+#' \code{$trajectories}, \code{$decisions}, \code{PCT_READINGS_IN_WINDOW}, and the
 #' \code{auc_target} attainment metric \emph{do} reflect the base regimen. A base
 #' dose scheduled exactly at a decision time is read \strong{pre-dose} (the
 #' trough), and a base dose scheduled after a \code{stop} still lands - a
@@ -123,9 +123,11 @@
 #'     \item{\code{doses}}{The realized dose ledger, \strong{controller-issued
 #'       doses only} (pre-scheduled base doses are excluded): DRAW, SIM, ID, TIME,
 #'       AMT, CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
-#'       assay-noised when \code{with_assay_error}), RULE (the rule that fired).}
+#'       assay-noised when \code{with_assay_error}), LATENT (the noise-free
+#'       monitor value that reading was drawn from; equal to SIGNAL when the
+#'       monitor has no assay error), RULE (the rule that fired).}
 #'     \item{\code{decisions}}{One row per review-grid point including holds:
-#'       DRAW, SIM, ID, DECISION, TIME, SIGNAL, OUTCOME ("dosed" / "hold" /
+#'       DRAW, SIM, ID, DECISION, TIME, SIGNAL, LATENT, OUTCOME ("dosed" / "hold" /
 #'       "not_due" / "stop"), N_DOSED, INTERVAL. "not_due" marks a grid point
 #'       at which no dose was due under the dosing interval in force (the
 #'       block declares \code{intervals} and \code{start_interval}): the
@@ -139,11 +141,14 @@
 #'       dose-change counts, by dose delta), N_HOLDS (consulted decisions that
 #'       gave no dose; not-due points are not counted), N_NOT_DUE (grid points
 #'       that were not due), DISCONTINUED,
-#'       TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (over the
-#'       decisions that recorded a signal), and PCT_TIME_IN_WINDOW - the fraction
-#'       of signal-bearing decisions whose observed value fell inside the model's
-#'       \code{[adaptive_dosing]} \code{target_window} (NA when no
-#'       \code{target_window} is declared), AUC_TARGET_ATTAINMENT - the
+#'       TIME_TO_DISCONT, SIGNAL_MIN / SIGNAL_MAX / SIGNAL_MEAN (of LATENT over
+#'       the decisions that recorded a signal), PCT_READINGS_IN_WINDOW - the
+#'       fraction of signal-bearing decision readings whose LATENT value fell
+#'       inside the model's \code{[adaptive_dosing]} \code{target_window} (NA
+#'       when no \code{target_window} is declared; it counts readings, not
+#'       elapsed time), PCT_TIME_IN_WINDOW (deprecated: the same values under
+#'       the old name, to be removed in a later release),
+#'       AUC_TARGET_ATTAINMENT - the
 #'       fraction of windows between consecutive realized decisions whose area
 #'       under the monitored signal fell inside the \code{auc_target} band
 #'       (NA when no \code{auc_target} is declared, or with fewer than two

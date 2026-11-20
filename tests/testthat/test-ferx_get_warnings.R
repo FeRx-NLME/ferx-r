@@ -1585,6 +1585,86 @@ test_that("the ode_solver escalation note keeps its informational guidance", {
   expect_false(.recommends_solver_settings(g))
 })
 
+test_that("the ODE tolerance-settlement warnings get their own guidance", {
+  # ferx-core #2994. Both share the `ode_solver` category with the solver
+  # statistics warning, but neither is an unclean integration: the guidance must
+  # name the tolerance re-check, not the generic solver-setting advice. Texts are
+  # ferx-core's not_settled_warning() / not_checked_warning() at a8f5f056 with
+  # their placeholders filled in.
+  not_settled <- paste0(
+    "W_ODE_OFV_NOT_SETTLED: re-solving the EBEs and the objective at the final ",
+    "estimates with ode_reltol = 1e-7 / ode_abstol = 1e-9 instead of the fit's ",
+    "1e-6 / 1e-8 moves the OFV by +3.9120 (1203.4410 -> 1207.3530), more than ",
+    "0.1 units: the objective is not settled at the fit's ODE tolerance, so OFV ",
+    "differences of that size between models may be integration error rather ",
+    "than a difference in fit. Refit with ode_reltol / ode_abstol at most 1e-7 / ",
+    "1e-9 and compare again, tightening until the OFV stops moving (#2994)."
+  )
+  # The reason names clamped segments: the token must win over the clause
+  # phrase "clamped at the minimum step size" below it.
+  unchecked <- paste0(
+    "W_ODE_OFV_SETTLEMENT_UNCHECKED: whether the OFV is settled at the fit's ODE ",
+    "tolerance could not be checked: re-solving at a tighter ode_reltol / ",
+    "ode_abstol could not be completed, because the tighter re-solve had 3 ",
+    "step(s) clamped at the minimum step size. The fit and its OFV are ",
+    "unaffected; refit once with tighter ode_reltol / ode_abstol and compare the ",
+    "OFV before comparing models by it (#2994)."
+  )
+  # The non-finite arm of the same token: no shift was measured, so the
+  # guidance must not claim one.
+  not_settled_nonfinite <- paste0(
+    "W_ODE_OFV_NOT_SETTLED: re-solving the EBEs and the objective at the final ",
+    "estimates with ode_reltol = 1e-7 / ode_abstol = 1e-9 instead of the fit's ",
+    "1e-6 / 1e-8 gives a non-finite objective (1203.4410 -> inf), so whether the ",
+    "OFV is settled at the fit's ODE tolerance could not be measured. Refit with ",
+    "ode_reltol / ode_abstol at most 1e-7 / 1e-9 and compare again, tightening ",
+    "until the OFV stops moving (#2994)."
+  )
+  # Every sentence of each guidance is asserted, so deleting one reddens a test.
+  g1 <- ferx:::.ferx_warning_guidance("ode_solver", message = not_settled)
+  expect_match(g1, "tenfold tighter ODE tolerance", fixed = TRUE)
+  expect_match(g1, "moved by more than 0.1", fixed = TRUE)
+  expect_match(g1, "carries integration error of that size", fixed = TRUE)
+  expect_match(g1, "Estimates are unchanged by this check", fixed = TRUE)
+  expect_match(g1, "Refit with tighter ode_reltol / ode_abstol", fixed = TRUE)
+  expect_match(g1, "(the message names the values)", fixed = TRUE)
+  expect_match(g1, "before comparing models by OFV", fixed = TRUE)
+  expect_false(grepl("could not be measured", g1, fixed = TRUE))
+  expect_false(grepl("could not be completed", g1, fixed = TRUE))
+  expect_false(grepl("not clean", g1, fixed = TRUE))
+  g1n <- ferx:::.ferx_warning_guidance("ode_solver", message = not_settled_nonfinite)
+  expect_match(g1n, "gave a non-finite objective", fixed = TRUE)
+  expect_match(g1n, "could not be measured", fixed = TRUE)
+  expect_match(g1n, "Estimates are unchanged by this check", fixed = TRUE)
+  expect_match(g1n, "Refit with tighter ode_reltol / ode_abstol", fixed = TRUE)
+  expect_false(grepl("moved by more than 0.1", g1n, fixed = TRUE))
+  expect_false(grepl("of that size", g1n, fixed = TRUE))
+  g2 <- ferx:::.ferx_warning_guidance("ode_solver", message = unchecked)
+  expect_match(g2, "could not be completed", fixed = TRUE)
+  expect_match(g2, "so that is unknown", fixed = TRUE)
+  expect_match(g2, "the fit itself is unaffected", fixed = TRUE)
+  expect_match(g2, "Refit once with ode_reltol / ode_abstol a decade tighter",
+               fixed = TRUE)
+  expect_match(g2, "compare the OFV before comparing models by it", fixed = TRUE)
+  expect_false(grepl("tenfold", g2, fixed = TRUE))
+  expect_false(grepl("For the clamped, discarded", g2, fixed = TRUE))
+  expect_false(grepl("not clean", g2, fixed = TRUE))
+})
+
+test_that("the ODE tolerance-settlement tokens are still in the engine", {
+  # The two fixtures above are transcribed; this requires the tokens the
+  # guidance keys on to still be the engine's, at the pinned revision.
+  core_src <- .core_src_at_pin()
+  skip_if(is.null(core_src), "cannot materialise ferx-core at the pinned revision")
+  f <- file.path(core_src, "estimation", "ode_tolerance_check.rs")
+  skip_if(!file.exists(f), "ferx-core at the pin has no ode_tolerance_check.rs")
+  ln <- readLines(f, warn = FALSE)
+  expect_true(any(grepl('"W_ODE_OFV_NOT_SETTLED"', ln, fixed = TRUE)))
+  expect_true(any(grepl('"W_ODE_OFV_SETTLEMENT_UNCHECKED"', ln, fixed = TRUE)))
+  # The phrase the guidance splits the NOT_SETTLED arms on.
+  expect_true(any(grepl("gives a non-finite objective", ln, fixed = TRUE)))
+})
+
 test_that("a real fit over an unorderable ODE timeline prints the timeline guidance", {
   # End to end, like the init_outside_bounds test above: the engine emits the
   # abandoned-walk clause (ferx-core #1234), the glue carries it into
@@ -1634,9 +1714,21 @@ test_that("a real fit over an unorderable ODE timeline prints the timeline guida
   fit <- ferx_fit(model, data, method = "focei", settings = list(maxiter = 1L),
                   covariance = FALSE, verbose = FALSE)
   ws <- ferx_get_warnings(fit, as_df = TRUE)
-  i <- which(ws$category == "ode_solver")
+  # Since ferx-core #2994 the category carries a second warning on this fit:
+  # the post-fit tolerance check cannot run over an abandoned timeline and says
+  # so. Pick the statistics warning by its token, and check the other one gets
+  # its own advice end to end (its reason names the abandoned timeline, which
+  # must not pull in the timeline guidance).
+  i <- which(ws$category == "ode_solver" &
+               startsWith(ws$message, "W_ODE_SOLVER_DIAGNOSTICS"))
   expect_length(i, 1L)
   expect_match(ws$message[i], "could not be ordered", fixed = TRUE)
+  j <- which(ws$category == "ode_solver" &
+               startsWith(ws$message, "W_ODE_OFV_SETTLEMENT_UNCHECKED"))
+  expect_length(j, 1L)
+  gj <- ferx:::.ferx_warning_guidance(ws$category[j], message = ws$message[j])
+  expect_match(gj, "could not be completed", fixed = TRUE)
+  expect_false(grepl("Nothing was integrated", gj, fixed = TRUE))
 
   g <- ferx:::.ferx_warning_guidance(ws$category[i], message = ws$message[i])
   expect_match(g, "Nothing was integrated for some subjects", fixed = TRUE)

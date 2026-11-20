@@ -68,12 +68,13 @@ test_that("the result tables carry the documented columns", {
   expect_true(all(c("DRAW", "SIM", "ID", "TIME", "IPRED", "DV_SIM") %in%
     names(res$trajectories)))
   expect_true(all(c("DRAW", "SIM", "ID", "TIME", "AMT", "CMT", "RATE", "DECISION",
-    "SIGNAL", "RULE") %in% names(res$doses)))
-  expect_true(all(c("DRAW", "SIM", "ID", "DECISION", "TIME", "SIGNAL", "OUTCOME",
+    "SIGNAL", "LATENT", "RULE") %in% names(res$doses)))
+  expect_true(all(c("DRAW", "SIM", "ID", "DECISION", "TIME", "SIGNAL", "LATENT", "OUTCOME",
     "N_DOSED", "INTERVAL") %in% names(res$decisions)))
   expect_true(all(c("DRAW", "SIM", "ID", "CUM_DOSE", "N_DOSES", "N_INCREASES",
     "N_DECREASES", "N_HOLDS", "N_NOT_DUE", "DISCONTINUED", "TIME_TO_DISCONT", "SIGNAL_MIN",
-    "SIGNAL_MAX", "SIGNAL_MEAN", "PCT_TIME_IN_WINDOW") %in% names(res$metrics)))
+    "SIGNAL_MAX", "SIGNAL_MEAN", "PCT_READINGS_IN_WINDOW", "PCT_TIME_IN_WINDOW") %in%
+    names(res$metrics)))
 })
 test_that("n_sim = 3 produces three replicates across all three tables", {
   ex  <- ferx_example("adaptive_tdm")
@@ -191,19 +192,74 @@ test_that("metrics: one row per (subject, draw, replicate), a faithful ledger re
     expect_equal(r$N_DOSES, sum(rows))
   }
 })
-test_that("metrics: target_window populates PCT_TIME_IN_WINDOW in [0, 1]", {
+test_that("metrics: target_window populates PCT_READINGS_IN_WINDOW in [0, 1]", {
   # The bundled adaptive_tdm model declares target_window = [10, 20], so the
   # attainment metric is reported (not NA) and is a valid fraction.
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 5L, seed = 1L)
-  expect_false(any(is.na(res$metrics$PCT_TIME_IN_WINDOW)))
-  expect_true(all(res$metrics$PCT_TIME_IN_WINDOW >= 0 &
-    res$metrics$PCT_TIME_IN_WINDOW <= 1))
+  expect_false(any(is.na(res$metrics$PCT_READINGS_IN_WINDOW)))
+  expect_true(all(res$metrics$PCT_READINGS_IN_WINDOW >= 0 &
+    res$metrics$PCT_READINGS_IN_WINDOW <= 1))
   # This example only titrates (no hold/stop rule): nothing discontinues, so the
   # discontinuation time is NA throughout.
   expect_true(all(!res$metrics$DISCONTINUED))
   expect_true(all(is.na(res$metrics$TIME_TO_DISCONT)))
 })
+# ferx-core #946: `pct_time_in_window` was renamed `pct_readings_in_window` (it
+# counts decision readings, never time). The R column follows; the old name stays
+# one release as a deprecated duplicate, so it must be the same vector.
+test_that("PCT_TIME_IN_WINDOW is a deprecated duplicate of PCT_READINGS_IN_WINDOW", {
+  ex  <- ferx_example("adaptive_tdm")
+  res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 3L, seed = 1L)
+  expect_identical(res$metrics$PCT_TIME_IN_WINDOW,
+                   res$metrics$PCT_READINGS_IN_WINDOW)
+})
+
+# ferx-core #946: the outcome metrics are scored on the latent (noise-free) monitor
+# value, not on the assay-noised reading the controller saw. adaptive_tdm titrates
+# on a `with_assay_error` (Dv) monitor, so LATENT and SIGNAL differ there, and the
+# metrics must be recomputable from LATENT and NOT from SIGNAL.
+test_that("Dv monitor: metrics are scored on LATENT, not on the noised SIGNAL", {
+  ex  <- ferx_example("adaptive_tdm")
+  res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 3L, seed = 1L)
+  d   <- res$decisions
+  expect_true(all(is.finite(d$LATENT)))
+  # The assay draw really moved the reading: otherwise the checks below could not
+  # tell LATENT from SIGNAL.
+  expect_true(any(d$LATENT != d$SIGNAL))
+  # The ledger's LATENT is the decision's LATENT at the issuing decision.
+  key_d <- paste(d$DRAW, d$SIM, d$ID, d$DECISION)
+  key_l <- paste(res$doses$DRAW, res$doses$SIM, res$doses$ID, res$doses$DECISION)
+  expect_identical(res$doses$LATENT, d$LATENT[match(key_l, key_d)])
+  expect_identical(res$doses$SIGNAL, d$SIGNAL[match(key_l, key_d)])
+  n_signal_scored <- 0L
+  for (i in seq_len(nrow(res$metrics))) {
+    r    <- res$metrics[i, ]
+    rows <- d$DRAW == r$DRAW & d$SIM == r$SIM & d$ID == r$ID
+    lat  <- d$LATENT[rows]
+    sig  <- d$SIGNAL[rows]
+    expect_equal(r$SIGNAL_MIN, min(lat))
+    expect_equal(r$SIGNAL_MAX, max(lat))
+    expect_equal(r$SIGNAL_MEAN, mean(lat))
+    expect_equal(r$PCT_READINGS_IN_WINDOW, mean(lat >= 10 & lat <= 20))
+    if (!isTRUE(all.equal(mean(sig), mean(lat)))) {
+      expect_false(isTRUE(all.equal(r$SIGNAL_MEAN, mean(sig))))
+      n_signal_scored <- n_signal_scored + 1L
+    }
+  }
+  # At least one run where scoring on SIGNAL would have given another mean.
+  expect_gt(n_signal_scored, 0L)
+})
+
+# An Ipred (latent `observe`) monitor has no assay draw: LATENT is SIGNAL, bit for bit.
+test_that("Ipred monitor: LATENT is identical to SIGNAL", {
+  ex  <- ferx_example("adaptive_vanco_loading")
+  res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 1L)
+  expect_gt(nrow(res$decisions), 0L)
+  expect_identical(res$decisions$LATENT, res$decisions$SIGNAL)
+  expect_identical(res$doses$LATENT, res$doses$SIGNAL)
+})
+
 test_that("a hold rule yields hold decisions and an empty dose ledger", {
   model <- .write_adaptive_model("  when signal < 1000000 : hold")
   data  <- ferx_example("adaptive_tdm")$data
@@ -219,7 +275,7 @@ test_that("a hold rule yields hold decisions and an empty dose ledger", {
   expect_true(all(res$metrics$N_INCREASES == 0L & res$metrics$N_DECREASES == 0L))
   expect_true(all(res$metrics$N_HOLDS > 0L))
   expect_true(all(!res$metrics$DISCONTINUED))
-  expect_true(all(is.na(res$metrics$PCT_TIME_IN_WINDOW)))
+  expect_true(all(is.na(res$metrics$PCT_READINGS_IN_WINDOW)))
 })
 test_that("a stop rule discontinues after the first decision", {
   model <- .write_adaptive_model("  when signal < 1000000 : stop")

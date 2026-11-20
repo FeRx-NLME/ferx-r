@@ -27,10 +27,11 @@ print(agg)
 # Per-subject outcome metrics (one row per subject x replicate): cumulative
 # dose, realized dose-change counts, and -- because this model declares
 # target_window = [10, 20] -- the fraction of monitored troughs that landed in
-# the 10-20 mg/L band (PCT_TIME_IN_WINDOW).
+# the 10-20 mg/L band (PCT_READINGS_IN_WINDOW), scored on the latent
+# (noise-free) trough, not on the assay-noised reading the controller saw.
 head(res$metrics[, c("ID", "SIM", "CUM_DOSE", "N_INCREASES", "N_DECREASES",
-                     "PCT_TIME_IN_WINDOW")])
+                     "PCT_READINGS_IN_WINDOW")])
 
 # Mean attainment across all simulated subjects/replicates.
-cat(sprintf("Mean time in 10-20 mg/L window: %.1f%%\n",
-            100 * mean(res$metrics$PCT_TIME_IN_WINDOW, na.rm = TRUE)))
+cat(sprintf("Mean share of troughs in 10-20 mg/L window: %.1f%%\n",
+            100 * mean(res$metrics$PCT_READINGS_IN_WINDOW, na.rm = TRUE)))
