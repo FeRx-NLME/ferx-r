@@ -1603,22 +1603,17 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: 
 /// each on the scale `fit$theta` / `fit$omega` / `fit$sigma` report it. No rows
 /// for a run without uncertainty (the engine's list is empty), with the same
 /// columns, so code keyed on `DRAW` runs unchanged. A parameter whose label is
-/// itself `DRAW` is renamed `DRAW.1`, as R's `make.unique()` would, so the key
+/// itself `DRAW` is renamed `DRAW.1` ([`unique_column_names`]), so the key
 /// stays the one `DRAW` column (#763 review, finding 6).
 fn drawn_parameters_to_df(draws: &[ferx_core::DrawnParameters], model: &CompiledModel) -> Robj {
-    let mut used: std::collections::HashSet<String> = std::iter::once("DRAW".to_string()).collect();
-    let labels: Vec<String> = packed_parameter_entries(model, &model.default_params)
-        .into_iter()
-        .map(|(label, _)| {
-            let mut name = label.clone();
-            let mut k = 1;
-            while !used.insert(name.clone()) {
-                name = format!("{label}.{k}");
-                k += 1;
-            }
-            name
-        })
+    let raw: Vec<String> = std::iter::once("DRAW".to_string())
+        .chain(
+            packed_parameter_entries(model, &model.default_params)
+                .into_iter()
+                .map(|(label, _)| label),
+        )
         .collect();
+    let labels: Vec<String> = unique_column_names(&raw).into_iter().skip(1).collect();
     let rows: Vec<Vec<f64>> = draws
         .iter()
         .map(|d| {
@@ -1643,6 +1638,29 @@ fn drawn_parameters_to_df(draws: &[ferx_core::DrawnParameters], model: &Compiled
         ));
     }
     finish_df(cols, draws.len())
+}
+
+/// `names` made unique for a data frame, first come first kept: a name already
+/// taken by an earlier column becomes `<name>.1` (`.2`, ... while that is taken
+/// too), the suffix R's `make.unique()` uses. Callers put their key columns
+/// first, so a model quantity that happens to be spelled like a key (`DRAW`,
+/// `SIM`, `ID`) is the one renamed and `merge(..., by = )` still finds one key
+/// column (#763 review, finding 6, for the adaptive `parameters` table and
+/// for `ferx_sim_parameters()`).
+fn unique_column_names(names: &[String]) -> Vec<String> {
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    names
+        .iter()
+        .map(|label| {
+            let mut name = label.clone();
+            let mut k = 1;
+            while !used.insert(name.clone()) {
+                name = format!("{label}.{k}");
+                k += 1;
+            }
+            name
+        })
+        .collect()
 }
 
 /// Simulate with parameter uncertainty propagation.
@@ -7047,10 +7065,29 @@ fn sim_parameters_to_df(table: &ferx_core::SimulatedParameters, model: &Compiled
     }
     push_block(&table.individual_names, &|r, j| r.individual.get(j).copied());
     push_block(&table.derived_names, &|r, j| r.derived.get(j).copied());
-    let pairs: Vec<(&str, Robj)> = names.iter().map(String::as_str).zip(values).collect();
+    let first_varying_candidate =
+        names.len() - table.individual_names.len() - table.derived_names.len();
+    // An eta, individual parameter or `[derived]` column spelled like a key
+    // (`DRAW`, `SIM`, `ID`), or an individual parameter spelled like a
+    // `<kappa>_<k>` column, would otherwise be a second column of that name,
+    // and `merge(sim, params, by = c("DRAW", "SIM", "ID"))` would join on
+    // whichever R picks. The later column is renamed instead.
+    let unique = unique_column_names(&names);
+    // `varying` names individual / `[derived]` columns: point it at their
+    // column, renamed or not.
+    let varying: Vec<String> = table
+        .varying
+        .iter()
+        .map(|v| {
+            (first_varying_candidate..names.len())
+                .find(|&j| &names[j] == v)
+                .map_or_else(|| v.clone(), |j| unique[j].clone())
+        })
+        .collect();
+    let pairs: Vec<(&str, Robj)> = unique.iter().map(String::as_str).zip(values).collect();
     let mut df = finish_df(pairs, nrow);
     df.set_class(&["ferx_sim_parameters", "data.frame"]).unwrap();
-    df.set_attrib("varying", table.varying.clone()).unwrap();
+    df.set_attrib("varying", varying).unwrap();
     df
 }
 
