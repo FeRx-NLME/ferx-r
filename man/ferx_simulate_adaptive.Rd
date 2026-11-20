@@ -177,7 +177,8 @@ rows of \code{fit$cov_matrix} (\code{TVCL}, \code{ETA_CL},
 \code{ETA_V ~ ETA_CL}, \code{EPS_PROP}, \code{ETA_CL (class 2)},
 ...) and on the scale \code{fit$theta}, \code{fit$omega} and
 \code{fit$sigma} report them. Join it to the other tables by
-\code{DRAW}. Without \code{uncertainty} it has these columns and
+\code{DRAW}; a parameter itself named \code{DRAW} is renamed
+\code{DRAW.1}, as \code{make.unique()} would. Without \code{uncertainty} it has these columns and
 no rows.}
 }
 

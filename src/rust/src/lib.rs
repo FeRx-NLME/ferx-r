@@ -1602,11 +1602,22 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: 
 /// the kappa elements, `[mixture]` overrides and `block_sigma` correlations,
 /// each on the scale `fit$theta` / `fit$omega` / `fit$sigma` report it. No rows
 /// for a run without uncertainty (the engine's list is empty), with the same
-/// columns, so code keyed on `DRAW` runs unchanged.
+/// columns, so code keyed on `DRAW` runs unchanged. A parameter whose label is
+/// itself `DRAW` is renamed `DRAW.1`, as R's `make.unique()` would, so the key
+/// stays the one `DRAW` column (#763 review, finding 6).
 fn drawn_parameters_to_df(draws: &[ferx_core::DrawnParameters], model: &CompiledModel) -> Robj {
+    let mut used: std::collections::HashSet<String> = std::iter::once("DRAW".to_string()).collect();
     let labels: Vec<String> = packed_parameter_entries(model, &model.default_params)
         .into_iter()
-        .map(|(label, _)| label)
+        .map(|(label, _)| {
+            let mut name = label.clone();
+            let mut k = 1;
+            while !used.insert(name.clone()) {
+                name = format!("{label}.{k}");
+                k += 1;
+            }
+            name
+        })
         .collect();
     let rows: Vec<Vec<f64>> = draws
         .iter()

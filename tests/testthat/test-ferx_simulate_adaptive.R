@@ -1221,6 +1221,30 @@ test_that("uncertainty: method = \"sir\" draws from kept SIR samples, refused wi
                "sir_keep_samples = TRUE", fixed = TRUE)
 })
 
+# A theta named DRAW must not shadow the key: the key stays the one `DRAW`
+# column and the parameter becomes `DRAW.1`, so the documented merge holds.
+# Mutation that reddens this (#763 review, finding 6): `drawn_parameters_to_df`
+# without the rename, which gives two `DRAW` columns.
+test_that("uncertainty: a parameter named DRAW is renamed DRAW.1, the key stays unique", {
+  model <- .write_fit_adaptive_model(c(2, 10, 0.09, 0.1))
+  txt <- gsub("TVV", "DRAW", readLines(model), fixed = TRUE)
+  txt <- sub("maxiter = 2", "maxiter = 200", txt, fixed = TRUE)
+  txt <- sub("covariance = false", "covariance = true", txt, fixed = TRUE)
+  writeLines(txt, model)
+  data <- .fit_adaptive_data()
+  fit <- ferx_fit(model, data, verbose = FALSE)
+  res <- .quiet_design_dv(ferx_simulate_adaptive(
+    model, data, n_sim = 1L, seed = 1L, fit = fit,
+    uncertainty = list(n_draws = 2L)
+  ))
+  p <- res$parameters
+  expect_identical(names(p), c("DRAW", "TVCL", "DRAW.1", "ETA_CL", "PROP"))
+  expect_identical(p$DRAW, 1:2)
+  expect_true(all(p$DRAW.1 > 1 & p$DRAW.1 < 500))
+  joined <- merge(res$metrics, p, by = "DRAW")
+  expect_identical(nrow(joined), nrow(res$metrics))
+})
+
 # A fit without a covariance step cannot draw asymptotically. The refusal is
 # this function's, not the internal helper's (#763 review, finding 3).
 test_that("uncertainty: asymptotic on a fit without cov_matrix is refused under this function's name", {
