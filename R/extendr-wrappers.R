@@ -39,8 +39,8 @@ ferx_rust_simulate_adaptive <- function(model_path, data_path, n_sim, seed, veri
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_adaptive_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, n_sim, seed, verify, max_decisions, supply_etas, eta_ids, eta_names, eta_flat, unmatched) {
-  .Call("wrap__ferx_rust_simulate_adaptive_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, as.integer(n_sim), as.integer(seed), verify, as.integer(max_decisions), supply_etas, eta_ids, eta_names, eta_flat, unmatched)
+ferx_rust_simulate_adaptive_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, n_sim, seed, verify, max_decisions, supply_etas, eta_ids, eta_names, eta_flat, unmatched, uncertainty_method, cov_matrix_flat, cov_matrix_dim, sir_resamples_flat, sir_resamples_n, sir_resamples_dim, n_draws) {
+  .Call("wrap__ferx_rust_simulate_adaptive_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, as.integer(n_sim), as.integer(seed), verify, as.integer(max_decisions), supply_etas, eta_ids, eta_names, eta_flat, unmatched, uncertainty_method, cov_matrix_flat, as.integer(cov_matrix_dim), sir_resamples_flat, as.integer(sir_resamples_n), as.integer(sir_resamples_dim), as.integer(n_draws))
 }
 
 #' @title Internal Rust backend binding

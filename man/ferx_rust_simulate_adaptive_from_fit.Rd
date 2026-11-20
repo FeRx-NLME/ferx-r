@@ -25,7 +25,14 @@ ferx_rust_simulate_adaptive_from_fit(
   eta_ids,
   eta_names,
   eta_flat,
-  unmatched
+  unmatched,
+  uncertainty_method,
+  cov_matrix_flat,
+  cov_matrix_dim,
+  sir_resamples_flat,
+  sir_resamples_n,
+  sir_resamples_dim,
+  n_draws
 )
 }
 \description{

@@ -267,10 +267,12 @@ res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 10L, seed = 1L)
 str(res, max.level = 1)
 ```
 
-`ferx_simulate_adaptive()` returns four data frames rather than one: the
+`ferx_simulate_adaptive()` returns five data frames rather than one: the
 per-observation `trajectories`, the realized dose `ledger` (`doses`), the
 per-decision log (`decisions`, which also records holds and stops - none fire in
-this run), and per-subject outcome `metrics`. The controller's day-by-day view -
+this run), per-subject outcome `metrics`, and the parameter set of each draw
+(`parameters`, which has no rows here: it fills only when
+`uncertainty = list(n_draws = ...)` propagates a fit's parameter uncertainty). The controller's day-by-day view -
 the trough it observed and the rule it fired - is in `decisions`:
 
 ```{r adaptive-decisions}

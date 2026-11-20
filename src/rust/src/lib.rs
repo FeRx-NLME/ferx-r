@@ -1174,7 +1174,16 @@ fn ferx_rust_simulate_adaptive(
 /// @param max_decisions Per-run decision cap; `<= 0` keeps the engine default
 /// @param supply_etas,eta_ids,eta_names,eta_flat,unmatched Supplied
 ///   per-subject etas, as in `ferx_rust_simulate_adaptive`
-/// @return The four-data-frame list `ferx_rust_simulate_adaptive` returns.
+/// @param uncertainty_method `""` simulates at the fit's estimates; `"asymptotic"`
+///   or `"sir"` propagates the fit's parameter uncertainty (ferx-core #946),
+///   drawing `n_draws` parameter sets from the fit's covariance matrix or its
+///   kept SIR resamples
+/// @param cov_matrix_flat,cov_matrix_dim,sir_resamples_flat,sir_resamples_n,sir_resamples_dim
+///   The fit's uncertainty payload, as in `ferx_rust_simulate_with_uncertainty`;
+///   ignored when `uncertainty_method` is `""`
+/// @param n_draws Number of parameter draws; ignored without uncertainty
+/// @return The list `ferx_rust_simulate_adaptive` returns; `parameters` holds
+///   one row per draw under uncertainty.
 /// @export
 #[extendr]
 #[allow(clippy::too_many_arguments)]
@@ -1200,9 +1209,32 @@ fn ferx_rust_simulate_adaptive_from_fit(
     eta_names: Vec<String>,
     eta_flat: Vec<f64>,
     unmatched: &str,
+    uncertainty_method: &str,
+    cov_matrix_flat: Vec<f64>,
+    cov_matrix_dim: i32,
+    sir_resamples_flat: Vec<f64>,
+    sir_resamples_n: i32,
+    sir_resamples_dim: i32,
+    n_draws: i32,
 ) -> Robj {
     entry(move || {
         let etas = AdaptiveEtas::from_r(supply_etas, eta_ids, eta_names, eta_flat, unmatched)?;
+        let uncertainty = if uncertainty_method.is_empty() {
+            None
+        } else {
+            let unc = FitUncertainty {
+                method: uncertainty_method_from_r(uncertainty_method)
+                    .map_err(|e| format!("ferx_simulate_adaptive: {e}"))?,
+                cov_matrix_flat: &cov_matrix_flat,
+                cov_matrix_dim,
+                sir_resamples_flat: &sir_resamples_flat,
+                sir_resamples_n,
+                sir_resamples_dim,
+            };
+            // R refuses `n_draws < 1`; a negative count reaching here is clamped
+            // to 0, which the engine refuses (`E_ADAPTIVE_OPTIONS`), never wrapped.
+            Some((unc, n_draws.max(0) as usize))
+        };
         let fit = AdaptiveFit {
             theta: &theta,
             omega_flat: &omega_flat,
@@ -1214,6 +1246,8 @@ fn ferx_rust_simulate_adaptive_from_fit(
             residual_rho_pairs: &residual_rho_pairs,
             mixture_overrides: &mixture_overrides,
             fitted: fit_bindings_from_r(&fit_bindings)?,
+            fit_bindings: &fit_bindings,
+            uncertainty,
         };
         simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, Some(fit), etas)
     })
@@ -1275,6 +1309,12 @@ struct AdaptiveFit<'a> {
     residual_rho_pairs: &'a [i32],
     mixture_overrides: &'a [f64],
     fitted: DataBindings,
+    /// The R list `fitted` was read from: the uncertainty draws read what the
+    /// fit's covariance step held from it.
+    fit_bindings: &'a List,
+    /// Parameter uncertainty (ferx-core #946): where the draws come from and
+    /// how many. `None` simulates at the fit's estimates.
+    uncertainty: Option<(FitUncertainty<'a>, usize)>,
 }
 
 /// The body of both adaptive entry points: at the model file's initial values
@@ -1325,6 +1365,7 @@ fn simulate_adaptive(
         Err(e) => return Err(format!("ferx_simulate_adaptive: error reading data: {e}")),
     };
 
+    let mut fit_result: Option<FitResult> = None;
     let (params, occasion_notes) = match &fit {
         None => {
             // A level block's theta layout comes from this design: the model's
@@ -1361,6 +1402,29 @@ fn simulate_adaptive(
                 MixtureClasses::Read,
             )
             .map_err(|e| prefix_refusal("ferx_simulate_adaptive: ", e))?;
+            // The fit the uncertainty draws come from (ferx-core #946), rebuilt
+            // from the same values as `params`, on the bound layout, exactly as
+            // `ferx_rust_simulate_with_uncertainty` rebuilds it. The engine
+            // refuses a `params` that is not this fit's point estimate.
+            if let Some((unc, _)) = &f.uncertainty {
+                fit_result = Some(
+                    build_fit_result_for_uncertainty(
+                        &parsed.model,
+                        f.theta,
+                        f.omega_flat,
+                        f.omega_dim,
+                        f.sigma,
+                        f.omega_iov_flat,
+                        f.omega_iov_dim,
+                        unc,
+                        f.residual_rho,
+                        f.residual_rho_pairs,
+                        f.mixture_overrides,
+                        f.fit_bindings,
+                    )
+                    .map_err(|e| prefix_refusal("ferx_simulate_adaptive: ", e))?,
+                );
+            }
             (params, OccasionNotes::none())
         }
     };
@@ -1392,6 +1456,18 @@ fn simulate_adaptive(
     if let Some(e) = &etas {
         inputs = inputs.with_etas(&e.etas).with_unmatched(e.unmatched);
     }
+    // Parameter uncertainty (ferx-core #946): `n_draws` parameter sets, each
+    // simulated for every subject and replicate. The engine refuses it together
+    // with supplied etas (`E_SUPPLIED_ETAS`) and `n_draws = 0`.
+    if let (Some(fr), Some((unc, n_draws))) =
+        (fit_result.as_ref(), fit.as_ref().and_then(|f| f.uncertainty.as_ref()))
+    {
+        // A literal, not `..Default::default()`: `UncertaintySpec` is exhaustive,
+        // so a field core adds is a build break here, decided rather than
+        // inherited (its `Default` already holds the refused `n_draws = 0`).
+        let spec = ferx_core::UncertaintySpec { method: unc.method, n_draws: *n_draws };
+        inputs = inputs.with_uncertainty(fr, spec);
+    }
     Ok(match ferx_core::simulate_adaptive_from_spec_with_inputs(
         &parsed.model,
         &population,
@@ -1407,7 +1483,11 @@ fn simulate_adaptive(
         // filter, which on this path also withholds `W_NO_DOSES`: the controller
         // supplies the whole regimen, so an observation grid alone is the normal
         // input (ferx-r #426).
-        Ok(result) => attach_sim_warnings(adaptive_result_to_list(&result), occasion_notes, &result),
+        Ok(result) => attach_sim_warnings(
+            adaptive_result_to_list(&result, &parsed.model),
+            occasion_notes,
+            &result,
+        ),
         Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
     })
 }
@@ -1421,7 +1501,7 @@ fn simulate_adaptive(
 /// `LATENT` column next to it (the noise-free readout it was drawn from; equal to
 /// `SIGNAL` for an `Ipred` monitor). The outcome metrics are scored on `LATENT`
 /// (ferx-core #946).
-fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj {
+fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: &CompiledModel) -> Robj {
     let trajectories = sim_results_to_df(&result.trajectories);
 
     // -- doses: one row per realized dose --
@@ -1509,9 +1589,60 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         trajectories = trajectories,
         doses = doses,
         decisions = decisions,
-        metrics = metrics
+        metrics = metrics,
+        parameters = drawn_parameters_to_df(&result.parameters, model)
     )
     .into()
+}
+
+/// An adaptive run's parameter draws (ferx-core #946) as an R data frame: one
+/// row per draw, `DRAW` (the tag of the rows simulated under it) and then one
+/// column per estimated quantity, named and ordered as `fit$cov_matrix` names
+/// its rows ([`packed_parameter_entries`]): theta, the Omega elements, sigma,
+/// the kappa elements, `[mixture]` overrides and `block_sigma` correlations,
+/// each on the scale `fit$theta` / `fit$omega` / `fit$sigma` report it. No rows
+/// for a run without uncertainty (the engine's list is empty), with the same
+/// columns, so code keyed on `DRAW` runs unchanged. A parameter whose label is
+/// itself `DRAW` is renamed `DRAW.1`, as R's `make.unique()` would, so the key
+/// stays the one `DRAW` column (#763 review, finding 6).
+fn drawn_parameters_to_df(draws: &[ferx_core::DrawnParameters], model: &CompiledModel) -> Robj {
+    let mut used: std::collections::HashSet<String> = std::iter::once("DRAW".to_string()).collect();
+    let labels: Vec<String> = packed_parameter_entries(model, &model.default_params)
+        .into_iter()
+        .map(|(label, _)| {
+            let mut name = label.clone();
+            let mut k = 1;
+            while !used.insert(name.clone()) {
+                name = format!("{label}.{k}");
+                k += 1;
+            }
+            name
+        })
+        .collect();
+    let rows: Vec<Vec<f64>> = draws
+        .iter()
+        .map(|d| {
+            packed_parameter_entries(model, &d.parameters)
+                .into_iter()
+                .map(|(_, v)| v)
+                .collect()
+        })
+        .collect();
+    let na_if_nan = |v: f64| if v.is_nan() { None } else { Some(v) };
+    let mut cols: Vec<(&str, Robj)> = vec![(
+        "DRAW",
+        draws.iter().map(|d| d.draw as i32).collect::<Vec<i32>>().into(),
+    )];
+    for (j, label) in labels.iter().enumerate() {
+        cols.push((
+            label.as_str(),
+            rows.iter()
+                .map(|r| r.get(j).copied().and_then(na_if_nan))
+                .collect::<Vec<Option<f64>>>()
+                .into(),
+        ));
+    }
+    finish_df(cols, draws.len())
 }
 
 /// Simulate with parameter uncertainty propagation.
@@ -1629,48 +1760,29 @@ fn ferx_rust_simulate_with_uncertainty(
         let occasion_notes =
             derive_fit_occasions("ferx_simulate_with_uncertainty", &parsed, &mut population, iov_occasion)?;
 
-        // Decode the method string to the engine enum.
-        let uncertainty_method = match method.trim().to_lowercase().as_str() {
-            "asymptotic" | "cov" | "covariance" => {
-                ferx_core::UncertaintyMethod::Asymptotic
-            }
-            "sir" => ferx_core::UncertaintyMethod::Sir,
-            other => return Err(format!(
-                "Unknown uncertainty method '{other}' — expected 'asymptotic' or 'sir'"
-            )),
+        let uncertainty_method = uncertainty_method_from_r(method)?;
+        let unc = FitUncertainty {
+            method: uncertainty_method,
+            cov_matrix_flat: &cov_matrix_flat,
+            cov_matrix_dim,
+            sir_resamples_flat: &sir_resamples_flat,
+            sir_resamples_n,
+            sir_resamples_dim,
         };
-
-        let mut fit_result =
-            match build_fit_result_for_uncertainty(
-                &parsed.model,
-                &theta,
-                &omega_flat,
-                omega_dim,
-                &sigma,
-                &omega_iov_flat,
-                omega_iov_dim,
-                uncertainty_method,
-                &cov_matrix_flat,
-                cov_matrix_dim,
-                &sir_resamples_flat,
-                sir_resamples_n,
-                sir_resamples_dim,
-                &residual_rho,
-                &residual_rho_pairs,
-                &mixture_overrides,
-            ) {
-                Ok(f) => f,
-                Err(e) => return Err(e),
-            };
-        // What the fit's covariance step held (#737 review, finding 3): the
-        // asymptotic draws keep a profiled level on its bound (ferx-core #2418)
-        // and a guard collapse on its rail (#2797) from these two lists. A zero
-        // row in the matrix is not enough, since the regularised Cholesky adds
-        // 1e-8 to it, and the coordinate would scatter about 1e-4 around its value.
-        let template = &parsed.model.default_params;
-        fit_result.profiled_levels_at_bound =
-            profiled_levels_at_bound_from_r(&fit_bindings, &template.theta_names)?;
-        fit_result.held_at_bound = held_at_bound_from_r(&fit_bindings, template)?;
+        let fit_result = build_fit_result_for_uncertainty(
+            &parsed.model,
+            &theta,
+            &omega_flat,
+            omega_dim,
+            &sigma,
+            &omega_iov_flat,
+            omega_iov_dim,
+            &unc,
+            &residual_rho,
+            &residual_rho_pairs,
+            &mixture_overrides,
+            &fit_bindings,
+        )?;
 
         let opts = ferx_core::SimulateUncertaintyOptions {
             n_uncertainty_draws: n_uncertainty_draws.max(0) as usize,
@@ -5708,16 +5820,20 @@ fn build_fit_result_for_uncertainty(
     sigma: &[f64],
     omega_iov_flat: &[f64],
     omega_iov_dim: i32,
-    method: ferx_core::UncertaintyMethod,
-    cov_matrix_flat: &[f64],
-    cov_matrix_dim: i32,
-    sir_resamples_flat: &[f64],
-    sir_resamples_n: i32,
-    sir_resamples_dim: i32,
+    unc: &FitUncertainty,
     residual_rho: &[f64],
     residual_rho_pairs: &[i32],
     mixture_overrides: &[f64],
+    fit_bindings: &List,
 ) -> std::result::Result<FitResult, String> {
+    let FitUncertainty {
+        method,
+        cov_matrix_flat,
+        cov_matrix_dim,
+        sir_resamples_flat,
+        sir_resamples_n,
+        sir_resamples_dim,
+    } = *unc;
     let template = &model.default_params;
     if theta.len() != template.theta.len() {
         return Err(format!(
@@ -5795,7 +5911,7 @@ fn build_fit_result_for_uncertainty(
         }
     };
 
-    Ok(default_fit_result(
+    let mut fit_result = default_fit_result(
         model,
         theta.to_vec(),
         omega_mat,
@@ -5806,7 +5922,42 @@ fn build_fit_result_for_uncertainty(
         residual_correlations_from_fit(model, residual_rho, residual_rho_pairs)
             .map_err(|e| format!("Uncertainty error: {e}"))?,
         (!mixture_overrides.is_empty()).then(|| mixture_overrides.to_vec()),
-    ))
+    );
+    // What the fit's covariance step held (#737 review, finding 3): the
+    // asymptotic draws keep a profiled level on its bound (ferx-core #2418)
+    // and a guard collapse on its rail (#2797) from these two lists. A zero
+    // row in the matrix is not enough, since the regularised Cholesky adds
+    // 1e-8 to it, and the coordinate would scatter about 1e-4 around its value.
+    fit_result.profiled_levels_at_bound =
+        profiled_levels_at_bound_from_r(fit_bindings, &template.theta_names)?;
+    fit_result.held_at_bound = held_at_bound_from_r(fit_bindings, template)?;
+    Ok(fit_result)
+}
+
+/// The uncertainty payload of a fit as R flattens it
+/// (`validate_fit_for_uncertainty()`): the method, and the covariance matrix or
+/// the SIR resample pool it draws from (the other one empty). Shared by
+/// `ferx_rust_simulate_with_uncertainty` and the adaptive from-fit path
+/// (ferx-core #946), so both rebuild the fit's `FitResult` the same way.
+#[derive(Clone, Copy)]
+struct FitUncertainty<'a> {
+    method: ferx_core::UncertaintyMethod,
+    cov_matrix_flat: &'a [f64],
+    cov_matrix_dim: i32,
+    sir_resamples_flat: &'a [f64],
+    sir_resamples_n: i32,
+    sir_resamples_dim: i32,
+}
+
+/// The R spelling of an uncertainty method, decoded to the engine enum.
+fn uncertainty_method_from_r(method: &str) -> std::result::Result<ferx_core::UncertaintyMethod, String> {
+    match method.trim().to_lowercase().as_str() {
+        "asymptotic" | "cov" | "covariance" => Ok(ferx_core::UncertaintyMethod::Asymptotic),
+        "sir" => Ok(ferx_core::UncertaintyMethod::Sir),
+        other => Err(format!(
+            "Unknown uncertainty method '{other}' — expected 'asymptotic' or 'sir'"
+        )),
+    }
 }
 
 /// `FitResult::saem_objective` (ferx-core #2973) as a named list, or NULL.
@@ -7140,48 +7291,91 @@ fn with_step_held(mut mask: Vec<bool>, step: &[bool]) -> Vec<bool> {
 /// the overridden name with its class, `ETA_CL (class 2)`. Empty, like the mask,
 /// when there is no matrix or the layout does not have its dimension.
 fn cov_matrix_labels(model: &CompiledModel, cov_matrix_dim: i32) -> Vec<String> {
-    let p = &model.default_params;
-    let named = |names: &[String], k: usize| names.get(k).filter(|n| !n.is_empty()).cloned();
-    let theta = |k: usize| named(&p.theta_names, k).unwrap_or_else(|| format!("THETA{}", k + 1));
-    let eta = |k: usize| named(&p.omega.eta_names, k);
-    let sigma = |k: usize| named(&p.sigma.names, k).unwrap_or_else(|| format!("SIGMA({})", k + 1));
-
-    let mut labels: Vec<String> = (0..p.theta.len()).map(theta).collect();
-    labels.extend(
-        lower_triangle(p.omega.dim(), p.omega.diagonal)
-            .map(|(r, c)| omega_element_label(&p.omega.eta_names, r, c)),
-    );
-    labels.extend((0..p.sigma.values.len()).map(sigma));
-    if let Some(ref iov) = p.omega_iov {
-        let kappa = |k: usize| named(&iov.eta_names, k).or_else(|| named(&model.kappa_names, k));
-        for (r, c) in lower_triangle(iov.dim(), iov.diagonal) {
-            labels.push(match (kappa(r), kappa(c)) {
-                (Some(a), _) if r == c => a,
-                (Some(a), Some(b)) => format!("{a} ~ {b}"),
-                _ if r == c => format!("KAPPA{}", r + 1),
-                _ => format!("KAPPA({},{})", r + 1, c + 1),
-            });
-        }
-    }
-    if let Some(ref mix) = p.mixture {
-        for &(class, k) in &mix.omega_override_addr {
-            let nm = eta(k).unwrap_or_else(|| format!("OMEGA({},{})", k + 1, k + 1));
-            labels.push(mixture_override_label(&nm, class + 1));
-        }
-        for &(class, k) in &mix.sigma_override_addr {
-            labels.push(mixture_override_label(&sigma(k), class + 1));
-        }
-    }
-    // Same `A ~ B` spelling as `residual_correlation_names`.
-    for c in &p.residual_correlations {
-        labels.push(residual_correlation_label(&p.sigma.names, c));
-    }
-
+    let labels: Vec<String> = packed_parameter_entries(model, &model.default_params)
+        .into_iter()
+        .map(|(label, _)| label)
+        .collect();
     if cov_matrix_dim > 0 && labels.len() == cov_matrix_dim as usize {
         labels
     } else {
         Vec::new()
     }
+}
+
+/// Every estimated quantity of the model in the packed order, labelled as
+/// [`cov_matrix_labels`] documents, with its value in `params`: theta, the Omega
+/// elements, sigma, the kappa elements, the `[mixture]` overrides, the
+/// `block_sigma` correlations. Labels and layout come from the model's template,
+/// values from `params` (NaN where `params` lacks one), so one function names
+/// both `cov_matrix`'s rows and an adaptive run's drawn parameters (ferx-core
+/// #946) and the two cannot drift apart.
+fn packed_parameter_entries(model: &CompiledModel, params: &ModelParameters) -> Vec<(String, f64)> {
+    let p = &model.default_params;
+    let named = |names: &[String], k: usize| names.get(k).filter(|n| !n.is_empty()).cloned();
+    let theta = |k: usize| named(&p.theta_names, k).unwrap_or_else(|| format!("THETA{}", k + 1));
+    let eta = |k: usize| named(&p.omega.eta_names, k);
+    let sigma = |k: usize| named(&p.sigma.names, k).unwrap_or_else(|| format!("SIGMA({})", k + 1));
+    let at = |m: &DMatrix<f64>, r: usize, c: usize| {
+        if r < m.nrows() && c < m.ncols() {
+            m[(r, c)]
+        } else {
+            f64::NAN
+        }
+    };
+
+    let mut entries: Vec<(String, f64)> = (0..p.theta.len())
+        .map(|k| (theta(k), params.theta.get(k).copied().unwrap_or(f64::NAN)))
+        .collect();
+    entries.extend(
+        lower_triangle(p.omega.dim(), p.omega.diagonal).map(|(r, c)| {
+            (omega_element_label(&p.omega.eta_names, r, c), at(&params.omega.matrix, r, c))
+        }),
+    );
+    entries.extend(
+        (0..p.sigma.values.len())
+            .map(|k| (sigma(k), params.sigma.values.get(k).copied().unwrap_or(f64::NAN))),
+    );
+    if let Some(ref iov) = p.omega_iov {
+        let kappa = |k: usize| named(&iov.eta_names, k).or_else(|| named(&model.kappa_names, k));
+        for (r, c) in lower_triangle(iov.dim(), iov.diagonal) {
+            let label = match (kappa(r), kappa(c)) {
+                (Some(a), _) if r == c => a,
+                (Some(a), Some(b)) => format!("{a} ~ {b}"),
+                _ if r == c => format!("KAPPA{}", r + 1),
+                _ => format!("KAPPA({},{})", r + 1, c + 1),
+            };
+            let value = params.omega_iov.as_ref().map_or(f64::NAN, |m| at(&m.matrix, r, c));
+            entries.push((label, value));
+        }
+    }
+    if let Some(ref mix) = p.mixture {
+        let drawn = params.mixture.as_ref();
+        for &(class, k) in &mix.omega_override_addr {
+            let nm = eta(k).unwrap_or_else(|| format!("OMEGA({},{})", k + 1, k + 1));
+            let value = drawn
+                .and_then(|m| m.omega.get(class))
+                .map_or(f64::NAN, |o| at(&o.matrix, k, k));
+            entries.push((mixture_override_label(&nm, class + 1), value));
+        }
+        for &(class, k) in &mix.sigma_override_addr {
+            let value = drawn
+                .and_then(|m| m.sigma.get(class))
+                .and_then(|s| s.values.get(k).copied())
+                .unwrap_or(f64::NAN);
+            entries.push((mixture_override_label(&sigma(k), class + 1), value));
+        }
+    }
+    // Same `A ~ B` spelling as `residual_correlation_names`; a correlation is
+    // matched by its sigma pair, not by position.
+    for c in &p.residual_correlations {
+        let value = params
+            .residual_correlations
+            .iter()
+            .find(|d| d.sigma_i == c.sigma_i && d.sigma_j == c.sigma_j)
+            .map_or(f64::NAN, |d| d.rho);
+        entries.push((residual_correlation_label(&p.sigma.names, c), value));
+    }
+    entries
 }
 
 /// The label of a `[mixture]` per-class override of the parameter labelled
