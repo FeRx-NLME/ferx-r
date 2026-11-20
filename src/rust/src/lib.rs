@@ -1642,25 +1642,36 @@ fn drawn_parameters_to_df(draws: &[ferx_core::DrawnParameters], model: &Compiled
 
 /// `names` made unique for a data frame, first come first kept: a name already
 /// taken by an earlier column becomes `<name>.1` (`.2`, ... while that is taken
-/// too), the suffix R's `make.unique()` uses. Callers put their key columns
-/// first, so a model quantity that happens to be spelled like a key (`DRAW`,
-/// `SIM`, `ID`) is the one renamed and `merge(..., by = )` still finds one key
-/// column (#763 review, finding 6, for the adaptive `parameters` table and
-/// for `ferx_sim_parameters()`).
+/// too), a `make.unique()`-style suffix (not identical to it: a name already
+/// ending in `.1` is never renumbered, so `a a a.1` gives `a a.1 a.1.1` where
+/// `make.unique()` gives `a a.2 a.1`). Callers put their key columns first, so
+/// a model quantity that happens to be spelled like a key (`DRAW`, `SIM`, `ID`)
+/// is the one renamed and `merge(..., by = )` still finds one key column (#763
+/// review, finding 6, for the adaptive `parameters` table).
 fn unique_column_names(names: &[String]) -> Vec<String> {
+    let order: Vec<usize> = (0..names.len()).collect();
+    unique_column_names_in_order(names, &order)
+}
+
+/// [`unique_column_names`] with the columns claiming their names in `order` (a
+/// permutation of `0..names.len()`) rather than left to right; the result is
+/// still in column order. For a frame whose engine-made columns do not all come
+/// first, as `ferx_sim_parameters()`'s kappa columns follow the etas.
+fn unique_column_names_in_order(names: &[String], order: &[usize]) -> Vec<String> {
+    debug_assert_eq!(order.len(), names.len());
     let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
-    names
-        .iter()
-        .map(|label| {
-            let mut name = label.clone();
-            let mut k = 1;
-            while !used.insert(name.clone()) {
-                name = format!("{label}.{k}");
-                k += 1;
-            }
-            name
-        })
-        .collect()
+    let mut out = names.to_vec();
+    for &j in order {
+        let label = &names[j];
+        let mut name = label.clone();
+        let mut k = 1;
+        while !used.insert(name.clone()) {
+            name = format!("{label}.{k}");
+            k += 1;
+        }
+        out[j] = name;
+    }
+    out
 }
 
 /// Simulate with parameter uncertainty propagation.
@@ -7020,7 +7031,8 @@ fn sim_parameters_to_df(table: &ferx_core::SimulatedParameters, model: &Compiled
         rows.iter().map(|r| r.sim as i32).collect::<Vec<i32>>().into(),
         rows.iter().map(|r| r.id.clone()).collect::<Vec<String>>().into(),
     ];
-    if rows.iter().any(|r| r.mixnum.is_some()) {
+    let has_mixnum = rows.iter().any(|r| r.mixnum.is_some());
+    if has_mixnum {
         names.push("MIXNUM".into());
         values.push(
             rows.iter()
@@ -7068,11 +7080,20 @@ fn sim_parameters_to_df(table: &ferx_core::SimulatedParameters, model: &Compiled
     let first_varying_candidate =
         names.len() - table.individual_names.len() - table.derived_names.len();
     // An eta, individual parameter or `[derived]` column spelled like a key
-    // (`DRAW`, `SIM`, `ID`), or an individual parameter spelled like a
-    // `<kappa>_<k>` column, would otherwise be a second column of that name,
-    // and `merge(sim, params, by = c("DRAW", "SIM", "ID"))` would join on
-    // whichever R picks. The later column is renamed instead.
-    let unique = unique_column_names(&names);
+    // (`DRAW`, `SIM`, `ID`, `MIXNUM`) or a `<kappa>_<k>` column would otherwise
+    // be a second column of that name, and `merge(sim, params, by = c("DRAW",
+    // "SIM", "ID"))` would join on whichever R picks. The engine's own columns
+    // claim their names first - the keys, MIXNUM, then the kappa columns, which
+    // come after the etas in the frame - so the model's spelling is the one
+    // renamed (#764 review, finding 1); the column order is unchanged.
+    let n_key = if has_mixnum { 4 } else { 3 };
+    let first_kappa = n_key + table.eta_names.len();
+    let claim_order: Vec<usize> = (0..n_key)
+        .chain(first_kappa..first_varying_candidate)
+        .chain(n_key..first_kappa)
+        .chain(first_varying_candidate..names.len())
+        .collect();
+    let unique = unique_column_names_in_order(&names, &claim_order);
     // `varying` names individual / `[derived]` columns: point it at their
     // column, renamed or not.
     let varying: Vec<String> = table

@@ -1317,9 +1317,12 @@ test_that("without uncertainty: DRAW is 1 throughout and parameters has no rows"
 # that the run's parameters are the fit's point estimate (E_ADAPTIVE_OPTIONS,
 # "the run's parameters differ from it"), which the glue cannot fail: it builds
 # the run's parameters and the fit it hands the engine from the same R values.
-# So that refusal never reaches R, and needs no R spelling. Mutation that
-# reddens every test in this block: `build_fit_result_for_uncertainty` handed
-# a theta one ULP off the fit's.
+# So that refusal never reaches R, and needs no R spelling. The check compares
+# theta, Omega, Omega_IOV, sigma and rho only - never the `[mixture]` class
+# matrices - so for the override values the mixture test's own column check is
+# what holds them to the fit (#764 review, finding 5). Mutation that reddens
+# every test in this block: `build_fit_result_for_uncertainty` handed a theta
+# one ULP off the fit's.
 
 # An ODE 1-cpt adaptive model: `params` the [parameters] lines, `indiv` the
 # [individual_parameters] lines, `err` the error model, `opts` extra
