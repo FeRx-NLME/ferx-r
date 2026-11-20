@@ -9037,14 +9037,21 @@ fn build_individual_estimates(
         return ().into();
     }
 
+    // An individual parameter named `ID` would be a second `ID` column, and
+    // `$ID` / a join on it would read whichever R picks: the key keeps its name
+    // and the parameter becomes `ID.1` (#764 review, finding 2).
+    let raw: Vec<String> = std::iter::once("ID".to_string())
+        .chain(columns.iter().map(|c| c.to_string()))
+        .collect();
+    let labels = unique_column_names(&raw);
     let mut pairs: Vec<(&str, Robj)> = Vec::with_capacity(columns.len() + 1);
-    pairs.push(("ID", ids.into()));
-    for &name in &columns {
+    pairs.push((labels[0].as_str(), ids.into()));
+    for (j, &name) in columns.iter().enumerate() {
         let values: Vec<f64> = maps
             .iter()
             .map(|m| m.get(name).copied().unwrap_or(f64::NAN))
             .collect();
-        pairs.push((name, values.into()));
+        pairs.push((labels[j + 1].as_str(), values.into()));
     }
     let mut df = List::from_pairs(pairs);
     df.set_class(&["data.frame"]).unwrap();
