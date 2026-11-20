@@ -254,3 +254,85 @@ test_that("ferx_sim_parameters() refuses an object without the table", {
   expect_error(ferx_sim_parameters(data.frame(ID = 1)),
                "carries no drawn-parameter table")
 })
+
+# A model quantity spelled like a key must not become a second key column:
+# with two `SIM` columns, `merge(sim, params, by = c("DRAW", "SIM", "ID"))`
+# joins on whichever one R picks. The eta `ID`, the individual parameter
+# `SIM` and the `[derived]` column `DRAW` are renamed `ID.1`, `SIM.1` and
+# `DRAW.1` (the engine refuses a `[derived]` `ID`), the keys keep their
+# names, and `varying` names the renamed columns.
+# Mutations that redden this: `sim_parameters_to_df` naming the columns
+# `names` instead of `unique_column_names_in_order(..)` (duplicate keys), or
+# passing `varying` on as the engine spells it ("SIM", which is the key).
+test_that("an eta / parameter / derived column spelled DRAW, SIM or ID does not shadow a key", {
+  model <- .sp_write_model("TVCL * (WT / 70) * exp(ETA_CL)")
+  txt <- readLines(model)
+  txt <- gsub("ETA_CL", "ID", txt, fixed = TRUE)
+  txt <- sub("  CL = ", "  SIM = ", txt, fixed = TRUE)
+  txt <- sub("cl=CL", "cl=SIM", txt, fixed = TRUE)
+  writeLines(c(txt, "[derived]", "  DRAW = SIM / V"), model)
+  sim <- ferx_simulate(
+    model,
+    .sp_write_data(n = 3L, wt = function(id, t) if (t < 4) 70 else 90),
+    n_sim = 2L, seed = 7L
+  )
+  params <- ferx_sim_parameters(sim)
+  expect_identical(
+    names(params),
+    c("DRAW", "SIM", "ID", "ID.1", "ETA_V", "ETA_KA", "SIM.1", "V", "KA",
+      "DRAW.1")
+  )
+  # The keys are the simulation's own.
+  expect_true(all(params$DRAW == 1L))
+  expect_setequal(unique(params$SIM), 1:2)
+  expect_setequal(unique(params$ID), unique(sim$ID))
+  # The renamed columns hold the model's values (WT 70 at the first row).
+  expect_equal(params$SIM.1, 2.0 * exp(params$ID.1))
+  expect_equal(params$DRAW.1, params$SIM.1 / params$V)
+  expect_identical(attr(params, "varying"), c("SIM.1", "DRAW.1"))
+  joined <- merge(sim, params, by = c("DRAW", "SIM", "ID"))
+  expect_identical(nrow(joined), nrow(sim))
+})
+
+# The kappa columns are spelled `<kappa>_<k>`, which an individual parameter
+# can spell too; the parameter is renamed. Mutation that reddens this: as
+# above, no renaming.
+test_that("an individual parameter spelled like a kappa column is renamed", {
+  ex <- ferx_example("warfarin_iov")
+  txt <- readLines(ex$model)
+  txt <- append(txt, "  KAPPA_CL_1 = TVCL",
+                after = grep("^\\[individual_parameters\\]", txt))
+  model <- tempfile(fileext = ".ferx")
+  writeLines(txt, model)
+  sim <- suppressWarnings(ferx_simulate(model, ex$data, n_sim = 1L, seed = 4L))
+  params <- ferx_sim_parameters(sim)
+  expect_identical(anyDuplicated(names(params)), 0L)
+  expect_true(all(c("KAPPA_CL_1", "KAPPA_CL_2", "KAPPA_CL_1.1") %in% names(params)))
+  # The kappa keeps its name and its drawn value; the parameter is TVCL.
+  expect_true(all(params$KAPPA_CL_1.1 == 0.134))
+  expect_false(any(params$KAPPA_CL_1 == 0.134))
+})
+
+# An eta can spell a kappa column too, and the eta columns come before the
+# kappa columns in the frame: left-to-right renaming kept the eta's name and
+# renamed the occasion-1 kappa, so `params$KAPPA_CL_1` read the eta (#764
+# review, finding 1). The kappa claims its name first. Mutation that reddens
+# this: `sim_parameters_to_df` claiming names in column order
+# (`unique_column_names(&names)`).
+test_that("an eta spelled like a kappa column is renamed, not the kappa", {
+  ex <- ferx_example("warfarin_iov")
+  txt <- gsub("ETA_V", "KAPPA_CL_1", readLines(ex$model), fixed = TRUE)
+  model <- tempfile(fileext = ".ferx")
+  writeLines(txt, model)
+  sim <- suppressWarnings(ferx_simulate(model, ex$data, n_sim = 2L, seed = 4L))
+  params <- ferx_sim_parameters(sim)
+  # Column order is unchanged: the eta stays among the etas.
+  expect_identical(
+    names(params)[1:8],
+    c("DRAW", "SIM", "ID", "ETA_CL", "KAPPA_CL_1.1", "ETA_KA",
+      "KAPPA_CL_1", "KAPPA_CL_2")
+  )
+  # The renamed column is the eta: V = TVV * exp(eta).
+  expect_equal(params$V, 8.1 * exp(params$KAPPA_CL_1.1))
+  expect_false(isTRUE(all.equal(params$V, 8.1 * exp(params$KAPPA_CL_1))))
+})

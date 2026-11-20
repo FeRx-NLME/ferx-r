@@ -2209,6 +2209,27 @@ test_that("ebe_etas and individual_estimates align on ID and row count", {
   fit <- warfarin_fit()
   expect_equal(fit$ebe_etas$ID, fit$individual_estimates$ID)
 })
+# An individual parameter named `ID` used to be a second `ID` column, so
+# `fit$individual_estimates$ID` (the subject key every reader joins on) could
+# read the parameter. The key keeps its name and the parameter is `ID.1`
+# (#764 review, finding 2). Mutation that reddens this:
+# `build_individual_estimates` pushing the raw names instead of
+# `unique_column_names(&raw)`.
+test_that("an individual parameter named ID does not shadow the subject key", {
+  ex <- ferx_example("warfarin")
+  txt <- readLines(ex$model)
+  txt <- append(txt, "  ID = 2.5",
+                after = grep("^\\[individual_parameters\\]", txt))
+  model <- tempfile(fileext = ".ferx")
+  writeLines(txt, model)
+  fit <- suppressWarnings(ferx_fit(model, ex$data, verbose = FALSE,
+                                   covariance = FALSE,
+                                   settings = list(maxiter = 2L)))
+  ie <- fit$individual_estimates
+  expect_identical(names(ie), c("ID", "ID.1", "CL", "V", "KA"))
+  expect_identical(ie$ID, fit$ebe_etas$ID)
+  expect_true(all(ie$ID.1 == 2.5))
+})
 # ODE models do not store individual parameters in PK slots 0..n in declaration
 # order: ferx-core's `ode_param_slots` puts canonical names (CL, V, KA, F,
 # LAGTIME, ...) at their fixed slot and every other name in a free slot that is

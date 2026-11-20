@@ -1305,3 +1305,227 @@ test_that("without uncertainty: DRAW is 1 throughout and parameters has no rows"
   expect_identical(res[.adaptive_tables],
                    .run_unc(uncertainty = NULL)[.adaptive_tables])
 })
+
+# --- uncertainty = on every packed block (#763 review, "not checked") ---------
+#
+# The tests above draw theta, one Omega and one sigma. These run the other
+# blocks `packed_parameter_entries` writes - kappa, `[mixture]` overrides,
+# `block_sigma` correlations - and a theta-level block, end to end: each draw's
+# column is named as `fit$cov_matrix` names the row, scatters around the
+# fit's estimate by about its standard error, and a FIX or held-at-bound
+# entry stays at its estimate. Every run here also passes the engine's check
+# that the run's parameters are the fit's point estimate (E_ADAPTIVE_OPTIONS,
+# "the run's parameters differ from it"), which the glue cannot fail: it builds
+# the run's parameters and the fit it hands the engine from the same R values.
+# So that refusal never reaches R, and needs no R spelling. The check compares
+# theta, Omega, Omega_IOV, sigma and rho only - never the `[mixture]` class
+# matrices - so for the override values the mixture test's own column check is
+# what holds them to the fit (#764 review, finding 5). Mutation that reddens
+# every test in this block: `build_fit_result_for_uncertainty` handed a theta
+# one ULP off the fit's.
+
+# An ODE 1-cpt adaptive model: `params` the [parameters] lines, `indiv` the
+# [individual_parameters] lines, `err` the error model, `opts` extra
+# [fit_options] lines.
+.unc_shape_model <- function(params, indiv, err = "  DV ~ proportional(PROP)",
+                             opts = character()) {
+  path <- tempfile(fileext = ".ferx")
+  writeLines(c(
+    "[parameters]", params,
+    "[individual_parameters]", indiv,
+    "[structural_model]", "  ode(states=[central])",
+    "[odes]", "  d/dt(central) = -(CL / V) * central",
+    "[scaling]", "  y = central / V",
+    "[error_model]", err,
+    "[fit_options]", "  covariance = true", opts,
+    "[adaptive_dosing]",
+    "  observe     = central / V",
+    "  at          = every 12 from 12 to 36",
+    "  start_dose  = 100",
+    "  route       = bolus(cmt=1)",
+    "  dose_bounds = [0, 400]",
+    "  confirm     = 1",
+    "  when signal < 2 : increase 25%"
+  ), path)
+  path
+}
+
+# 24 subjects, two occasions 48 h apart (OCC), each a 100 mg dose observed at
+# 1, 4, 12 and 24 h; subjects 1-12 are STUDY 1, 13-24 STUDY 2. The DVs are
+# simulated from `truth` (a model file) with a fixed seed.
+.unc_shape_data <- function(truth) {
+  design <- do.call(rbind, lapply(1:24, function(i) {
+    do.call(rbind, lapply(1:2, function(o) {
+      t0 <- (o - 1) * 48
+      rbind(
+        data.frame(ID = i, TIME = t0, DV = ".", EVID = 1, AMT = "100", CMT = 1,
+                   MDV = 1, OCC = o, STUDY = if (i <= 12) 1 else 2),
+        data.frame(ID = i, TIME = t0 + c(1, 4, 12, 24), DV = "1", EVID = 0,
+                   AMT = ".", CMT = 1, MDV = 0, OCC = o,
+                   STUDY = if (i <= 12) 1 else 2)
+      )
+    }))
+  }))
+  path <- tempfile(fileext = ".csv")
+  utils::write.csv(design, path, row.names = FALSE, quote = FALSE)
+  sim <- suppressWarnings(ferx_simulate(truth, path, n_sim = 1L, seed = 946L))
+  obs <- design$EVID == 0
+  key <- paste(design$ID, design$TIME)[obs]
+  design$DV[obs] <- sprintf("%.6g", sim$DV_SIM[match(key, paste(sim$ID, sim$TIME))])
+  utils::write.csv(design, path, row.names = FALSE, quote = FALSE)
+  path
+}
+
+# Fit `model` on `data` and run 200 parameter draws through the controller.
+.unc_shape_run <- function(model, data, method = "asymptotic", fit = NULL) {
+  if (is.null(fit)) fit <- ferx_fit(model, data, verbose = FALSE)
+  res <- .quiet_design_dv(ferx_simulate_adaptive(
+    model, data, n_sim = 1L, seed = 3L, fit = fit,
+    uncertainty = list(method = method, n_draws = 200L)
+  ))
+  list(fit = fit, p = res$parameters, res = res)
+}
+
+# Each `free` column of the draws `p` is centred on `est` and spread by `se`
+# (natural scale; 200 draws), each `held` column is exactly its estimate.
+.expect_draws_around <- function(p, est, se, free, held = character()) {
+  for (nm in free) {
+    x <- p[[nm]]
+    expect_identical(length(unique(x)), nrow(p), label = nm)
+    expect_lt(abs(stats::median(x) - est[[nm]]) / se[[nm]], 0.35)
+    expect_gt(stats::sd(x) / se[[nm]], 0.7)
+    expect_lt(stats::sd(x) / se[[nm]], 1.45)
+  }
+  for (nm in held) {
+    expect_identical(p[[nm]], rep(est[[nm]], nrow(p)), label = nm)
+  }
+}
+
+# Mutation that reddens this: `packed_parameter_entries` reading a kappa's
+# value from the model template (`p.omega_iov`) instead of the draw, which
+# puts the file's 0.05 in every row.
+test_that("uncertainty: kappa columns carry each draw's IOV, a FIX kappa its estimate", {
+  params <- c("  theta TVCL(2.5, 0.01, 50.0)", "  theta TVV(15, 1.0, 500.0)",
+              "  omega ETA_CL ~ 0.09", "  kappa KAPPA_CL ~ 0.05",
+              "  kappa KAPPA_V ~ 0.01 FIX", "  sigma PROP ~ 0.1 (sd)")
+  indiv <- c("  CL = TVCL * exp(ETA_CL + KAPPA_CL)", "  V  = TVV * exp(KAPPA_V)")
+  model <- .unc_shape_model(params, indiv, opts = "  iov_column = OCC")
+  r <- .unc_shape_run(model, .unc_shape_data(model))
+  fit <- r$fit
+  expect_true(fit$converged)
+  expect_identical(nrow(fit$held_at_bound), 0L)
+  expect_identical(names(r$p), c("DRAW", rownames(fit$cov_matrix)))
+  expect_identical(tail(names(r$p), 2L), c("KAPPA_CL", "KAPPA_V"))
+  .expect_draws_around(
+    r$p,
+    est = c(diag(fit$omega_iov), fit$theta),
+    se = c(fit$se_kappa, fit$se_theta),
+    free = c("KAPPA_CL", "TVCL"), held = "KAPPA_V"
+  )
+})
+
+# Mutation that reddens this: `packed_parameter_entries` reading an override
+# from the base class (`m.omega.get(0)`) instead of its own class, which puts
+# the base ETA_CL in the override column.
+test_that("uncertainty: a [mixture] override column carries each draw's class value", {
+  data <- test_path("fixtures", "mixture_iv.csv")
+  model <- .write_mixture_adaptive_model()
+  fit <- muffle_mixl_lint(ferx_fit(model, data, verbose = FALSE,
+                                   covariance = TRUE))
+  r <- muffle_mixl_lint(.unc_shape_run(model, data, fit = fit))
+  expect_true(fit$converged)
+  expect_identical(names(r$p), c("DRAW", rownames(fit$cov_matrix)))
+  expect_identical(tail(names(r$p), 1L), "ETA_CL (class 2)")
+  ov <- "ETA_CL (class 2)"
+  .expect_draws_around(
+    r$p,
+    est = c(stats::setNames(fit$mixture_overrides, ov), fit$theta),
+    se = c(stats::setNames(fit$se_mixture_overrides, ov), fit$se_theta),
+    free = c(ov, "MIXL")
+  )
+  # Not the base class's draw.
+  expect_false(any(r$p[[ov]] == r$p$ETA_CL))
+})
+
+# A correlation is drawn on the Fisher-z scale (`atanh(rho)`, the scale of its
+# `fit$cov_matrix` row), so it is checked there. The data come from rho = -0.6,
+# away from the engine's |z| <= 3 rail: a rho the data push onto it (as a
+# PROP/ADD pair with a weak additive part does) has a packed SE of ~10 and
+# draws piled on the rail. Mutation that reddens this:
+# `packed_parameter_entries` reading a correlation from the model template
+# instead of the draw, which puts the file's rho in every row.
+test_that("uncertainty: a block_sigma correlation column carries each draw's rho", {
+  params <- c("  theta TVCL(2.5, 0.01, 50.0)", "  theta TVV(15, 1.0, 500.0)",
+              "  omega ETA_CL ~ 0.09",
+              "  block_sigma (PROP, ADD) = [0.04, -0.012, 0.01]")
+  indiv <- c("  CL = TVCL * exp(ETA_CL)", "  V  = TVV")
+  model <- .unc_shape_model(params, indiv, err = "  DV ~ combined(PROP, ADD)")
+  r <- .unc_shape_run(model, .unc_shape_data(model))
+  fit <- r$fit
+  rc <- fit$residual_correlations
+  expect_true(fit$converged)
+  expect_identical(names(r$p), c("DRAW", rownames(fit$cov_matrix)))
+  expect_identical(tail(names(r$p), 1L), rc$name)
+  rho <- r$p[[rc$name]]
+  expect_true(all(rho > -1 & rho < 1))
+  z <- stats::setNames(data.frame(atanh(rho)), rc$name)
+  .expect_draws_around(
+    z, est = stats::setNames(atanh(rc$rho), rc$name),
+    se = stats::setNames(sqrt(fit$cov_matrix[rc$name, rc$name]), rc$name),
+    free = rc$name
+  )
+})
+
+# A level block's thetas are named per level and drawn per level, on the
+# layout bound to the fit. Mutation that reddens this: `packed_parameter_
+# entries` reading theta `k` from another position.
+test_that("uncertainty: a theta-level block draws each level around its own estimate", {
+  params <- c("  theta TVCL[STUDY, contrast = none](2.5, 0.01, 50.0)",
+              "  theta TVV(15, 1.0, 500.0)", "  omega ETA_CL ~ 0.09",
+              "  sigma PROP ~ 0.1 (sd)")
+  indiv <- c("  CL = TVCL * exp(ETA_CL)", "  V  = TVV")
+  truth <- .unc_shape_model(sub("TVCL[STUDY, contrast = none]", "TVCL",
+                                params, fixed = TRUE), indiv)
+  data <- .unc_shape_data(truth)
+  # Study 2 clears faster, so the two levels do not share an estimate.
+  d <- utils::read.csv(data, colClasses = "character")
+  d$DV[d$STUDY == "2" & d$EVID == "0"] <- sprintf(
+    "%.6g", as.numeric(d$DV[d$STUDY == "2" & d$EVID == "0"]) *
+      exp(-0.8 * as.numeric(d$TIME[d$STUDY == "2" & d$EVID == "0"]) %% 48 / 12))
+  utils::write.csv(d, data, row.names = FALSE, quote = FALSE)
+  r <- .unc_shape_run(.unc_shape_model(params, indiv), data)
+  fit <- r$fit
+  lv <- c("TVCL[STUDY=1]", "TVCL[STUDY=2]")
+  expect_identical(names(r$p), c("DRAW", rownames(fit$cov_matrix)))
+  expect_identical(names(r$p)[2:3], lv)
+  expect_gt(abs(diff(fit$theta[lv])) / max(fit$se_theta[lv]), 3)
+  .expect_draws_around(r$p, est = fit$theta, se = fit$se_theta,
+                       free = c(lv, "TVV"))
+})
+
+# `method = "sir"` resamples the fit's kept pool: every draw is one of its
+# rows, unpacked (theta and the sd-scale sigma on log, the Omega variance on
+# log-sd). Mutation that reddens this: the glue reading the flat pool
+# column-major, which mixes coordinates of different resamples.
+test_that("uncertainty: method = \"sir\" draws are rows of the fit's kept pool", {
+  fx <- .unc_fixture()
+  sir_fit <- ferx_sir(fx$fit, sir_samples = 200L, sir_resamples = 30L,
+                      sir_keep_samples = TRUE, sir_seed = 1L)
+  pool <- matrix(sir_fit$sir_resamples, nrow = sir_fit$sir_resamples_n,
+                 byrow = TRUE)
+  expect_identical(ncol(pool), 4L)
+  # TVCL, TVV (FIX), ETA_CL, PROP.
+  nat <- cbind(exp(pool[, 1:2]), exp(2 * pool[, 3]), exp(pool[, 4]))
+  res <- .quiet_design_dv(ferx_simulate_adaptive(
+    fx$model, fx$data, n_sim = 1L, seed = 7L, fit = sir_fit,
+    uncertainty = list(method = "sir", n_draws = 8L)
+  ))
+  p <- as.matrix(res$parameters[, c("TVCL", "TVV", "ETA_CL", "PROP")])
+  for (r in seq_len(nrow(p))) {
+    rel <- apply(abs(sweep(nat, 2L, p[r, ])) / rep(p[r, ], each = nrow(nat)),
+                 1L, max)
+    expect_lt(min(rel), 1e-12)
+  }
+  # More than one row of the pool is used.
+  expect_gt(length(unique(p[, "TVCL"])), 1L)
+})

@@ -56,6 +56,13 @@
 #'     \item{derived columns}{One per \code{[derived]} / \code{[output]} column,
 #'       computed with the simulated random effects, \code{IPRED} and \code{DV}.}
 #'   }
+#'   Every column name is unique: a random effect, individual parameter or
+#'   derived column spelled like a key (\code{DRAW}, \code{SIM}, \code{ID}, and
+#'   \code{MIXNUM} on a \code{[mixture]} model) or a kappa column gets a
+#'   \code{make.unique()}-style
+#'   \code{.1} suffix (\code{.2}, ... if that is taken too), while the key or
+#'   kappa column keeps its name, so the join above always finds one column
+#'   per key. Two model quantities with one spelling keep the first's name.
 #'   Attribute \code{varying}: see the section above.
 #'
 #' @examples

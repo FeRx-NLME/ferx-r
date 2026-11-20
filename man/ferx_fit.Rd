@@ -1404,7 +1404,9 @@ counts.}
 \item{individual_estimates}{Data frame with one row per subject containing
 each subject's individual parameter values: \code{ID} plus one column
 per parameter declared in the \code{[individual_parameters]} block
-(e.g. \code{CL}, \code{V}, \code{KA}). Computed by evaluating the
+(e.g. \code{CL}, \code{V}, \code{KA}); a parameter itself named
+\code{ID} is the column \code{ID.1}, so \code{ID} is always the
+subject. Computed by evaluating the
 individual-parameter expressions at the subject's EBE eta with kappa
 fixed at zero, so the result reflects each subject's typical value
 under the model's covariate effects. For inter-occasion variation see

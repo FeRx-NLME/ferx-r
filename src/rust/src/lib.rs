@@ -1603,22 +1603,17 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: 
 /// each on the scale `fit$theta` / `fit$omega` / `fit$sigma` report it. No rows
 /// for a run without uncertainty (the engine's list is empty), with the same
 /// columns, so code keyed on `DRAW` runs unchanged. A parameter whose label is
-/// itself `DRAW` is renamed `DRAW.1`, as R's `make.unique()` would, so the key
+/// itself `DRAW` is renamed `DRAW.1` ([`unique_column_names`]), so the key
 /// stays the one `DRAW` column (#763 review, finding 6).
 fn drawn_parameters_to_df(draws: &[ferx_core::DrawnParameters], model: &CompiledModel) -> Robj {
-    let mut used: std::collections::HashSet<String> = std::iter::once("DRAW".to_string()).collect();
-    let labels: Vec<String> = packed_parameter_entries(model, &model.default_params)
-        .into_iter()
-        .map(|(label, _)| {
-            let mut name = label.clone();
-            let mut k = 1;
-            while !used.insert(name.clone()) {
-                name = format!("{label}.{k}");
-                k += 1;
-            }
-            name
-        })
+    let raw: Vec<String> = std::iter::once("DRAW".to_string())
+        .chain(
+            packed_parameter_entries(model, &model.default_params)
+                .into_iter()
+                .map(|(label, _)| label),
+        )
         .collect();
+    let labels: Vec<String> = unique_column_names(&raw).into_iter().skip(1).collect();
     let rows: Vec<Vec<f64>> = draws
         .iter()
         .map(|d| {
@@ -1643,6 +1638,40 @@ fn drawn_parameters_to_df(draws: &[ferx_core::DrawnParameters], model: &Compiled
         ));
     }
     finish_df(cols, draws.len())
+}
+
+/// `names` made unique for a data frame, first come first kept: a name already
+/// taken by an earlier column becomes `<name>.1` (`.2`, ... while that is taken
+/// too), a `make.unique()`-style suffix (not identical to it: a name already
+/// ending in `.1` is never renumbered, so `a a a.1` gives `a a.1 a.1.1` where
+/// `make.unique()` gives `a a.2 a.1`). Callers put their key columns first, so
+/// a model quantity that happens to be spelled like a key (`DRAW`, `SIM`, `ID`)
+/// is the one renamed and `merge(..., by = )` still finds one key column (#763
+/// review, finding 6, for the adaptive `parameters` table).
+fn unique_column_names(names: &[String]) -> Vec<String> {
+    let order: Vec<usize> = (0..names.len()).collect();
+    unique_column_names_in_order(names, &order)
+}
+
+/// [`unique_column_names`] with the columns claiming their names in `order` (a
+/// permutation of `0..names.len()`) rather than left to right; the result is
+/// still in column order. For a frame whose engine-made columns do not all come
+/// first, as `ferx_sim_parameters()`'s kappa columns follow the etas.
+fn unique_column_names_in_order(names: &[String], order: &[usize]) -> Vec<String> {
+    debug_assert_eq!(order.len(), names.len());
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out = names.to_vec();
+    for &j in order {
+        let label = &names[j];
+        let mut name = label.clone();
+        let mut k = 1;
+        while !used.insert(name.clone()) {
+            name = format!("{label}.{k}");
+            k += 1;
+        }
+        out[j] = name;
+    }
+    out
 }
 
 /// Simulate with parameter uncertainty propagation.
@@ -7002,7 +7031,8 @@ fn sim_parameters_to_df(table: &ferx_core::SimulatedParameters, model: &Compiled
         rows.iter().map(|r| r.sim as i32).collect::<Vec<i32>>().into(),
         rows.iter().map(|r| r.id.clone()).collect::<Vec<String>>().into(),
     ];
-    if rows.iter().any(|r| r.mixnum.is_some()) {
+    let has_mixnum = rows.iter().any(|r| r.mixnum.is_some());
+    if has_mixnum {
         names.push("MIXNUM".into());
         values.push(
             rows.iter()
@@ -7047,10 +7077,38 @@ fn sim_parameters_to_df(table: &ferx_core::SimulatedParameters, model: &Compiled
     }
     push_block(&table.individual_names, &|r, j| r.individual.get(j).copied());
     push_block(&table.derived_names, &|r, j| r.derived.get(j).copied());
-    let pairs: Vec<(&str, Robj)> = names.iter().map(String::as_str).zip(values).collect();
+    let first_varying_candidate =
+        names.len() - table.individual_names.len() - table.derived_names.len();
+    // An eta, individual parameter or `[derived]` column spelled like a key
+    // (`DRAW`, `SIM`, `ID`, `MIXNUM`) or a `<kappa>_<k>` column would otherwise
+    // be a second column of that name, and `merge(sim, params, by = c("DRAW",
+    // "SIM", "ID"))` would join on whichever R picks. The engine's own columns
+    // claim their names first - the keys, MIXNUM, then the kappa columns, which
+    // come after the etas in the frame - so the model's spelling is the one
+    // renamed (#764 review, finding 1); the column order is unchanged.
+    let n_key = if has_mixnum { 4 } else { 3 };
+    let first_kappa = n_key + table.eta_names.len();
+    let claim_order: Vec<usize> = (0..n_key)
+        .chain(first_kappa..first_varying_candidate)
+        .chain(n_key..first_kappa)
+        .chain(first_varying_candidate..names.len())
+        .collect();
+    let unique = unique_column_names_in_order(&names, &claim_order);
+    // `varying` names individual / `[derived]` columns: point it at their
+    // column, renamed or not.
+    let varying: Vec<String> = table
+        .varying
+        .iter()
+        .map(|v| {
+            (first_varying_candidate..names.len())
+                .find(|&j| &names[j] == v)
+                .map_or_else(|| v.clone(), |j| unique[j].clone())
+        })
+        .collect();
+    let pairs: Vec<(&str, Robj)> = unique.iter().map(String::as_str).zip(values).collect();
     let mut df = finish_df(pairs, nrow);
     df.set_class(&["ferx_sim_parameters", "data.frame"]).unwrap();
-    df.set_attrib("varying", table.varying.clone()).unwrap();
+    df.set_attrib("varying", varying).unwrap();
     df
 }
 
@@ -8979,14 +9037,21 @@ fn build_individual_estimates(
         return ().into();
     }
 
+    // An individual parameter named `ID` would be a second `ID` column, and
+    // `$ID` / a join on it would read whichever R picks: the key keeps its name
+    // and the parameter becomes `ID.1` (#764 review, finding 2).
+    let raw: Vec<String> = std::iter::once("ID".to_string())
+        .chain(columns.iter().map(|c| c.to_string()))
+        .collect();
+    let labels = unique_column_names(&raw);
     let mut pairs: Vec<(&str, Robj)> = Vec::with_capacity(columns.len() + 1);
-    pairs.push(("ID", ids.into()));
-    for &name in &columns {
+    pairs.push((labels[0].as_str(), ids.into()));
+    for (j, &name) in columns.iter().enumerate() {
         let values: Vec<f64> = maps
             .iter()
             .map(|m| m.get(name).copied().unwrap_or(f64::NAN))
             .collect();
-        pairs.push((name, values.into()));
+        pairs.push((labels[j + 1].as_str(), values.into()));
     }
     let mut df = List::from_pairs(pairs);
     df.set_class(&["data.frame"]).unwrap();
