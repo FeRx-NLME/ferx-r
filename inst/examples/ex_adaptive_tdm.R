@@ -10,8 +10,9 @@ ex <- ferx_example("adaptive_tdm")
 
 res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L)
 
-# Four tables: concentration trajectories, the realized dose ledger, the
-# per-decision log (including holds), and the per-subject outcome metrics.
+# Five tables: concentration trajectories, the realized dose ledger, the
+# per-decision log (including holds), the per-subject outcome metrics, and
+# each parameter draw (empty here: no `uncertainty =`).
 str(res, max.level = 1)
 
 # For the first subject/replicate: the trough the controller observed at each

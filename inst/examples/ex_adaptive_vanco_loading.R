@@ -11,8 +11,9 @@ ex <- ferx_example("adaptive_vanco_loading")
 
 res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 10L, seed = 1L)
 
-# Four tables: concentration trajectories, the realized dose ledger, the
-# per-decision log, and the per-subject outcome metrics.
+# Five tables: concentration trajectories, the realized dose ledger, the
+# per-decision log, the per-subject outcome metrics, and each parameter draw
+# (empty here: no `uncertainty =`).
 str(res, max.level = 1)
 
 # The trajectory for the first subject/replicate: concentration starts high from
