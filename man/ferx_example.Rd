@@ -389,6 +389,20 @@ need not be dose-free. Note the loading dose is a base dose, so it is absent
 from the returned dose ledger and from \code{metrics$CUM_DOSE} (which counts
 controller doses only). Run with \code{\link{ferx_simulate_adaptive}}
 (ferx-core #702 / #929).}
+\item{vine_tail_iv}{One-compartment IV bolus PK with asymmetric lower-tail
+dependence between \code{ETA_CL} and \code{ETA_V} (Clayton copula:
+Kendall \eqn{\tau \approx 0.40}, \eqn{\lambda_L \approx 0.59},
+\eqn{\lambda_U = 0}), fitted under SAEM with
+\code{omega_dist = "vine"} and \code{vine_marginals = "gaussian"}
+(ferx-core #225). Compare its QMC importance-sampled \code{ofv},
+\code{aic}, and \code{bic} against \code{vine_tail_iv_gaussian}.}
+\item{vine_tail_iv_gaussian}{Symmetric multivariate-Gaussian SAEM baseline
+(\code{block_omega} + \code{saem_ofv = "imp"}) on the same
+\code{vine_tail_iv.csv} dataset, for direct \eqn{\Delta\text{OFV}}
+comparison against \code{vine_tail_iv}.}
+\item{warfarin_vine}{One-compartment oral warfarin PK fitted with SAEM and
+a 3-dimensional regular-vine copula (\code{omega_dist = "vine"}) over
+\code{(ETA_CL, ETA_V, ETA_KA)} on \code{warfarin.csv}.}
 }
 Call \code{ferx_example()} with no arguments to list all available names.
 

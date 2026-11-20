@@ -105,7 +105,10 @@ validate_fit_for_params <- function(fit) {
     stat_min = as.numeric(cs$min),
     stat_max = as.numeric(cs$max),
     stat_mode = as.numeric(cs$mode),
-    stat_levels = lapply(cs$levels, as.numeric)
+    stat_levels = lapply(cs$levels, as.numeric),
+    # Fitted regular-vine random-effect distribution (`omega_dist = "vine"`):
+    # serialized `VineFitParams` JSON, or "" on Gaussian fits.
+    vine_json = as.character(fit$vine_copula$json %||% "")
   ))
 }
 

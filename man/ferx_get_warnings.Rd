@@ -49,6 +49,7 @@ Other diagnostics:
 \code{\link[=ferx_gam_screen]{ferx_gam_screen()}},
 \code{\link[=ferx_runlog_iters]{ferx_runlog_iters()}},
 \code{\link[=ferx_trace]{ferx_trace()}},
+\code{\link[=ferx_vine_density]{ferx_vine_density()}},
 \code{\link[=plot.ferx_bootstrap]{plot.ferx_bootstrap()}},
 \code{\link[=plot.ferx_fit]{plot.ferx_fit()}},
 \code{\link[=summary.ferx_fit]{summary.ferx_fit()}}

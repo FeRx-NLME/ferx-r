@@ -1536,7 +1536,7 @@ test_that("summary.ferx_fit returns a ferx_summary with expected fields", {
     "total_ebe_fallbacks", "model_structure", "profiled_blocks",
     "call_settings",
     "model_file_settings", "sir_ess", "importance_sampling", "saem_objective",
-    "bayes", "vi",
+    "bayes", "vi", "vine_copula", "vine_corrected_ofv",
     "warnings",
     "uses_sde", "ode_linear_exact", "dw_statistic", "iwres_lag1_r",
     "saem_n_subjects_hmc", "mixture_overrides", "se_mixture_overrides"
@@ -1547,6 +1547,14 @@ test_that("summary.ferx_fit passes through the VI result (#507)", {
   vi <- list(neg_two_elbo = 317.2, converged = TRUE, family = "full_rank",
              elbo_tightness_ratio = 2.1, superseded_by = NA_character_)
   expect_identical(summary(make_fake_fit(vi = vi))$vi, vi)
+})
+test_that("summary.ferx_fit passes through vine_copula and vine_corrected_ofv (#225)", {
+  expect_null(summary(make_fake_fit())$vine_copula)
+  expect_null(summary(make_fake_fit())$vine_corrected_ofv)
+  vc <- list(n_free_params = 3L)
+  s <- summary(make_fake_fit(vine_copula = vc, vine_corrected_ofv = 123.45))
+  expect_identical(s$vine_copula, vc)
+  expect_identical(s$vine_corrected_ofv, 123.45)
 })
 test_that("summary.ferx_fit passes through call_settings", {
   fit <- make_fake_fit(call_settings = list(optimizer = "slsqp", max_iter = 200L))

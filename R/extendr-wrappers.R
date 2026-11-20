@@ -547,4 +547,10 @@ ferx_rust_globalsearch_option_keys <- function() {
   .Call("wrap__ferx_rust_globalsearch_option_keys")
 }
 
+#' @title Internal Rust backend binding
+#' @keywords internal
+ferx_rust_vine_density <- function(vine_json, eta_flat, n_rows, n_cols, marginal_col, log_scale) {
+  .Call("wrap__ferx_rust_vine_density", vine_json, eta_flat, as.integer(n_rows), as.integer(n_cols), as.integer(marginal_col), log_scale)
+}
+
 # nolint end

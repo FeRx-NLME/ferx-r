@@ -1145,6 +1145,16 @@
   # `ferx_load_fit()` uses. NULL for every method but VI.
   result$vi <- .ferx_vi_from_raw(result$vi, result$eta_names, result$kappa_names)
 
+  # Regular-vine random-effect distribution (`omega_dist = "vine"`, #225),
+  # normalized identically for fresh and reloaded fits; NULL for Gaussian fits.
+  result["vine_copula"] <- list(.ferx_vine_from_raw(result$vine_copula))
+  if (!is.null(result$vine_corrected_ofv)) {
+    vco <- suppressWarnings(as.numeric(unlist(result$vine_corrected_ofv, use.names = FALSE)))
+    result["vine_corrected_ofv"] <- list(if (length(vco) == 1L && is.finite(vco)) vco else NULL)
+  } else {
+    result["vine_corrected_ofv"] <- list(NULL)
+  }
+
   # Normalize trace_path: NULL/empty means no trace was written
   tp <- result$trace_path
   if (is.null(tp) || length(tp) == 0L || !nzchar(tp[[1L]])) {

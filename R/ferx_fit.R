@@ -719,9 +719,35 @@
 #'     \item{\code{adapt_interval}}{How often (in iterations) the MH step
 #'       scales are adapted under \code{scale_adaptation = "interval"}
 #'       (default 50). Also governs the IOV scales under either rule.}
-#'     \item{\code{omega_burnin}}{Initial iterations during which Omega is held
-#'       fixed while the sampler warms up (default 20). Guards against Omega
-#'       collapse on sparse data. Set to \code{0} to disable.}
+#'     \item{\code{omega_burnin} / \code{saem_omega_burnin}}{Initial iterations
+#'       during which Omega is held fixed while the sampler warms up (default
+#'       20). Guards against Omega collapse on sparse data. Set to \code{0} to
+#'       disable.}
+#'     \item{\code{omega_dist} / \code{saem_omega_dist}}{(default
+#'       \code{"gaussian"}) Between-subject random-effect joint distribution
+#'       under \code{method = "saem"} (ferx-core #225). \code{"vine"} (aliases
+#'       \code{"vine_copula"}, \code{"copula"}) replaces the multivariate
+#'       Gaussian prior on \eqn{\eta} with zero-mean flexible marginals coupled
+#'       by a Dissmann regular-vine (R-vine) copula over \code{independence},
+#'       \code{gaussian}, \code{student_t}, \code{frank}, and rotated
+#'       \code{clayton} / \code{gumbel} pair-copulas (\eqn{0^\circ},
+#'       \eqn{90^\circ}, \eqn{180^\circ}, \eqn{270^\circ}), selected by BIC
+#'       after a Gaussian SAEM warm-up and refined by Robbins-Monro score and
+#'       information stochastic approximation. Individual EBEs are computed as
+#'       multi-start vine MAP estimates, and \code{fit$ofv} (also echoed on
+#'       \code{fit$vine_corrected_ofv}) is evaluated by adaptive
+#'       Owen-scrambled Sobol QMC importance sampling with a defensive
+#'       vine-prior mixture, directly comparable to Gaussian SAEM with
+#'       \code{saem_ofv = "imp"}. Inspect fitted marginals and pair-copulas on
+#'       \code{fit$vine_copula} and evaluate densities via
+#'       \code{\link{ferx_vine_density}}. Standalone \code{"saem"} only (refused
+#'       with method chains, \code{sir = TRUE}, and \code{[mixture]} models).}
+#'     \item{\code{vine_marginals}}{(default \code{"auto"}) Marginal family
+#'       rule under \code{omega_dist = "vine"}: \code{"auto"} selects per-ETA
+#'       zero-mean \code{normal}, \code{student_t}, \code{skew_normal}, or
+#'       Azzalini \code{skew_t} marginals by BIC; \code{"gaussian"} (alias
+#'       \code{"normal"}) pins zero-mean Gaussian marginals to isolate pure
+#'       copula rank and tail dependence.}
 #'     \item{\code{seed} / \code{saem_seed}}{RNG seed for the SAEM
 #'       Metropolis-Hastings sampler (default 12345). Independent of
 #'       \code{multi_start_seed}.}
@@ -3747,6 +3773,14 @@ print.ferx_fit <- function(x, ...) {
     }
   }
 
+  # VINE COPULA (`omega_dist = "vine"`, #225)
+  vine_lines <- .ferx_vine_report_lines(x)
+  if (!is.null(vine_lines)) {
+    cat("\n", .ferx_style("VINE COPULA  (regular-vine random-effect model)", "bold"), "\n", sep = "")
+    cat(strrep("-", 60), "\n", sep = "")
+    cat(paste0(vine_lines, "\n"), sep = "")
+  }
+
   # OMEGA_IOV (Inter-Occasion Variability)
   if (!is.null(x$omega_iov)) {
     cat("\n", .ferx_style("OMEGA_IOV  (inter-occasion variability)", "bold"), "\n", sep = "")
@@ -4148,6 +4182,8 @@ summary.ferx_fit <- function(object, ...) {
     bayes = x$bayes,
     # The VI result (#507), for the VI block print.ferx_summary() shows.
     vi = x$vi,
+    vine_copula = x$vine_copula,
+    vine_corrected_ofv = x$vine_corrected_ofv,
     warnings = x$warnings,
     uses_sde = isTRUE(x$uses_sde),
     ode_linear_exact = isTRUE(x$ode_linear_exact),
@@ -4253,6 +4289,11 @@ print.ferx_summary <- function(x, ...) {
   if (!is.null(vi_lines)) {
     cat("Variational inference:\n")
     cat(paste0("  ", vi_lines, "\n"), sep = "")
+  }
+  vine_lines <- .ferx_vine_report_lines(x)
+  if (!is.null(vine_lines)) {
+    cat("Vine copula:\n")
+    cat(paste0(vine_lines, "\n"), sep = "")
   }
   cat(sprintf(
     "Subjects: %d  Obs: %d  Params: %s  Iter: %d\n",

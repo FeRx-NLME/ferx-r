@@ -1031,6 +1031,7 @@ fn ferx_rust_simulate_from_fit(
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
+        let fitted_vine = fit_vine_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
             .map_err(|e| e.refusal(""))?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
@@ -1049,6 +1050,7 @@ fn ferx_rust_simulate_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            fitted_vine.as_ref(),
             MixtureClasses::Read,
         ) {
             Ok(p) => p,
@@ -1214,6 +1216,7 @@ fn ferx_rust_simulate_adaptive_from_fit(
             residual_rho_pairs: &residual_rho_pairs,
             mixture_overrides: &mixture_overrides,
             fitted: fit_bindings_from_r(&fit_bindings)?,
+            vine: fit_vine_from_r(&fit_bindings)?,
         };
         simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, Some(fit), etas)
     })
@@ -1275,6 +1278,7 @@ struct AdaptiveFit<'a> {
     residual_rho_pairs: &'a [i32],
     mixture_overrides: &'a [f64],
     fitted: DataBindings,
+    vine: Option<ferx_core::stats::vine_copula::VineFitParams>,
 }
 
 /// The body of both adaptive entry points: at the model file's initial values
@@ -1358,6 +1362,7 @@ fn simulate_adaptive(
                 f.residual_rho,
                 f.residual_rho_pairs,
                 f.mixture_overrides,
+                f.vine.as_ref(),
                 MixtureClasses::Read,
             )
             .map_err(|e| prefix_refusal("ferx_simulate_adaptive: ", e))?;
@@ -1480,7 +1485,7 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult) -> Robj
         SIGNAL_MEAN = m.iter().map(|e| e.signal_mean).collect::<Vec<Option<f64>>>(),
         PCT_TIME_IN_WINDOW = m
             .iter()
-            .map(|e| e.pct_time_in_window)
+            .map(|e| e.pct_readings_in_window)
             .collect::<Vec<Option<f64>>>(),
         AUC_TARGET_ATTAINMENT = m
             .iter()
@@ -1658,6 +1663,7 @@ fn ferx_rust_simulate_with_uncertainty(
         fit_result.profiled_levels_at_bound =
             profiled_levels_at_bound_from_r(&fit_bindings, &template.theta_names)?;
         fit_result.held_at_bound = held_at_bound_from_r(&fit_bindings, template)?;
+        fit_result.vine_params = fit_vine_from_r(&fit_bindings)?;
 
         let opts = ferx_core::SimulateUncertaintyOptions {
             n_uncertainty_draws: n_uncertainty_draws.max(0) as usize,
@@ -1817,6 +1823,7 @@ fn ferx_rust_predict_from_fit(
         // Place the design on the fit's theta layout before anything reads theta
         // by position (ferx-r #370); see `bind_design_from_fit`.
         let fitted = fit_bindings_from_r(&fit_bindings)?;
+        let fitted_vine = fit_vine_from_r(&fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
             .map_err(|e| e.refusal(""))?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
@@ -1835,6 +1842,7 @@ fn ferx_rust_predict_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            fitted_vine.as_ref(),
             MixtureClasses::NotRead,
         ) {
             Ok(p) => p,
@@ -2045,6 +2053,7 @@ fn ferx_rust_predict_survival_from_fit(
             None
         };
 
+        let fitted_vine = fit_vine_from_r(&fit_bindings)?;
         let params = match params_from_fit(
             &parsed.model,
             &theta,
@@ -2056,6 +2065,7 @@ fn ferx_rust_predict_survival_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            fitted_vine.as_ref(),
             MixtureClasses::NotRead,
         ) {
             Ok(p) => p,
@@ -2414,6 +2424,7 @@ impl VpcRun {
             .map_err(|e| format!("Error parsing model: {e}"))?;
         let mut population = read_vpc_tte_population(&parsed, data_path)?;
         let fitted = fit_bindings_from_r(fit_bindings)?;
+        let fitted_vine = fit_vine_from_r(fit_bindings)?;
         bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
             .map_err(|e| e.refusal(""))?;
         let notes = derive_fit_occasions(entry_point, &parsed, &mut population, iov_occasion)?;
@@ -2428,6 +2439,7 @@ impl VpcRun {
             fit.residual_rho,
             fit.residual_rho_pairs,
             fit.mixture_overrides,
+            fitted_vine.as_ref(),
             MixtureClasses::Read,
         )?;
         Ok(VpcRun { parsed, population, params, notes })
@@ -3008,6 +3020,7 @@ fn ferx_rust_npde_from_fit(
         let occasion_notes =
             derive_fit_occasions("ferx_calc_npde", &parsed, &mut population, iov_occasion)?;
         let notes = [notes, occasion_notes.into_vec()].concat();
+        let fitted_vine = fit_vine_from_r(&fit_bindings)?;
 
         let params = match params_from_fit(
             &parsed.model,
@@ -3020,6 +3033,7 @@ fn ferx_rust_npde_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            fitted_vine.as_ref(),
             MixtureClasses::Read,
         ) {
             Ok(p) => p,
@@ -5291,6 +5305,32 @@ fn fit_bindings_from_r(r: &List) -> std::result::Result<DataBindings, String> {
     Ok(out)
 }
 
+/// Decode `fit_bindings$vine_json` (serialized `VineFitParams`) when the fit
+/// ran under `omega_dist = "vine"`; `None` for Gaussian fits (`""` or `NULL`).
+fn fit_vine_from_r(
+    r: &List,
+) -> std::result::Result<Option<ferx_core::stats::vine_copula::VineFitParams>, String> {
+    let cols: HashMap<&str, Robj> = r.iter().collect();
+    let Some(v) = cols.get("vine_json") else {
+        return Ok(None);
+    };
+    if v.is_null() {
+        return Ok(None);
+    }
+    let vec = v
+        .as_string_vector()
+        .ok_or_else(|| "internal: `fit_bindings$vine_json` is not a character vector".to_string())?;
+    let Some(s) = vec.first() else {
+        return Ok(None);
+    };
+    if s.trim().is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str::<ferx_core::stats::vine_copula::VineFitParams>(s)
+        .map(Some)
+        .map_err(|e| format!("`fit$vine_copula` could not be decoded: {e}"))
+}
+
 // -- Helper: parse a single R-side propensity-matching token into an
 //    Option<MatchMethod> ("none" → None disables matching). --
 
@@ -5575,6 +5615,7 @@ fn params_from_fit(
     residual_rho: &[f64],
     residual_rho_pairs: &[i32],
     mixture_overrides: &[f64],
+    vine_params: Option<&ferx_core::stats::vine_copula::VineFitParams>,
     classes: MixtureClasses,
 ) -> std::result::Result<ModelParameters, String> {
     let template = &model.default_params;
@@ -5678,6 +5719,9 @@ fn params_from_fit(
         mixture,
         residual_correlations,
         residual_correlation_fixed: template.residual_correlation_fixed.clone(),
+        vine_dist: vine_params.map(|vp| {
+            std::sync::Arc::new(ferx_core::stats::vine_copula::VineCopulaOmega::from_fit_params(vp))
+        }),
     })
 }
 
@@ -6069,6 +6113,8 @@ fn default_fit_result(
         environment: ferx_core::environment::EnvironmentInfo::default(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
+        vine_params: None,
+        vine_corrected_ofv: None,
     }
 }
 
@@ -8083,6 +8129,11 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         .map(Robj::from)
         .unwrap_or_else(null);
     let mixture_override_params = mixture_override_params_to_r(result);
+    let vine_copula = match &result.vine_params {
+        Some(vp) => vine_params_to_r(vp)?,
+        None => null(),
+    };
+    let vine_corrected_ofv = result.vine_corrected_ofv.map(Robj::from).unwrap_or_else(null);
 
     // One row per theta level-block level (ferx-r #370), with its fitted value
     // (#430) and its se and SIR interval (#528); zero rows for a model with no
@@ -8396,8 +8447,163 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         // covariate columns); NULL unless the model declares a [covariates] block.
         covtab            = covtab,
         // covariate_types: named char vector covariate -> "continuous"/"categorical".
-        covariate_types   = covariate_types
+        covariate_types   = covariate_types,
+        vine_copula       = vine_copula,
+        vine_corrected_ofv = vine_corrected_ofv
     ))
+}
+
+/// Marshal `FitResult::vine_params` (`VineFitParams`) into a structured R list
+/// (`marginals`, `trees`, `n_free_params`, and lossless `json` for simulation /
+/// `ferx_vine_density`). `.ferx_fit_from_raw()` builds the tidy `marginals`,
+/// `pairs`, and `params` data frames from this representation on both fresh and
+/// loaded fits.
+fn vine_params_to_r(
+    vp: &ferx_core::stats::vine_copula::VineFitParams,
+) -> std::result::Result<Robj, String> {
+    let json = serde_json::to_string(vp)
+        .map_err(|e| format!("cannot serialize `fit$vine_copula`: {e}"))?;
+
+    let named_double = |items: &[(String, f64)]| -> Robj {
+        let vals: Vec<f64> = items.iter().map(|(_, v)| *v).collect();
+        let names: Vec<&str> = items.iter().map(|(k, _)| k.as_str()).collect();
+        let mut r: Robj = vals.into();
+        if !names.is_empty() {
+            let _ = r.set_names(names);
+        }
+        r
+    };
+
+    let m_eta: Vec<String> = vp.marginals.iter().map(|m| m.eta.clone()).collect();
+    let m_family: Vec<String> = vp.marginals.iter().map(|m| m.family.clone()).collect();
+    let m_mean: Vec<f64> = vp.marginals.iter().map(|m| m.mean).collect();
+    let m_sd: Vec<f64> = vp.marginals.iter().map(|m| m.sd).collect();
+    let m_skew: Doubles = vp
+        .marginals
+        .iter()
+        .map(|m| m.skewness.map_or_else(Rfloat::na, Rfloat::from))
+        .collect();
+    let m_kurt: Doubles = vp
+        .marginals
+        .iter()
+        .map(|m| m.excess_kurtosis.map_or_else(Rfloat::na, Rfloat::from))
+        .collect();
+    let m_params: Vec<Robj> = vp.marginals.iter().map(|m| named_double(&m.params)).collect();
+    let m_se: Vec<Robj> = vp.marginals.iter().map(|m| named_double(&m.se)).collect();
+
+    let marginals = list!(
+        eta = m_eta,
+        family = m_family,
+        mean = m_mean,
+        sd = m_sd,
+        skewness = m_skew,
+        excess_kurtosis = m_kurt,
+        params = List::from_values(m_params),
+        se = List::from_values(m_se)
+    );
+
+    let mut trees_out: Vec<Robj> = Vec::with_capacity(vp.trees.len());
+    for tr in &vp.trees {
+        let mut pairs_out: Vec<Robj> = Vec::with_capacity(tr.pairs.len());
+        for p in &tr.pairs {
+            let c = &p.copula;
+            pairs_out.push(
+                list!(
+                    label = p.label.clone(),
+                    family = c.family.clone(),
+                    rotation = c.rotation as i32,
+                    params = named_double(&c.params),
+                    se = named_double(&c.se),
+                    kendall_tau = c.kendall_tau,
+                    tail_dep_lower = c.tail_dep_lower,
+                    tail_dep_upper = c.tail_dep_upper
+                )
+                .into(),
+            );
+        }
+        trees_out.push(
+            list!(
+                tree = tr.tree as i32,
+                pairs = List::from_values(pairs_out)
+            )
+            .into(),
+        );
+    }
+
+    Ok(list!(
+        marginals = marginals,
+        trees = List::from_values(trees_out),
+        n_free_params = vp.n_free_params() as i32,
+        json = json
+    )
+    .into())
+}
+
+/// Evaluate a fitted `VineCopulaOmega` density (or 1-D marginal density when
+/// `marginal_col >= 1`, 1-based) over `n_rows` points flattened row-major in
+/// `eta_flat`.
+///
+/// @keywords internal
+#[extendr]
+fn ferx_rust_vine_density(
+    vine_json: &str,
+    eta_flat: Vec<f64>,
+    n_rows: i32,
+    n_cols: i32,
+    marginal_col: i32,
+    log_scale: bool,
+) -> Doubles {
+    entry(move || {
+        use ferx_core::stats::random_effects::RandomEffectDistribution;
+        let vp: ferx_core::stats::vine_copula::VineFitParams = serde_json::from_str(vine_json)
+            .map_err(|e| format!("ferx_vine_density: invalid vine specification: {e}"))?;
+        let vine = ferx_core::stats::vine_copula::VineCopulaOmega::from_fit_params(&vp);
+        let nr = n_rows.max(0) as usize;
+        let nc = n_cols.max(0) as usize;
+        if eta_flat.len() != nr * nc {
+            return Err(format!(
+                "ferx_vine_density: `eta_flat` length {} does not match n_rows * n_cols = {}",
+                eta_flat.len(),
+                nr * nc
+            ));
+        }
+
+        let mut out = Vec::with_capacity(nr);
+        if marginal_col >= 1 {
+            let j = (marginal_col - 1) as usize;
+            if j >= vine.d {
+                return Err(format!(
+                    "ferx_vine_density: marginal index {} out of range (1..={})",
+                    marginal_col, vine.d
+                ));
+            }
+            if nc != 1 {
+                return Err(format!(
+                    "ferx_vine_density: 1-D marginal evaluation expects 1 column, got {nc}"
+                ));
+            }
+            for &x in &eta_flat {
+                let lp = vine.marginals[j].log_pdf(x);
+                out.push(Rfloat::from(if log_scale { lp } else { lp.exp() }));
+            }
+        } else {
+            if nc != vine.d {
+                return Err(format!(
+                    "ferx_vine_density: point matrix has {nc} columns, but the fitted vine has {} random effects",
+                    vine.d
+                ));
+            }
+            for row in eta_flat.chunks_exact(nc) {
+                let val = if log_scale {
+                    vine.log_density(row)
+                } else {
+                    vine.density(row)
+                };
+                out.push(Rfloat::from(val));
+            }
+        }
+        Ok(Doubles::from_values(out))
+    })
 }
 
 /// Build the R-side `neural_networks` list from `result.neural_networks`.
@@ -16204,4 +16410,5 @@ extendr_module! {
     fn ferx_rust_globalsearch;
     fn ferx_rust_globalsearch_columns;
     fn ferx_rust_globalsearch_option_keys;
+    fn ferx_rust_vine_density;
 }

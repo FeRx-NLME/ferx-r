@@ -760,9 +760,35 @@ it is off except for a model with \code{iiv_on_ruv}, which gets
 \item{\code{adapt_interval}}{How often (in iterations) the MH step
 scales are adapted under \code{scale_adaptation = "interval"}
 (default 50). Also governs the IOV scales under either rule.}
-\item{\code{omega_burnin}}{Initial iterations during which Omega is held
-fixed while the sampler warms up (default 20). Guards against Omega
-collapse on sparse data. Set to \code{0} to disable.}
+\item{\code{omega_burnin} / \code{saem_omega_burnin}}{Initial iterations
+during which Omega is held fixed while the sampler warms up (default
+20). Guards against Omega collapse on sparse data. Set to \code{0} to
+disable.}
+\item{\code{omega_dist} / \code{saem_omega_dist}}{(default
+\code{"gaussian"}) Between-subject random-effect joint distribution
+under \code{method = "saem"} (ferx-core #225). \code{"vine"} (aliases
+\code{"vine_copula"}, \code{"copula"}) replaces the multivariate
+Gaussian prior on \eqn{\eta} with zero-mean flexible marginals coupled
+by a Dissmann regular-vine (R-vine) copula over \code{independence},
+\code{gaussian}, \code{student_t}, \code{frank}, and rotated
+\code{clayton} / \code{gumbel} pair-copulas (\eqn{0^\circ},
+\eqn{90^\circ}, \eqn{180^\circ}, \eqn{270^\circ}), selected by BIC
+after a Gaussian SAEM warm-up and refined by Robbins-Monro score and
+information stochastic approximation. Individual EBEs are computed as
+multi-start vine MAP estimates, and \code{fit$ofv} (also echoed on
+\code{fit$vine_corrected_ofv}) is evaluated by adaptive
+Owen-scrambled Sobol QMC importance sampling with a defensive
+vine-prior mixture, directly comparable to Gaussian SAEM with
+\code{saem_ofv = "imp"}. Inspect fitted marginals and pair-copulas on
+\code{fit$vine_copula} and evaluate densities via
+\code{\link{ferx_vine_density}}. Standalone \code{"saem"} only (refused
+with method chains, \code{sir = TRUE}, and \code{[mixture]} models).}
+\item{\code{vine_marginals}}{(default \code{"auto"}) Marginal family
+rule under \code{omega_dist = "vine"}: \code{"auto"} selects per-ETA
+zero-mean \code{normal}, \code{student_t}, \code{skew_normal}, or
+Azzalini \code{skew_t} marginals by BIC; \code{"gaussian"} (alias
+\code{"normal"}) pins zero-mean Gaussian marginals to isolate pure
+copula rank and tail dependence.}
 \item{\code{seed} / \code{saem_seed}}{RNG seed for the SAEM
 Metropolis-Hastings sampler (default 12345). Independent of
 \code{multi_start_seed}.}
@@ -1160,7 +1186,7 @@ bundle written before it existed.}
 \item{interaction}{Logical; the interaction flag the fitted objective
 ran under. \code{TRUE} for FOCEI and \code{FALSE} for FOCE; SAEM, VI and
 Gauss-Newton inherit it from the options they ran under.
-\code{\link{ferx_covariance}()} and \code{\link{ferx_sir}()} hand it back to the engine.}
+\code{\link[=ferx_covariance]{ferx_covariance()}} and \code{\link[=ferx_sir]{ferx_sir()}} hand it back to the engine.}
 \item{n_iterations}{Number of outer iterations run}
 \item{ofv}{Objective function value (-2 log-likelihood). The
 \emph{penalized} objective when the model declares a \code{prior(...)}
@@ -1590,12 +1616,12 @@ method. Prefer \code{gradient_used} for display.}
 optimizer's gradient method.}
 \item{ferx_version}{ferx-core library version string.}
 \item{bundle}{The fit's \code{.fitrx} bundle as a raw vector, as ferx-core
-  serialized it. These bytes are the fit: \code{\link{ferx_save_fit}} writes
-  them, and \code{\link{ferx_covariance}}, \code{\link{ferx_sir}} and
-  \code{\link{ferx_calc_npde}} read them and return a new fit with new ones,
-  so a change made to the list by hand reaches none of these.
-  \code{ferx_load_fit()} sets it to the file's bytes. Roughly doubles the size
-  of a fit saved with \code{saveRDS()}.}
+serialized it. These bytes are the fit: \code{\link{ferx_save_fit}} writes
+them, and \code{\link{ferx_covariance}}, \code{\link{ferx_sir}} and
+\code{\link{ferx_calc_npde}} read them and return a new fit with new ones,
+so a change made to the list by hand reaches none of these.
+\code{ferx_load_fit()} sets it to the file's bytes. Roughly doubles the size
+of a fit saved with \code{saveRDS()}.}
 \item{model_text}{Verbatim content of the \code{.ferx} model file as a
 character string. \code{NULL} for in-memory fits that were never
 associated with a file, or for fits produced by older engine versions.
@@ -2798,16 +2824,16 @@ starting values before a full run.
 \item \code{\link{plot.ferx_fit}} - convergence trace plot.
 }
 
-Other fitting: 
-\code{\link{ferx_bootstrap}()},
-\code{\link{ferx_bootstrap_summarize}()},
-\code{\link{ferx_check_init}()},
-\code{\link{ferx_coef}()},
-\code{\link{ferx_collect}()},
-\code{\link{ferx_covariance}()},
-\code{\link{ferx_inits_from_nca}()},
-\code{\link{ferx_sir}()},
-\code{\link{ferx_stop}()},
-\code{\link{print.ferx_job}()}
+Other fitting:
+\code{\link[=ferx_bootstrap]{ferx_bootstrap()}},
+\code{\link[=ferx_bootstrap_summarize]{ferx_bootstrap_summarize()}},
+\code{\link[=ferx_check_init]{ferx_check_init()}},
+\code{\link[=ferx_coef]{ferx_coef()}},
+\code{\link[=ferx_collect]{ferx_collect()}},
+\code{\link[=ferx_covariance]{ferx_covariance()}},
+\code{\link[=ferx_inits_from_nca]{ferx_inits_from_nca()}},
+\code{\link[=ferx_sir]{ferx_sir()}},
+\code{\link[=ferx_stop]{ferx_stop()}},
+\code{\link[=print.ferx_job]{print.ferx_job()}}
 }
 \concept{fitting}
