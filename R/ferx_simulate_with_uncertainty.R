@@ -203,6 +203,17 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
 # empty branches give the Rust side something to ignore - it switches on
 # `method` and only inspects the relevant arrays.
 validate_fit_for_uncertainty <- function(fit, method) {
+  if (method == "none") {
+    # No uncertainty requested (`ferx_simulate_adaptive()` without
+    # `uncertainty`): the empty payload, whatever the fit carries.
+    return(list(
+      cov_matrix_flat    = numeric(0),
+      cov_matrix_dim     = 0L,
+      sir_resamples_flat = numeric(0),
+      sir_resamples_n    = 0L,
+      sir_resamples_dim  = 0L
+    ))
+  }
   if (method == "asymptotic") {
     cov <- fit$cov_matrix
     if (is.null(cov) || length(cov) == 0L) {

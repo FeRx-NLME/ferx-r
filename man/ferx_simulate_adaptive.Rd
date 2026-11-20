@@ -13,7 +13,8 @@ ferx_simulate_adaptive(
   max_decisions = 0L,
   fit = NULL,
   etas = NULL,
-  unmatched = c("refuse", "draw")
+  unmatched = c("refuse", "draw"),
+  uncertainty = NULL
 )
 }
 \arguments{
@@ -95,9 +96,33 @@ data subject (\code{"01"} against \code{"1"}, say) is warned about,
 since every subject was then drawn. IDs are matched as text; a numeric
 \code{ID} is spelled as a data.frame \code{data} writes it. Passing
 \code{unmatched} without \code{etas} has no effect and warns.}
+
+\item{uncertainty}{Optional parameter uncertainty to propagate from
+\code{fit}: \code{NULL} (the default) simulates at the fit's point
+estimates; otherwise \code{list(method = , n_draws = )}, where
+\code{method} is \code{"asymptotic"} (the default; a multivariate normal
+on \code{fit$cov_matrix}, so the fit needs its covariance step) or
+\code{"sir"} (resampled from the fit's kept SIR draws, so the fit needs
+\code{sir_keep_samples = TRUE}), and \code{n_draws} (a positive whole
+number) is the number of parameter sets. Every subject and each of the
+\code{n_sim} replicates is simulated under every draw, so a run has
+\code{n_draws * n_sim} replicates per subject. The draws are the
+sampler \code{\link{ferx_simulate_with_uncertainty}} uses, with a FIX or
+held-at-bound parameter kept at its estimate. They come from a stream of
+their own: draw 1 uses the random effects the same \code{seed} gives
+without uncertainty (under draw 1's omega), so draw 1 does not depend on
+\code{n_draws}, and each further draw simulates new virtual patients.
+Requires \code{fit}, and cannot be combined with \code{etas}: each
+supplied eta was estimated at the fit's theta, so pairing it with a drawn
+theta would not describe the same patient (refused, coded
+\code{E_SUPPLIED_ETAS}). Dose expressions that read only theta are
+evaluated at the fit's estimate in every draw, while a
+\code{dose_knowledge = oracle} subject is dosed from its own draw's
+parameters. Warnings and refusals name the replicate as
+\code{"(draw d, sim s)"} only in a run with uncertainty.}
 }
 \value{
-A list of four data frames:
+A list of five data frames:
 \describe{
 \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 OBSERVED - the per-observation predictions, as in
@@ -143,7 +168,22 @@ and DOSE_ORACLE (\code{TRUE} for a subject whose eta was drawn and
 whose dose expressions read its drawn individual parameters, under
 the block's \code{dose_knowledge = oracle}: a perfect-information
 comparison arm, never a dosing rule).}
+\item{\code{parameters}}{The parameter set each draw was simulated
+under: one row per draw, \code{DRAW} and then one column per
+estimated quantity - theta, the omega elements, sigma, the IOV
+(kappa) omega elements, a \code{[mixture]} model's per-class
+overrides and the \code{block_sigma} correlations - named as the
+rows of \code{fit$cov_matrix} (\code{TVCL}, \code{ETA_CL},
+\code{ETA_V ~ ETA_CL}, \code{EPS_PROP}, \code{ETA_CL (class 2)},
+...) and on the scale \code{fit$theta}, \code{fit$omega} and
+\code{fit$sigma} report them. Join it to the other tables by
+\code{DRAW}. Without \code{uncertainty} it has these columns and
+no rows.}
 }
+
+\code{DRAW} on every table is the parameter draw a row was simulated
+under: \code{1} throughout without \code{uncertainty}, \code{1} to
+\code{n_draws} with it.
 }
 \description{
 Runs a forward simulation in which the dosing regimen is decided at run time
@@ -217,6 +257,11 @@ table(res$metrics$ID, res$metrics$ETA_SUPPLIED)
 
 # With a fit to observed data, each fitted subject at its own EBEs:
 # ferx_simulate_adaptive(model, data, fit = fit, etas = fit$ebe_etas)
+
+# Or propagate the fit's parameter uncertainty: 50 parameter draws.
+# res <- ferx_simulate_adaptive(model, data, fit = fit, seed = 1L,
+#                               uncertainty = list(n_draws = 50L))
+# merge(res$metrics, res$parameters, by = "DRAW")
 }
 
 }

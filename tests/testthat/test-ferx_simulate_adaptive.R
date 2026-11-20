@@ -52,15 +52,16 @@
 
 
 
-test_that("ferx_simulate_adaptive returns four named data frames", {
+test_that("ferx_simulate_adaptive returns five named data frames", {
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 1L)
   expect_type(res, "list")
-  expect_named(res, c("trajectories", "doses", "decisions", "metrics"))
+  expect_named(res, c("trajectories", "doses", "decisions", "metrics", "parameters"))
   expect_s3_class(res$trajectories, "data.frame")
   expect_s3_class(res$doses, "data.frame")
   expect_s3_class(res$decisions, "data.frame")
   expect_s3_class(res$metrics, "data.frame")
+  expect_s3_class(res$parameters, "data.frame")
 })
 test_that("the result tables carry the documented columns", {
   ex  <- ferx_example("adaptive_tdm")
@@ -153,7 +154,7 @@ test_that("verify = FALSE skips the replay verifier and still returns results", 
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 1L, seed = 1L,
                                 verify = FALSE)
-  expect_named(res, c("trajectories", "doses", "decisions", "metrics"))
+  expect_named(res, c("trajectories", "doses", "decisions", "metrics", "parameters"))
   expect_gt(nrow(res$doses), 0L)
 })
 test_that("a non-logical `verify` is rejected before touching the engine", {
@@ -402,7 +403,7 @@ test_that("a dosed base subject (pre-scheduled loading dose) now simulates", {
   # This used to be rejected outright ("requires a dose-free base subject").
   ex  <- ferx_example("adaptive_vanco_loading")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 1L)
-  expect_named(res, c("trajectories", "doses", "decisions", "metrics"))
+  expect_named(res, c("trajectories", "doses", "decisions", "metrics", "parameters"))
   expect_gt(nrow(res$doses), 0L)
 })
 
@@ -1126,4 +1127,125 @@ test_that("double IDs in etas match a data.frame data's double IDs", {
   chr <- ferx_simulate_adaptive(model, .supplied_eta_data(), n_sim = 1L,
                                 seed = 1L, etas = .supplied_etas)
   expect_identical(res$trajectories$IPRED, chr$trajectories$IPRED)
+})
+
+# --- uncertainty = (ferx-core #946) -------------------------------------------
+
+# A fit of `.write_fit_adaptive_model()` with its covariance step, TVV FIX, run
+# to convergence so the covariance matrix exists. Fitted once per file.
+.unc_fixture <- local({
+  cache <- NULL
+  function() {
+    if (is.null(cache)) {
+      model <- .write_fit_adaptive_model(c(2, 10, 0.09, 0.1))
+      txt <- readLines(model)
+      txt <- sub("maxiter = 2", "maxiter = 200", txt, fixed = TRUE)
+      txt <- sub("covariance = false", "covariance = true", txt, fixed = TRUE)
+      txt <- sub("(theta TVV\\(.*\\))", "\\1 FIX", txt)
+      writeLines(txt, model)
+      data <- .fit_adaptive_data()
+      cache <<- list(model = model, data = data,
+                     fit = ferx_fit(model, data, verbose = FALSE))
+    }
+    cache
+  }
+})
+
+.run_unc <- function(..., n_sim = 2L, seed = 7L) {
+  fx <- .unc_fixture()
+  .quiet_design_dv(ferx_simulate_adaptive(fx$model, fx$data, n_sim = n_sim,
+                                          seed = seed, fit = fx$fit, ...))
+}
+
+.adaptive_tables <- c("trajectories", "doses", "decisions", "metrics")
+
+# Mutations that redden this: the glue dropping `with_uncertainty` (every row
+# DRAW 1, no parameters), or handing the engine another n_draws than R's.
+test_that("uncertainty: n_draws = 3 tags every table DRAW 1..3, one parameters row per draw", {
+  res <- .run_unc(uncertainty = list(n_draws = 3L))
+  for (tbl in .adaptive_tables) {
+    expect_identical(sort(unique(res[[tbl]]$DRAW)), 1:3, label = tbl)
+  }
+  expect_identical(res$parameters$DRAW, 1:3)
+  # Named as `fit$cov_matrix` names its rows: one spelling per parameter.
+  expect_identical(names(res$parameters),
+                   c("DRAW", rownames(.unc_fixture()$fit$cov_matrix)))
+})
+
+# The draws come from their own stream, so adding draws must not reshuffle the
+# first. Mutation that reddens this: seeding the parameter draws from the eta
+# stream, or from a seed that mixes in n_draws.
+test_that("uncertainty: draw 1 does not depend on n_draws", {
+  one <- .run_unc(uncertainty = list(n_draws = 1L))
+  three <- .run_unc(uncertainty = list(n_draws = 3L))
+  for (tbl in c(.adaptive_tables, "parameters")) {
+    first <- three[[tbl]][three[[tbl]]$DRAW == 1L, , drop = FALSE]
+    rownames(first) <- NULL
+    expect_identical(first, one[[tbl]], label = tbl)
+  }
+})
+
+# Mutations that redden this: a glue that returns the point estimate for every
+# draw, or drops the held-at-bound / FIX handling and scatters TVV.
+test_that("uncertainty: theta differs across draws, a FIX theta stays at its estimate", {
+  fit <- .unc_fixture()$fit
+  p <- .run_unc(uncertainty = list(n_draws = 3L))$parameters
+  expect_identical(length(unique(p$TVCL)), 3L)
+  expect_false(any(p$TVCL == fit$theta[["TVCL"]]))
+  expect_identical(p$TVV, rep(fit$theta[["TVV"]], 3L))
+})
+
+test_that("uncertainty: method = \"sir\" draws from kept SIR samples, refused without them", {
+  fx <- .unc_fixture()
+  sir_fit <- ferx_sir(fx$fit, sir_samples = 200L, sir_resamples = 50L,
+                      sir_keep_samples = TRUE, sir_seed = 1L)
+  res <- .quiet_design_dv(ferx_simulate_adaptive(
+    fx$model, fx$data, n_sim = 1L, seed = 7L, fit = sir_fit,
+    uncertainty = list(method = "sir", n_draws = 2L)
+  ))
+  expect_identical(res$parameters$DRAW, 1:2)
+  expect_identical(sort(unique(res$metrics$DRAW)), 1:2)
+  expect_error(.run_unc(uncertainty = list(method = "sir", n_draws = 2L)),
+               "sir_keep_samples = TRUE", fixed = TRUE)
+})
+
+test_that("uncertainty without fit, or with etas, is refused", {
+  fx <- .unc_fixture()
+  expect_error(
+    ferx_simulate_adaptive(fx$model, fx$data, uncertainty = list(n_draws = 2L)),
+    "`uncertainty` needs `fit`", fixed = TRUE
+  )
+  # The engine's coded refusal, spelled with this function's arguments.
+  probe <- engine_error_probe(
+    .run_unc(etas = fx$fit$ebe_etas, uncertainty = list(n_draws = 2L))
+  )
+  expect_coded_refusal(probe, "cannot be combined", "E_SUPPLIED_ETAS")
+  msg <- conditionMessage(probe$cond)
+  expect_true(grepl("(`uncertainty`)", msg, fixed = TRUE), info = msg)
+  expect_true(grepl("(`etas`)", msg, fixed = TRUE), info = msg)
+  expect_false(grepl("with_uncertainty|with_etas", msg), info = msg)
+})
+
+test_that("a malformed `uncertainty` is refused in R before the engine", {
+  expect_error(.run_unc(uncertainty = list(n_draws = 0L)), "positive whole")
+  expect_error(.run_unc(uncertainty = list(n_draws = 1.5)), "positive whole")
+  expect_error(.run_unc(uncertainty = list()), "named list")
+  expect_error(.run_unc(uncertainty = list(method = "boot", n_draws = 2L)),
+               "\"asymptotic\" or \"sir\"", fixed = TRUE)
+  expect_error(.run_unc(uncertainty = list(methd = "sir", n_draws = 2L)),
+               "unknown `uncertainty` element(s) `methd`", fixed = TRUE)
+})
+
+# Without uncertainty nothing changes: every row is DRAW 1 and `parameters`
+# keeps its columns with no rows (the engine's list is empty).
+test_that("without uncertainty: DRAW is 1 throughout and parameters has no rows", {
+  res <- .run_unc()
+  for (tbl in .adaptive_tables) {
+    expect_true(all(res[[tbl]]$DRAW == 1L), label = tbl)
+  }
+  expect_identical(nrow(res$parameters), 0L)
+  expect_identical(names(res$parameters),
+                   c("DRAW", rownames(.unc_fixture()$fit$cov_matrix)))
+  expect_identical(res[.adaptive_tables],
+                   .run_unc(uncertainty = NULL)[.adaptive_tables])
 })

@@ -111,8 +111,31 @@
 #'   since every subject was then drawn. IDs are matched as text; a numeric
 #'   \code{ID} is spelled as a data.frame \code{data} writes it. Passing
 #'   \code{unmatched} without \code{etas} has no effect and warns.
+#' @param uncertainty Optional parameter uncertainty to propagate from
+#'   \code{fit}: \code{NULL} (the default) simulates at the fit's point
+#'   estimates; otherwise \code{list(method = , n_draws = )}, where
+#'   \code{method} is \code{"asymptotic"} (the default; a multivariate normal
+#'   on \code{fit$cov_matrix}, so the fit needs its covariance step) or
+#'   \code{"sir"} (resampled from the fit's kept SIR draws, so the fit needs
+#'   \code{sir_keep_samples = TRUE}), and \code{n_draws} (a positive whole
+#'   number) is the number of parameter sets. Every subject and each of the
+#'   \code{n_sim} replicates is simulated under every draw, so a run has
+#'   \code{n_draws * n_sim} replicates per subject. The draws are the
+#'   sampler \code{\link{ferx_simulate_with_uncertainty}} uses, with a FIX or
+#'   held-at-bound parameter kept at its estimate. They come from a stream of
+#'   their own: draw 1 uses the random effects the same \code{seed} gives
+#'   without uncertainty (under draw 1's omega), so draw 1 does not depend on
+#'   \code{n_draws}, and each further draw simulates new virtual patients.
+#'   Requires \code{fit}, and cannot be combined with \code{etas}: each
+#'   supplied eta was estimated at the fit's theta, so pairing it with a drawn
+#'   theta would not describe the same patient (refused, coded
+#'   \code{E_SUPPLIED_ETAS}). Dose expressions that read only theta are
+#'   evaluated at the fit's estimate in every draw, while a
+#'   \code{dose_knowledge = oracle} subject is dosed from its own draw's
+#'   parameters. Warnings and refusals name the replicate as
+#'   \code{"(draw d, sim s)"} only in a run with uncertainty.
 #'
-#' @return A list of four data frames:
+#' @return A list of five data frames:
 #'   \describe{
 #'     \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 #'       OBSERVED - the per-observation predictions, as in
@@ -158,7 +181,22 @@
 #'       whose dose expressions read its drawn individual parameters, under
 #'       the block's \code{dose_knowledge = oracle}: a perfect-information
 #'       comparison arm, never a dosing rule).}
+#'     \item{\code{parameters}}{The parameter set each draw was simulated
+#'       under: one row per draw, \code{DRAW} and then one column per
+#'       estimated quantity - theta, the omega elements, sigma, the IOV
+#'       (kappa) omega elements, a \code{[mixture]} model's per-class
+#'       overrides and the \code{block_sigma} correlations - named as the
+#'       rows of \code{fit$cov_matrix} (\code{TVCL}, \code{ETA_CL},
+#'       \code{ETA_V ~ ETA_CL}, \code{EPS_PROP}, \code{ETA_CL (class 2)},
+#'       ...) and on the scale \code{fit$theta}, \code{fit$omega} and
+#'       \code{fit$sigma} report them. Join it to the other tables by
+#'       \code{DRAW}. Without \code{uncertainty} it has these columns and
+#'       no rows.}
 #'   }
+#'
+#'   \code{DRAW} on every table is the parameter draw a row was simulated
+#'   under: \code{1} throughout without \code{uncertainty}, \code{1} to
+#'   \code{n_draws} with it.
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #'
@@ -177,6 +215,11 @@
 #'
 #' # With a fit to observed data, each fitted subject at its own EBEs:
 #' # ferx_simulate_adaptive(model, data, fit = fit, etas = fit$ebe_etas)
+#'
+#' # Or propagate the fit's parameter uncertainty: 50 parameter draws.
+#' # res <- ferx_simulate_adaptive(model, data, fit = fit, seed = 1L,
+#' #                               uncertainty = list(n_draws = 50L))
+#' # merge(res$metrics, res$parameters, by = "DRAW")
 #' }
 #'
 #' @family simulation
@@ -184,7 +227,9 @@
 ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
                                    verify = TRUE, max_decisions = 0L,
                                    fit = NULL, etas = NULL,
-                                   unmatched = c("refuse", "draw")) {
+                                   unmatched = c("refuse", "draw"),
+                                   uncertainty = NULL) {
+  uncertainty <- .ferx_adaptive_uncertainty(uncertainty, fit)
   if (!missing(unmatched) && is.null(etas)) {
     warning("ferx_simulate_adaptive: `unmatched` has no effect without ",
             "`etas`; every subject's eta is drawn.", call. = FALSE)
@@ -240,7 +285,21 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
     # `ferx_simulate(fit = )` places them (ferx-core #1594). No occasion
     # rule is passed: the adaptive engine draws kappa per decision window.
     fit_pieces <- validate_fit_for_params(fit)
-    .ferx_engine_call(
+    # The fit's covariance matrix or SIR pool, refused here with the R remedy
+    # when the fit lacks the one `method` needs, as `ferx_simulate_with_
+    # uncertainty()` refuses it.
+    unc_pieces <- if (is.null(uncertainty)) {
+      validate_fit_for_uncertainty(NULL, "none")
+    } else {
+      validate_fit_for_uncertainty(fit, uncertainty$method)
+    }
+    # The engine's refusal of supplied etas under parameter uncertainty
+    # (ferx-core #946) names the two `AdaptiveInputs` builders; here they
+    # are these two arguments.
+    spell <- function(call, from, to) {
+      .ferx_engine_spelling(call, "E_SUPPLIED_ETAS", from, to)
+    }
+    spell(spell(.ferx_engine_call(
       ferx_rust_simulate_adaptive_from_fit(
         model_path = normalizePath(model),
         data_path = normalizePath(data),
@@ -262,10 +321,17 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
         eta_ids = supplied$ids,
         eta_names = supplied$names,
         eta_flat = supplied$flat,
-        unmatched = unmatched
+        unmatched = unmatched,
+        uncertainty_method = if (is.null(uncertainty)) "" else uncertainty$method,
+        cov_matrix_flat = unc_pieces$cov_matrix_flat,
+        cov_matrix_dim = unc_pieces$cov_matrix_dim,
+        sir_resamples_flat = unc_pieces$sir_resamples_flat,
+        sir_resamples_n = unc_pieces$sir_resamples_n,
+        sir_resamples_dim = unc_pieces$sir_resamples_dim,
+        n_draws = if (is.null(uncertainty)) 0L else uncertainty$n_draws
       ),
       model, data
-    )
+    ), "`with_uncertainty`", "`uncertainty`"), "`with_etas`", "`etas`")
   }, "E_SUPPLIED_ETAS", "`UnmatchedSubjects::Draw`", "`unmatched = \"draw\"`")
 
   # Under "draw" an `etas` keyed differently from the data (`01` against `1`)
@@ -289,6 +355,48 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run (ferx-r #426).
   .ferx_surface_sim_warnings(res, "ferx_simulate_adaptive")
+}
+
+# `uncertainty =` checked and normalised to list(method, n_draws), or NULL
+# (ferx-core #946). Refused here: an uncertainty without `fit` (there is no
+# estimate to draw around), a malformed list, and `n_draws` that is not a
+# positive whole number (the glue casts it to an unsigned count). Combined with
+# `etas` it reaches the engine, which refuses it coded `E_SUPPLIED_ETAS`.
+.ferx_adaptive_uncertainty <- function(uncertainty, fit) {
+  if (is.null(uncertainty)) return(NULL)
+  if (is.null(fit)) {
+    stop("ferx_simulate_adaptive: `uncertainty` needs `fit`: the parameter ",
+         "draws come from a fit's covariance matrix or SIR samples. Pass ",
+         "`fit = `, or drop `uncertainty`.", call. = FALSE)
+  }
+  if (!is.list(uncertainty) || is.null(names(uncertainty)) ||
+      any(names(uncertainty) == "")) {
+    stop("ferx_simulate_adaptive: `uncertainty` must be NULL or a named ",
+         "list, e.g. `list(method = \"asymptotic\", n_draws = 100)`.",
+         call. = FALSE)
+  }
+  unknown <- setdiff(names(uncertainty), c("method", "n_draws"))
+  if (length(unknown) > 0L) {
+    stop("ferx_simulate_adaptive: unknown `uncertainty` element(s) ",
+         paste0("`", unknown, "`", collapse = ", "),
+         "; expected `method` and `n_draws`.", call. = FALSE)
+  }
+  method <- uncertainty$method
+  if (is.null(method)) method <- "asymptotic"
+  if (!is.character(method) || length(method) != 1L || is.na(method) ||
+      !method %in% c("asymptotic", "sir")) {
+    stop("ferx_simulate_adaptive: `uncertainty$method` must be ",
+         "\"asymptotic\" or \"sir\".", call. = FALSE)
+  }
+  n_draws <- uncertainty$n_draws
+  if (!is.numeric(n_draws) || length(n_draws) != 1L || !is.finite(n_draws) ||
+      n_draws != round(n_draws) || n_draws < 1 ||
+      n_draws > .Machine$integer.max) {
+    stop("ferx_simulate_adaptive: `uncertainty$n_draws` must be a single ",
+         "positive whole number (the number of parameter draws).",
+         call. = FALSE)
+  }
+  list(method = method, n_draws = as.integer(n_draws))
 }
 
 # `etas =` flattened for the engine (ferx-core #1594): IDs as text, matched to
