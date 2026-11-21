@@ -31,6 +31,7 @@
 [fit_options]
   method        = saem
   omega_dist    = vine
+  saem_ofv      = imp
   n_exploration = 200
   n_convergence = 250
   seed          = 12345
