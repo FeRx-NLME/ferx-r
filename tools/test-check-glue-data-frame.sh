@@ -25,9 +25,13 @@ case_() {
   printf '%s\n' "$src" > "$dir/lib.rs"
   for gha in "" true; do
     cases=$((cases + 1))
-    local out rc=0
+    local out rc=0 expect="$text"
+    # A location is written `lib.rs:N: ` locally and `lib.rs,line=N::` in CI.
+    if [[ "$gha" == true && "$expect" =~ ^lib\.rs:([0-9]+):\ (.*)$ ]]; then
+      expect="lib.rs,line=${BASH_REMATCH[1]}::${BASH_REMATCH[2]}"
+    fi
     out="$(GITHUB_ACTIONS="$gha" bash "$CHECK" "$dir" 2>&1)" || rc=$?
-    if [[ $rc -ne $want ]] || { [[ -n "$text" ]] && ! grep -qF -- "$text" <<<"$out"; }; then
+    if [[ $rc -ne $want ]] || { [[ -n "$expect" ]] && ! grep -qF -- "$expect" <<<"$out"; }; then
       echo "FAIL: $name (GITHUB_ACTIONS='$gha'): exit $rc, wanted $want${text:+ with '$text'}"
       printf '%s\n' "$out" | sed 's/^/     | /'
       failures=$((failures + 1))
@@ -66,10 +70,55 @@ case_ qualified_call 1 "data_frame! builds the table" "$CLEAN
 fn f() { let d = extendr_api::data_frame!(a = 1); }"
 case_ after_block_comment 1 "data_frame! builds the table" "$CLEAN
 fn f() { /* note */ let d = data_frame!(a = 1); }"
-case_ import 1 "data_frame is imported here" "$CLEAN
+case_ import 1 "data_frame is named here" "$CLEAN
 use extendr_api::data_frame;"
-case_ import_as 1 "data_frame is imported here" "$CLEAN
+case_ import_as 1 "data_frame is named here" "$CLEAN
 use extendr_api::{data_frame as df, List};"
+# #781 review finding 3: the rename split over lines, then used under its
+# new name, which no `data_frame!` rule can see.
+case_ import_as_multiline 1 "lib.rs:6: data_frame is named here" "$CLEAN
+use extendr_api::{
+    List,
+    data_frame as df,
+};
+fn f() { df!(a = 1); }"
+
+# -- What the scan must treat as not-code, and what it must not lose track
+#    in (#781 review findings 1, 2, 8). Each "hit" case puts the call on a
+#    line after the tricky syntax, so a scan that went blind there passes it.
+NL=$'\n'
+case_ slashstar_in_line_comment 1 "lib.rs:5: data_frame!" "$CLEAN$NL"'// scans tools/*.sh'"$NL"'fn f() { data_frame!(a = 1); }'
+case_ slashstar_in_doc_comment 1 "lib.rs:5: data_frame!" "$CLEAN$NL"'/// reads inst/examples/*.R'"$NL"'fn f() { data_frame!(a = 1); }'
+case_ slashstar_in_string 1 "lib.rs:5: data_frame!" "$CLEAN$NL"'fn g() { let p = "inst/*.R"; }'"$NL"'fn f() { data_frame!(a = 1); }'
+case_ slashslash_in_string 1 "lib.rs:4: data_frame!" "$CLEAN$NL"'fn f() { let u = "http://x"; let d = data_frame!(a = 1); }'
+case_ escaped_quote_in_string 1 "lib.rs:4: data_frame!" "$CLEAN$NL"'fn f() { let s = "a \"data_frame!(\" b"; let d = data_frame!(a = 1); }'
+case_ quote_char_literal 1 "lib.rs:4: data_frame!" "$CLEAN$NL"$'fn f() { let q = \'"\'; let d = data_frame!(a = 1); }'
+case_ escaped_quote_in_string_only 0 "glue data frames OK" "$CLEAN$NL"'fn f() { let s = "a \" data_frame!(x) \" b"; }'
+case_ escaped_char_literal 1 "lib.rs:4: data_frame!" "$CLEAN$NL"$'fn f() { let q = \'\\"\'; let d = data_frame!(a = 1); }'
+case_ lifetime_then_call 1 "lib.rs:4: data_frame!" "$CLEAN$NL"$'fn f<\'a>(x: &\'a str) { let d = data_frame!(a = 1); }'
+case_ raw_string_with_quote 1 "lib.rs:5: data_frame!" "$CLEAN$NL"'fn g() { let r = r#"say "hi" /* "#; }'"$NL"'fn f() { data_frame!(a = 1); }'
+# Rust block comments nest: the first `*/` closes only the inner one.
+case_ nested_block_comment 0 "glue data frames OK" "$CLEAN$NL"'/* outer /* inner */'"$NL"'   still a comment: data_frame!(a = 1) */'"$NL"'fn f() {}'
+case_ after_nested_block_comment 1 "lib.rs:6: data_frame!" "$CLEAN$NL"'/* outer /* inner */'"$NL"'   still a comment */'"$NL"'fn f() { data_frame!(a = 1); }'
+case_ call_in_string 0 "glue data frames OK" "$CLEAN$NL"'fn f() { let m = "use data_frame!(..) never"; }'
+case_ call_in_byte_string 0 "glue data frames OK" "$CLEAN$NL"'fn f() { let m = b"data_frame!(a)"; }'
+case_ call_in_raw_string 0 "glue data frames OK" "$CLEAN$NL"'fn f() { let m = r##"a "# data_frame!(x) "##; }'
+case_ call_in_multiline_string 0 "glue data frames OK" "$CLEAN$NL"'fn f() { let m = "first \'"$NL"'    data_frame!(a = 1) \'"$NL"'    last"; }'
+case_ unterminated_string 1 "inside a string literal" "$CLEAN$NL"'fn f() { let m = "never closed; }'
+case_ unterminated_block 1 "inside a block comment" "$CLEAN$NL"'/* never closed'
+case_ unterminated_raw 1 "inside a raw string" "$CLEAN$NL"'fn f() { let m = r#"closed with the wrong count"; }'
+
+# #781 review finding 4: a nested module is glue too.
+mkdir -p "$TMP/nested/inner"
+printf '%s\n' "$CLEAN" > "$TMP/nested/lib.rs"
+printf '%s\n' 'fn f() { data_frame!(a = 1); }' > "$TMP/nested/inner/mod.rs"
+cases=$((cases + 1))
+out="$(GITHUB_ACTIONS='' bash "$CHECK" "$TMP/nested" 2>&1 || true)"
+if ! grep -qE 'inner/mod\.rs:1: data_frame!' <<<"$out"; then
+  echo "FAIL: nested module: no finding at inner/mod.rs:1"
+  printf '%s\n' "$out" | sed 's/^/     | /'
+  failures=$((failures + 1))
+fi
 
 # The finding names the line of the call, not of the statement it opens -
 # locally as `file:line:` and in CI as an `::error` annotation.
