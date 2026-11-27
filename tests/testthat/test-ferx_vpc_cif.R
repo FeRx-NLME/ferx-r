@@ -198,6 +198,16 @@ test_that("the glue-side argument checks refuse before the engine", {
   expect_error(ferx_vpc_cif(ex$model, ex$data, grid = "every"), "`grid`")
   expect_error(ferx_vpc_cif(ex$model, ex$data, probs = c(0.1, 0.9)), "`probs`")
   expect_false("cmt" %in% names(formals(ferx_vpc_cif)))
+  # The glue's own check, which the R checks above keep out of reach, names
+  # the R function it serves (#778 review, finding 4).
+  e <- tryCatch(
+    ferx:::ferx_rust_vpc_cif(normalizePath(ex$model), normalizePath(ex$data),
+                             20L, 1L, c(0.05, 0.5, 0.95), "bogus", numeric(0),
+                             "observed", "none", "", -1),
+    error = function(e) e
+  )
+  expect_match(conditionMessage(e), "internal: ferx_vpc_cif got grid `bogus`",
+               fixed = TRUE)
 })
 
 test_that("print() lists the settings and the events per cause", {

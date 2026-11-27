@@ -2286,6 +2286,7 @@ fn ferx_rust_vpc_tte(
 ) -> Robj {
     entry(move || {
         let opts = vpc_tte_options(
+            "ferx_vpc_tte",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
@@ -2355,6 +2356,7 @@ fn ferx_rust_vpc_tte_from_fit(
 ) -> Robj {
     entry(move || {
         let opts = vpc_tte_options(
+            "ferx_vpc_tte",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
@@ -2425,6 +2427,7 @@ fn ferx_rust_vpc_kmmc(
 ) -> Robj {
     entry(move || {
         let vpc = vpc_tte_options(
+            "ferx_vpc_kmmc",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
@@ -2496,6 +2499,7 @@ fn ferx_rust_vpc_kmmc_from_fit(
 ) -> Robj {
     entry(move || {
         let vpc = vpc_tte_options(
+            "ferx_vpc_kmmc",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
@@ -2559,6 +2563,7 @@ fn ferx_rust_vpc_cif(
 ) -> Robj {
     entry(move || {
         let vpc = vpc_tte_options(
+            "ferx_vpc_cif",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, 0,
             horizon,
         )?;
@@ -2622,6 +2627,7 @@ fn ferx_rust_vpc_cif_from_fit(
 ) -> Robj {
     entry(move || {
         let vpc = vpc_tte_options(
+            "ferx_vpc_cif",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, 0,
             horizon,
         )?;
@@ -2841,9 +2847,11 @@ fn read_vpc_tte_population(
 }
 
 /// `VpcTteOptions` from the R arguments. The R wrapper has already checked
-/// the strings; an unknown one here is a glue bug, refused as a call error.
+/// the strings; an unknown one here is a glue bug, refused as a call error
+/// naming `who`, the R function the glue serves (#778 review, finding 4).
 #[allow(clippy::too_many_arguments)]
 fn vpc_tte_options(
+    who: &str,
     n_sim: i32,
     seed: i32,
     probs: &[f64],
@@ -2856,7 +2864,7 @@ fn vpc_tte_options(
     horizon: f64,
 ) -> std::result::Result<ferx_core::VpcTteOptions, String> {
     let bad = |what: &str, value: &str| {
-        argument_refusal(format!("internal: ferx_vpc_tte got {what} `{value}`"))
+        argument_refusal(format!("internal: {who} got {what} `{value}`"))
     };
     let probs: [f64; 3] = probs
         .try_into()
