@@ -101,15 +101,17 @@ test_that("ferx_predict_survival() ignores a data.frame in the global environmen
 # Run `expr`, collecting every value the namespace function `fn` returns.
 capture_glue <- function(fn, expr) {
   orig <- get(fn, envir = asNamespace("ferx"))
-  seen <- list()
+  # The wrapper appends to this environment rather than with `<<-`.
+  seen <- new.env(parent = emptyenv())
+  seen$values <- list()
   wrapper <- function(...) {
     out <- orig(...)
-    seen[[length(seen) + 1L]] <<- out
+    seen$values[[length(seen$values) + 1L]] <- out
     out
   }
   do.call(local_mocked_bindings, c(setNames(list(wrapper), fn), .package = "ferx"))
   force(expr)
-  seen
+  seen$values
 }
 
 # A frame laid out as `data.frame()` lays it out: these columns in this order
