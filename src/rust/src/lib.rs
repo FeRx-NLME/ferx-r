@@ -373,10 +373,19 @@ fn argument_refusal(text: String) -> String {
 /// its `kind` and an empty code, so `.ferx_engine_error()` does not go looking
 /// for a validation finding to blame it on (ferx-r #517, #521).
 fn failure_refusal(kind: RecordKind, text: String) -> String {
+    coded_refusal(kind, "", text)
+}
+
+/// The text an entry point raises for a refusal this glue makes itself, with
+/// its record: `message`, plus ` [CODE]` when `code` is not empty (as an
+/// `EngineError` with a code displays), recorded with `kind` and `code`. An
+/// empty `code` is `failure_refusal`'s record, its text `message` unchanged.
+fn coded_refusal(kind: RecordKind, code: &str, message: String) -> String {
+    let text = if code.is_empty() { message.clone() } else { format!("{message} [{code}]") };
     *PENDING_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) = Some(EngineDiagnostic {
         kind,
-        message: text.clone(),
-        code: String::new(),
+        message,
+        code: code.to_string(),
         block: None,
         line: None,
         suggestion: None,
@@ -1667,18 +1676,11 @@ fn check_decomposition_design(
 /// recorded with core's code for them (`E_ADAPTIVE_OPTIONS`), so R classes it
 /// exactly as the engine's own refusal of the same options.
 fn adaptive_options_refusal(message: String) -> String {
-    let message = format!("ferx_simulate_adaptive: {message}");
-    let text = format!("{message} [E_ADAPTIVE_OPTIONS]");
-    *PENDING_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) = Some(EngineDiagnostic {
-        kind: RecordKind::Engine,
-        message,
-        code: "E_ADAPTIVE_OPTIONS".to_string(),
-        block: None,
-        line: None,
-        suggestion: None,
-        text: text.clone(),
-    });
-    text
+    coded_refusal(
+        RecordKind::Engine,
+        "E_ADAPTIVE_OPTIONS",
+        format!("ferx_simulate_adaptive: {message}"),
+    )
 }
 
 /// `x` as R prints a double: `NA` for R's `NA_real_` and `NaN` alike (both
