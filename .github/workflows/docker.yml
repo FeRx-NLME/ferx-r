@@ -101,7 +101,12 @@ jobs:
       # does not re-run this job, so that resume is still possible.
       - name: Release tag not yet published
         if: github.ref_type == 'tag'
-        run: tools/docker-release-tags.sh guard "$IMAGE" "${{ github.ref_name }}"
+        # The tag name reaches the shell as data through env, never expanded
+        # into the script text (CodeFactor: code injection via template
+        # expansion), as the publish job's TAG already does.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: tools/docker-release-tags.sh guard "$IMAGE" "$TAG"
 
       # Build once into the local daemon so the image can be smoke-tested
       # before anything is published.

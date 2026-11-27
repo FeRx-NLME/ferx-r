@@ -76,6 +76,12 @@ test_that("the result tables carry the documented columns", {
     "N_DECREASES", "N_HOLDS", "N_NOT_DUE", "DISCONTINUED", "TIME_TO_DISCONT", "SIGNAL_MIN",
     "SIGNAL_MAX", "SIGNAL_MEAN", "PCT_READINGS_IN_WINDOW", "PCT_TIME_IN_WINDOW") %in%
     names(res$metrics)))
+  # The assay replicate (ferx-core #946 PR3) follows SIM; 1 without n_reps.
+  for (tab in c("doses", "decisions", "metrics")) {
+    nm <- names(res[[tab]])
+    expect_identical(nm[match("SIM", nm) + 1L], "REP", info = tab)
+    expect_true(all(res[[tab]]$REP == 1L), info = tab)
+  }
 })
 test_that("n_sim = 3 produces three replicates across all three tables", {
   ex  <- ferx_example("adaptive_tdm")
@@ -1025,6 +1031,21 @@ test_that(".ferx_engine_spelling() swaps message and suggestion, for its code on
   other <- spell(refusal("E_B", "pass `X::Y` instead"))
   expect_identical(conditionMessage(other), "or pass `X::Y` [E_A]")
   expect_identical(other$suggestion, "pass `X::Y` instead")
+
+  # Several pairs in one call, each swapped (replaces nested calls).
+  cond <- structure(
+    class = c("ferx_engine_error", "error", "condition"),
+    list(message = "use `A::B` or `C::D` [E_A]", call = NULL, code = "E_A",
+         suggestion = "`C::D` here")
+  )
+  both <- tryCatch(
+    ferx:::.ferx_engine_spelling(stop(cond), "E_A", c("`A::B`", "`C::D`"),
+                                 c("`b`", "`d`")),
+    error = function(e) e
+  )
+  expect_identical(conditionMessage(both), "use `b` or `d` [E_A]")
+  expect_identical(both$suggestion, "`d` here")
+  expect_error(ferx:::.ferx_engine_spelling(1, "E_A", c("a", "b"), "c"))
 })
 
 # Review r1 #6: an explicit `unmatched` with no `etas` cannot do anything.

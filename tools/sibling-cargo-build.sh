@@ -2,11 +2,12 @@
 # Run cargo in src/rust against a sibling ../ferx-core checkout, and leave
 # src/rust/Cargo.lock exactly as it was found.
 #
-# Why this exists (ferx-r #353). The [patch] that redirects ferx-core and
-# ferx-tools to the sibling used to be written into the persistent
+# Why this exists (ferx-r #353). The [patch] that redirects the ferx-core
+# repository's crates (FERX_CRATES in ferx-core-lock-lib.sh: ferx-core,
+# ferx-tools, ferx-search) to the sibling used to be written into the persistent
 # src/rust/.cargo/config.toml, so *every* later cargo resolve rewrote the lock:
 # R CMD INSTALL, roxygen2::roxygenize(), pkgload::load_all(), cargo run by hand,
-# an editor's rust-analyzer. An applied patch deletes both `source = "git+..."`
+# an editor's rust-analyzer. An applied patch deletes every `source = "git+..."`
 # pins - unpinning the crates for CI and for everyone who builds without the
 # sibling - while an unused one appends [[patch.unused]] tables instead. Here
 # the patch is handed to this one cargo invocation with --config, and the lock
@@ -94,22 +95,27 @@ if [ ! -f "$SIBLING/Cargo.toml" ]; then
   err "  build the revision Cargo.lock pins."
   exit 2
 fi
-if [ ! -f "$SIBLING/crates/ferx-tools/Cargo.toml" ]; then
-  err "ERROR the sibling ferx-core checkout has no crates/ferx-tools:"
-  err "  $SIBLING"
-  err "  (a checkout predating the ferx-tools workspace split). Patching ferx-core"
-  err "  alone would build that checkout's engine against ferx-tools from GitHub"
-  err "  main - two revisions of one workspace, with no compile error to say so."
-  exit 2
-fi
+for crate in $FERX_CRATES; do
+  dir=$(ferx_crate_dir "$crate")
+  if [ ! -f "$SIBLING/$dir/Cargo.toml" ]; then
+    err "ERROR the sibling ferx-core checkout has no $dir:"
+    err "  $SIBLING"
+    err "  (a checkout predating the $crate workspace split). Patching the other"
+    err "  crates alone would build that checkout's engine against $crate from"
+    err "  GitHub main - two revisions of one workspace, with no compile error to"
+    err "  say so."
+    exit 2
+  fi
+done
+CRATES_PHRASE=$(ferx_crates_phrase)
 
 # -- what cargo will do with the patch ---------------------------------------
 #
 # Cargo applies a [patch] only when the patched crate's version *equals* the one
 # Cargo.lock holds; anything else (an older sibling, a patch-level difference)
 # leaves the entry unused, with no more than a "was not used in the crate graph"
-# warning. ferx-core and ferx-tools carry their own version numbers, so the two
-# can disagree - and a build that patches one and pins the other is the
+# warning. Each crate carries its own version number, so they can disagree -
+# and a build that patches some and pins the others is the
 # mixed-revision build this script exists to keep out. Predict it here, before
 # spending a compile on it; the post-build verdict below re-checks what cargo
 # actually resolved, which is what decides.
@@ -142,22 +148,27 @@ would_patch() { # sibling version, locked version
   fi
 }
 
-core_locked_version=$(ferx_lock_version_of ferx-core "$LOCK")
-tools_locked_version=$(ferx_lock_version_of ferx-tools "$LOCK")
-core_sibling_version=$(manifest_version "$SIBLING/Cargo.toml")
-tools_sibling_version=$(manifest_version "$SIBLING/crates/ferx-tools/Cargo.toml")
-core_expected=$(would_patch "$core_sibling_version" "$core_locked_version")
-tools_expected=$(would_patch "$tools_sibling_version" "$tools_locked_version")
+n_crates=0
+n_expect_yes=0
+n_expect_no=0
+versions_line=""
+for crate in $FERX_CRATES; do
+  locked=$(ferx_lock_version_of "$crate" "$LOCK")
+  sibling_version=$(manifest_version "$SIBLING/$(ferx_crate_dir "$crate")/Cargo.toml")
+  n_crates=$((n_crates + 1))
+  case "$(would_patch "$sibling_version" "$locked")" in
+    yes) n_expect_yes=$((n_expect_yes + 1)) ;;
+    no) n_expect_no=$((n_expect_no + 1)) ;;
+  esac
+  versions_line="${versions_line:+$versions_line; }$crate: lock ${locked:-?}, sibling ${sibling_version:-?}"
+done
 
-versions_line="ferx-core: lock ${core_locked_version:-?}, sibling ${core_sibling_version:-?}; ferx-tools: lock ${tools_locked_version:-?}, sibling ${tools_sibling_version:-?}"
-
-if { [ "$core_expected" = yes ] && [ "$tools_expected" = no ]; } ||
-   { [ "$core_expected" = no ] && [ "$tools_expected" = yes ]; }; then
-  err "ERROR the sibling checkout would supply only one of the two crates:"
+if [ "$n_expect_yes" -gt 0 ] && [ "$n_expect_no" -gt 0 ]; then
+  err "ERROR the sibling checkout would supply only some of the crates:"
   err "  $versions_line"
   err "  cargo applies a [patch] only when the sibling's version equals the locked"
-  err "  one, so this build would take one crate from $SIBLING"
-  err "  and the other from the revision Cargo.lock pins - two revisions of one"
+  err "  one, so this build would take some crates from $SIBLING"
+  err "  and the others from the revision Cargo.lock pins - two revisions of one"
   err "  workspace, with no compile error to say so. Refusing to build."
   err "  Fix it by bumping the lock (tools/update-ferx-core-lock.sh), by moving the"
   err "  sibling to a matching revision, or by building wholly from the pin with"
@@ -272,24 +283,49 @@ cp "$LOCK" "$SNAPSHOT"
 
 # -- build -------------------------------------------------------------------
 
-say "patching ferx-core + ferx-tools to the sibling checkout, for this cargo run only"
+say "patching $CRATES_PHRASE to the sibling checkout, for this cargo run only"
 say "  $SIBLING"
-if [ "$core_expected" = no ] && [ "$tools_expected" = no ]; then
-  say "  (both versions differ from the lock, so cargo will most likely ignore it: $versions_line)"
+if [ "$n_expect_no" -eq "$n_crates" ]; then
+  say "  (every version differs from the lock, so cargo will most likely ignore it: $versions_line)"
 fi
+
+# One --config per crate, appended after the caller's cargo arguments: the
+# positional parameters are the only array a POSIX shell has.
+for crate in $FERX_CRATES; do
+  dir=$(ferx_crate_dir "$crate")
+  if [ "$dir" = . ]; then path="$SIBLING"; else path="$SIBLING/$dir"; fi
+  set -- "$@" --config "patch.\"$GIT_URL\".$crate.path=\"$path\""
+done
 
 status=0
 (
-  cd "$RUST_DIR" &&
-    cargo "$@" \
-      --config "patch.\"$GIT_URL\".ferx-core.path=\"$SIBLING\"" \
-      --config "patch.\"$GIT_URL\".ferx-tools.path=\"$SIBLING/crates/ferx-tools\""
+  cd "$RUST_DIR" && cargo "$@"
 ) || status=$?
 
 # -- per-crate verdict, read from the lock cargo just wrote ------------------
 
-core_origin=$(ferx_lock_origin_of ferx-core "$LOCK")
-tools_origin=$(ferx_lock_origin_of ferx-tools "$LOCK")
+# `path` means an applied patch: cargo replaced the git pin with the sibling
+# directory. `git` means the patch went unused and the pinned revision was
+# built.
+origin_word() { # git | path | other | absent
+  case "$1" in
+    path) echo "the sibling" ;;
+    git) echo "the pinned revision" ;;
+    *) echo "somewhere else ($1)" ;;
+  esac
+}
+
+n_path=0
+n_git=0
+origins=""
+for crate in $FERX_CRATES; do
+  origin=$(ferx_lock_origin_of "$crate" "$LOCK")
+  case "$origin" in
+    path) n_path=$((n_path + 1)) ;;
+    git) n_git=$((n_git + 1)) ;;
+  esac
+  origins="${origins:+$origins, }$crate from $(origin_word "$origin")"
+done
 unused=$(ferx_lock_patch_unused_names "$LOCK" | tr '\n' ' ' | sed 's/ *$//')
 
 # Put the lock back before saying anything about the build: a verdict printed
@@ -325,45 +361,30 @@ if [ "$status" -ne 0 ]; then
   exit "$status"
 fi
 
-# `path` means an applied patch: cargo replaced the git pin with the sibling
-# directory. `git` means the patch went unused and the pinned revision was
-# built. Deciding per crate is the whole point - a verdict taken from one of
-# them calls the mixed build "the sibling was not used".
-origin_word() { # git | path | other | absent
-  case "$1" in
-    path) echo "the sibling" ;;
-    git) echo "the pinned revision" ;;
-    *) echo "somewhere else ($1)" ;;
-  esac
-}
-
-case "$core_origin,$tools_origin" in
-  path,path)
-    say "the sibling supplied BOTH ferx-core and ferx-tools"
-    ;;
-  git,git)
-    say "WARNING the sibling was NOT used: ferx-core and ferx-tools both come from"
-    say "  the revision Cargo.lock pins."
-    if [ "$core_expected" = yes ] && [ "$tools_expected" = yes ]; then
-      say "  Both versions match the lock ($versions_line), so cargo was expected to"
-      say "  take the patch. It did not, which means this run did not resolve - an"
-      say "  unchanged lock and a warm cache, or a cargo subcommand that reads the"
-      say "  lock without writing it."
-    else
-      say "  cargo applies a [patch] only when the sibling's version equals the"
-      say "  locked one - $versions_line"
-    fi
-    if [ -n "$unused" ]; then say "  cargo reported these patch entries unused: $unused"; fi
-    ;;
-  *)
-    err "ERROR this build MIXED revisions: ferx-core came from $(origin_word "$core_origin"),"
-    err "  ferx-tools from $(origin_word "$tools_origin")."
-    err "  $versions_line"
-    if [ -n "$unused" ]; then err "  cargo reported these patch entries unused: $unused"; fi
-    err "  The two crates are halves of one workspace and move together, so what was"
-    err "  just built is a combination that exists nowhere. Bump the lock"
-    err "  (tools/update-ferx-core-lock.sh), move the sibling to a matching revision,"
-    err "  or build wholly from the pin with MAKEFLAGS=\"LOCAL_FERX_CORE=\"."
-    exit 1
-    ;;
-esac
+# Deciding per crate is the whole point - a verdict taken from one of them
+# calls the mixed build "the sibling was not used".
+if [ "$n_path" -eq "$n_crates" ]; then
+  say "the sibling supplied ALL of $CRATES_PHRASE"
+elif [ "$n_git" -eq "$n_crates" ]; then
+  say "WARNING the sibling was NOT used: $CRATES_PHRASE all come from"
+  say "  the revision Cargo.lock pins."
+  if [ "$n_expect_yes" -eq "$n_crates" ]; then
+    say "  Every version matches the lock ($versions_line), so cargo was expected to"
+    say "  take the patch. It did not, which means this run did not resolve - an"
+    say "  unchanged lock and a warm cache, or a cargo subcommand that reads the"
+    say "  lock without writing it."
+  else
+    say "  cargo applies a [patch] only when the sibling's version equals the"
+    say "  locked one - $versions_line"
+  fi
+  if [ -n "$unused" ]; then say "  cargo reported these patch entries unused: $unused"; fi
+else
+  err "ERROR this build MIXED revisions: $origins."
+  err "  $versions_line"
+  if [ -n "$unused" ]; then err "  cargo reported these patch entries unused: $unused"; fi
+  err "  The crates are parts of one workspace and move together, so what was"
+  err "  just built is a combination that exists nowhere. Bump the lock"
+  err "  (tools/update-ferx-core-lock.sh), move the sibling to a matching revision,"
+  err "  or build wholly from the pin with MAKEFLAGS=\"LOCAL_FERX_CORE=\"."
+  exit 1
+fi

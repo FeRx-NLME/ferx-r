@@ -8,9 +8,38 @@
 # Not executable, and it runs nothing on its own: source it, then call the
 # functions with an explicit lock path.
 
-# The prefix every ferx-core / ferx-tools `source =` line must carry. Matched as
+# The prefix every `source =` line of the crates below must carry. Matched as
 # a literal, never as a regex: it contains `+`, `.` and `/`.
 FERX_GIT_SOURCE_PREFIX='source = "git+https://github.com/FeRx-NLME/ferx-core'
+
+# The crates of the ferx-core repository that src/rust/Cargo.toml depends on:
+# one workspace, so they are pinned to one revision, patched to a sibling
+# checkout together and checked together. The only list of them: the pin check,
+# the sibling build and its harness all read it. ferx-search split out of
+# ferx-tools in ferx-core #3185.
+FERX_CRATES='ferx-core ferx-tools ferx-search'
+
+# Where a crate's manifest lives in a ferx-core checkout, relative to its root.
+ferx_crate_dir() { # crate
+  case "$1" in
+    ferx-core) echo . ;;
+    *) echo "crates/$1" ;;
+  esac
+}
+
+# The crates as a phrase, "ferx-core, ferx-tools and ferx-search".
+ferx_crates_phrase() {
+  # shellcheck disable=SC2086
+  set -- $FERX_CRATES
+  fcp_out=$1
+  shift
+  while [ "$#" -gt 1 ]; do
+    fcp_out="$fcp_out, $1"
+    shift
+  done
+  if [ "$#" -eq 1 ]; then fcp_out="$fcp_out and $1"; fi
+  echo "$fcp_out"
+}
 
 # The `source = ` line of a package's [[package]] table, verbatim, or empty for
 # a path package - which is what an applied [patch] leaves behind.

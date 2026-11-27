@@ -83,7 +83,10 @@
 #'   \code{etas = fit$ebe_etas}.
 #' @param etas Optional data frame of each known subject's own random effects:
 #'   an \code{ID} column plus one column per eta, named and ordered as the
-#'   model declares them (\code{fit$ebe_etas} has exactly this shape, so
+#'   model declares them, leaving out any \code{omega NAME ~ 0 FIX}
+#'   placeholder, which is removed from the model (ferx-core #3150; a table
+#'   with its column is refused with \code{E_SUPPLIED_ETAS}).
+#'   \code{fit$ebe_etas} has exactly this shape (so
 #'   \code{ferx_simulate_adaptive(model, fit = fit, etas = fit$ebe_etas)}
 #'   simulates every fitted subject at its EBEs). A subject with a row is
 #'   simulated at those etas in every replicate instead of a draw from omega;
@@ -144,13 +147,13 @@
 #'       model adds an integer \code{MIXNUM} column, the class each subject
 #'       was drawn into for that replicate; it is absent otherwise.}
 #'     \item{\code{doses}}{The realized dose ledger, \strong{controller-issued
-#'       doses only} (pre-scheduled base doses are excluded): DRAW, SIM, ID, TIME,
+#'       doses only} (pre-scheduled base doses are excluded): DRAW, SIM, REP, ID, TIME,
 #'       AMT, CMT, RATE, DECISION, SIGNAL (the value the controller titrated on -
 #'       assay-noised when \code{with_assay_error}), LATENT (the noise-free
 #'       monitor value that reading was drawn from; equal to SIGNAL when the
 #'       monitor has no assay error), RULE (the rule that fired).}
 #'     \item{\code{decisions}}{One row per review-grid point including holds:
-#'       DRAW, SIM, ID, DECISION, TIME, SIGNAL, LATENT, OUTCOME ("dosed" / "hold" /
+#'       DRAW, SIM, REP, ID, DECISION, TIME, SIGNAL, LATENT, OUTCOME ("dosed" / "hold" /
 #'       "not_due" / "stop"), N_DOSED, INTERVAL. "not_due" marks a grid point
 #'       at which no dose was due under the dosing interval in force (the
 #'       block declares \code{intervals} and \code{start_interval}): the
@@ -158,7 +161,7 @@
 #'       what the monitor read. INTERVAL is the dosing interval in force after
 #'       the decision, NA when the block declares no \code{intervals}.}
 #'     \item{\code{metrics}}{One row per realized run (subject x draw x
-#'       replicate) - the per-subject outcome summary: DRAW, SIM, ID, CUM_DOSE
+#'       replicate) - the per-subject outcome summary: DRAW, SIM, REP, ID, CUM_DOSE
 #'       (sum of controller-issued doses; excludes the base regimen), N_DOSES
 #'       (controller doses only), N_INCREASES / N_DECREASES (realized
 #'       dose-change counts, by dose delta), N_HOLDS (consulted decisions that
@@ -181,6 +184,9 @@
 #'       whose dose expressions read its drawn individual parameters, under
 #'       the block's \code{dose_knowledge = oracle}: a perfect-information
 #'       comparison arm, never a dosing rule).}
+#'     In \code{doses}, \code{decisions} and \code{metrics}, \code{REP} is the
+#'       1-based assay replicate within a \code{(DRAW, SIM)} (ferx-core #946):
+#'       \code{1} on every row of a run without replicates.
 #'     \item{\code{parameters}}{The parameter set each draw was simulated
 #'       under: one row per draw, \code{DRAW} and then one column per
 #'       estimated quantity - theta, the omega elements, sigma, the IOV

@@ -56,16 +56,17 @@ expect() { # name, lockfile, expected exit, message fragment, advice|no-advice
 }
 
 # The committed lock must itself be pinned, or every fixture below is meaningless.
-expect "committed lock" "$LOCK" 0 "ferx-core and ferx-tools pinned to" no-advice
+expect "committed lock" "$LOCK" 0 "ferx-core, ferx-tools and ferx-search pinned to" no-advice
 
-# An applied [patch]: cargo drops both source lines.
+# An applied [patch]: cargo drops every source line.
 awk -v pfx="$PIN_PREFIX" 'index($0, pfx) != 1' "$LOCK" > "$TMP/stripped.lock"
-expect "both pins stripped" "$TMP/stripped.lock" 1 "ferx-core lacks a git source pin" advice
+expect "all pins stripped" "$TMP/stripped.lock" 1 "ferx-core lacks a git source pin" advice
 
-# One pin stripped at a time. ferx-tools' table follows ferx-core's, so a scan that
-# ran past the end of ferx-core's table would borrow ferx-tools' pin; and a
-# stripped ferx-tools must not be excused by the revision check skipping it.
-for crate in ferx-core ferx-tools; do
+# One pin stripped at a time. ferx-search's and ferx-tools' tables follow
+# ferx-core's, so a scan that ran past the end of a table would borrow the next
+# one's pin; and a stripped crate must not be excused by the revision check
+# skipping it.
+for crate in ferx-core ferx-tools ferx-search; do
   awk -v pfx="$PIN_PREFIX" -v crate="$crate" '
     $0 == "name = \"" crate "\"" { hit = 1 }
     hit && index($0, pfx) == 1 { hit = 0; next }
@@ -82,13 +83,16 @@ expect "pinned to a fork" "$TMP/fork.lock" 1 "ferx-core lacks a git source pin" 
 { cat "$LOCK"; printf '\n[[patch.unused]]\nname = "ferx-core"\nversion = "0.0.0"\n'; } > "$TMP/unused.lock"
 expect "[[patch.unused]] appended" "$TMP/unused.lock" 1 "[[patch.unused]]" advice
 
-# The two crates on different revisions of the one repository.
-awk -v pfx="$PIN_PREFIX" '
-  $0 == "name = \"ferx-tools\"" { tools = 1 }
-  tools && index($0, pfx) == 1 { sub(/#[0-9a-f]+/, "#0000000000000000000000000000000000000000"); tools = 0 }
-  { print }
-' "$LOCK" > "$TMP/split.lock"
-expect "revisions split" "$TMP/split.lock" 1 "pinned to different revisions" advice
+# A crate on a different revision of the one repository from ferx-core.
+for crate in ferx-tools ferx-search; do
+  awk -v pfx="$PIN_PREFIX" -v crate="$crate" '
+    $0 == "name = \"" crate "\"" { hit = 1 }
+    hit && index($0, pfx) == 1 { sub(/#[0-9a-f]+/, "#0000000000000000000000000000000000000000"); hit = 0 }
+    { print }
+  ' "$LOCK" > "$TMP/$crate-split.lock"
+  expect "$crate revision split" "$TMP/$crate-split.lock" 1 \
+    "ferx-core ($(grep -m1 -o '#[0-9a-f]*"' "$LOCK" | tr -d '#"')) and $crate" advice
+done
 
 expect "missing lock" "$TMP/does-not-exist.lock" 1 "not found" no-advice
 

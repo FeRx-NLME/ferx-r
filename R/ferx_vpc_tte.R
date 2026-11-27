@@ -131,8 +131,9 @@
 #'       Nelson-Aalen \code{cumhaz}.}
 #'     \item{\code{band}}{The replicate band, one row per grid time per
 #'       stratum: \code{STRATUM}, \code{time}, \code{obs} (the observed curve
-#'       read at \code{time}; \code{NA} past its last time unless it reached
-#'       0), \code{lo}, \code{med}, \code{hi} (the band at \code{probs};
+#'       read at \code{time}; \code{NA} past its last time, also where it
+#'       has reached 0, ferx-core #2930), \code{lo}, \code{med},
+#'       \code{hi} (the band at \code{probs};
 #'       \code{NA} where too few replicates are still under follow-up) and
 #'       \code{n_used}, the number of replicate curves defined there.}
 #'     \item{\code{strata}}{One row per stratum: \code{STRATUM} (its label:
@@ -494,7 +495,30 @@ plot.ferx_vpc_tte <- function(x, y = NULL, engine = c("auto", "vpc", "base"),
 }
 
 .ferx_vpc_tte_plot_vpc <- function(x, smooth = FALSE, ...) {
-  vpc::plot_vpc(.ferx_vpc_tte_vpcdb(x), smooth = smooth, ...)
+  p <- vpc::plot_vpc(.ferx_vpc_tte_vpcdb(x), smooth = smooth, ...)
+  # A stratum with no band (ferx-core #2947) gets the base engine's note in its
+  # panel instead of an observed curve alone.
+  levs <- levels(x$strata$STRATUM)
+  empty <- levs[vapply(levs, function(s) {
+    !nrow(.ferx_vpc_tte_bins(x$band[x$band$STRATUM == s, , drop = FALSE],
+                             x$horizon))
+  }, logical(1))]
+  if (length(empty)) {
+    note <- data.frame(x = rep(x$horizon / 2, length(empty)),
+                       y = rep(0.95, length(empty)),
+                       label = rep(.ferx_vpc_no_band_label, length(empty)))
+    if (nrow(x$strata) > 1L) note$STRATUM <- factor(empty, levels = levs)
+    # The mapping is built from symbols: ggplot2 is only suggested, so its
+    # `.data` pronoun cannot be imported, and `ggplot2::.data$x` is not the
+    # pronoun inside aes() (it fails "while computing aesthetics").
+    mapping <- do.call(ggplot2::aes, lapply(c(x = "x", y = "y", label = "label"),
+                                            as.name))
+    p <- p + ggplot2::geom_text(
+      data = note, mapping = mapping,
+      inherit.aes = FALSE, colour = "firebrick", size = 3
+    )
+  }
+  p
 }
 
 .ferx_vpc_tte_plot_base <- function(x, ...) {
@@ -519,6 +543,7 @@ plot.ferx_vpc_tte <- function(x, y = NULL, engine = c("auto", "vpc", "base"),
     graphics::lines(c(0, o$time), c(1, o$surv), type = "s", lwd = 2)
     cens <- o$n_censor > 0L
     graphics::points(o$time[cens], o$surv[cens], pch = "|")
+    if (!nrow(b)) .ferx_vpc_no_band_note()
   }
   invisible(x)
 }

@@ -382,7 +382,9 @@ ferx_model_validate <- function(path, data = NULL) {
 }
 
 # Evaluate `call` and, on a `ferx_engine_error` with code `code`, replace
-# `from` with `to` in its message and suggestion. For a refusal whose advice
+# `from` with `to` in its message and suggestion. `from` and `to` may be
+# equal-length vectors: each pair is swapped in turn, so one call site states
+# every Rust spelling its refusals can carry instead of nesting calls. For a refusal whose advice
 # names a Rust API (an enum variant, an entry point) where an R user needs the
 # R argument: only that spelling changes, never the engine's prose, class or
 # code, and any other condition passes through untouched. `from` is matched
@@ -391,11 +393,13 @@ ferx_model_validate <- function(path, data = NULL) {
 # pins the R spelling at each call site fails rather than an R user meeting
 # the Rust.
 .ferx_engine_spelling <- function(call, code, from, to) {
+  stopifnot(is.character(from), is.character(to), length(from) == length(to))
   tryCatch(call, ferx_engine_error = function(e) {
     if (identical(e$code, code)) {
       swap <- function(x) {
         if (length(x) != 1L || is.na(x)) return(x)
-        gsub(from, to, x, fixed = TRUE)
+        for (i in seq_along(from)) x <- gsub(from[i], to[i], x, fixed = TRUE)
+        x
       }
       e$message <- swap(e$message)
       e$suggestion <- swap(e$suggestion)

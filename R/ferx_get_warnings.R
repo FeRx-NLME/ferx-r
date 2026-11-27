@@ -364,6 +364,16 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     ))
   }
   if (grepl("W_ODE_OFV_SETTLEMENT_UNCHECKED", message, fixed = TRUE)) {
+    # Since ferx-core #3157 the same token also reports a check the user
+    # switched off; the message then names the setting.
+    if (grepl("ode_ofv_check = false", message, fixed = TRUE)) {
+      return(paste0(
+        "The post-fit OFV settlement check was skipped because ",
+        "settings = list(ode_ofv_check = FALSE) asked for it, so whether the ",
+        "OFV carries integration error is unknown. Leave ode_ofv_check at its ",
+        "default (TRUE) on any fit whose OFV will be compared with another's."
+      ))
+    }
     return(paste0(
       "The post-fit check of whether the OFV is settled at the ODE tolerance ",
       "could not be completed, so that is unknown; the fit itself is ",
@@ -374,8 +384,12 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   if (grepl("W_ODE_SOLVER_ESCALATION_NOTE", message, fixed = TRUE)) {
     return(paste0(
       "ode_method = \"auto\" escalated to a stiff solver and the stiff ",
-      "method coped (informational). Set ode_method explicitly to skip the ",
-      "non-stiff attempt."
+      "method coped (informational). To skip the stiffness probe, name a stiff ",
+      "method (ode_method = \"rodas5p\" or \"rodas4\"), which then runs every ",
+      "segment. Do not pin ode_method = \"rk45\" on the strength of this note: ",
+      "the escalated segments are the ones the probe judged stiff, so an ",
+      "explicit stepper can exhaust its step budget on them and move the OFV ",
+      "(ferx-core #3154)."
     ))
   }
   anchors <- .ferx_ode_solver_anchors()
@@ -441,6 +455,26 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       "late band is drawn from more follow-up than the observed curve. If those ",
       "subjects were followed on, add one DV = 0 (censoring) record per subject ",
       "on the endpoint's CMT at its end of follow-up, then rerun ferx_vpc_tte()."
+    ))
+  }
+  if (startsWith(message, "W_VPC_EMPTY_STRATUM")) {
+    # ferx-core #2947: the panel has no band at any grid time. The message names
+    # the stratum and the first reason that applies; each has its own remedy.
+    remedy <- if (grepl("fewer than `min_at_risk", message, fixed = TRUE)) {
+      "lower min_at_risk, or stratify more coarsely"
+    } else if (grepl("Every grid time is past", message, fixed = TRUE)) {
+      "give grid times inside the simulated follow-up, or a longer sim horizon"
+    } else if (grepl("subjects are at risk there", message, fixed = TRUE)) {
+      # vpc_kmmc's third reason with its at-risk floor: replicate curves stop
+      # counting below min_at_risk, so more replicates alone may not help.
+      "lower min_at_risk, raise n_sim, or stratify more coarsely"
+    } else {
+      "raise n_sim, or stratify more coarsely"
+    }
+    return(paste0(
+      "This stratum's panel has no simulated band at any grid time, so it ",
+      "cannot be judged; the observed curve alone is shown. To get a band, ",
+      remedy, "."
     ))
   }
   if (startsWith(message, "W_VPC_KMMC_TIME_VARYING_COVARIATE")) {
@@ -651,14 +685,38 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       ))
     }
     # covariance_method = "s" alone: the S matrix itself cannot be inverted.
-    # The R-matrix estimators do not need it inverted, so they are the remedy.
+    # Since ferx-core #1780 the message names the cause, and advises the
+    # R-matrix estimators only for the design case (fewer subjects than free
+    # parameters, every score informative): for a zero or collinear score the
+    # objective is flat along the same direction, so R is singular too.
     if (grepl("score cross-product matrix S is singular", message, fixed = TRUE)) {
+      if (grepl("covariance_method = r or rsr", message, fixed = TRUE)) {
+        return(paste0(
+          "The score cross-product S is singular because there are fewer ",
+          "subjects than free parameters, so the S-only covariance cannot be ",
+          "formed on this design. Use an estimator that does not invert S: ",
+          "ferx_covariance(fit, covariance_method = \"r\") or ",
+          "covariance_method = \"rsr\". Both need the R matrix positive ",
+          "definite at the estimate, which after saem, imp, impmap or vi it ",
+          "may not be."
+        ))
+      }
+      # The all-zero case names no parameter: nothing the fit scored depends
+      # on any of them.
+      if (grepl("zero for every free parameter", message, fixed = TRUE)) {
+        return(paste0(
+          "The score cross-product S is zero because no subject's likelihood ",
+          "depends on any estimated parameter as scored. Check that the model ",
+          "reads its parameters and that the data carry scored observations; ",
+          "no covariance_method can help until it does."
+        ))
+      }
       return(paste0(
-        "The score cross-product S is singular, which usually means fewer ",
-        "subjects than free parameters or collinear per-subject scores, so the ",
-        "S-only covariance cannot be formed. Use an estimator that does not ",
-        "invert S: ferx_covariance(fit, covariance_method = \"r\") or ",
-        "covariance_method = \"rsr\"."
+        "The score cross-product S is singular because the data do not inform ",
+        "the parameters the message names (a score that is zero, nearly zero, ",
+        "or collinear with another in every subject). Fix or remove those ",
+        "parameters as it says; covariance_method = \"r\" or \"rsr\" will not ",
+        "help, since the objective is flat along the same direction."
       ))
     }
     # The covariance step of a fit with a `profile` theta level block
@@ -960,6 +1018,43 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
     return(paste0(
       "Standard errors unavailable. Check identifiability; try a simpler ",
       "omega/sigma structure or covariance = FALSE for development."
+    ))
+  }
+  # Two parse/fit notes the engine files under `general`, keyed on their
+  # tokens (ferx-core #3150, #1580).
+  if (grepl("W_ZERO_FIX_ETA_DROPPED", message, fixed = TRUE)) {
+    return(paste0(
+      "Informational: the named eta has variance 0 FIX, so it was removed and ",
+      "the model fitted is the one written without it (as NONMEM treats ",
+      "$OMEGA 0 FIX). It has no row in fit$omega, fit$eta_names, the EBEs, ",
+      "the shrinkage tables or the sdtab. Anything sized per eta that you ",
+      "supply - an omega from a NONMEM run, a table of etas - must leave it ",
+      "out. Delete the line to silence this note."
+    ))
+  }
+  # ferx-core #2438: plain `gn` on fewer subjects than free parameters. Matched
+  # on the engine's fixed head and middle (gauss_newton.rs
+  # GN_RANK_DEFICIENT_HEAD / _MID), whatever category it arrives under, so the
+  # generic convergence advice (other initial values, more starts) cannot
+  # contradict the engine's remedy beside it.
+  if (grepl("Gauss-Newton (BHHH): ", message, fixed = TRUE) &&
+      grepl(" free parameters, so the BHHH information has rank at most ",
+            message, fixed = TRUE)) {
+    return(paste0(
+      "With fewer subjects than free parameters, Gauss-Newton's information ",
+      "matrix is singular by construction, so new initial values or more ",
+      "starts will not help. Refit with method = \"gn_hybrid\" (its L-BFGS ",
+      "polish needs no BHHH matrix) or another method."
+    ))
+  }
+  if (grepl("W_DERIVED_CMT_TWIN_ANALYTICAL", message, fixed = TRUE)) {
+    return(paste0(
+      "The [derived] columns that read compartments[i] are NaN for the ",
+      "subjects the closed-form transit / inverse-Gaussian model solves on its ",
+      "ODE equivalent (a steady-state or infusion dose, a TIME-reading ",
+      "parameter, flip-flop kinetics); IPRED and the fit are unaffected. ",
+      "Write the model as an explicit ODE transit() / igd() model to get ",
+      "compartment states for every subject."
     ))
   }
   # ferx-core has no `unused_parameter` code -- its unused-declaration messages
