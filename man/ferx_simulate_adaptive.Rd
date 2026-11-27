@@ -142,7 +142,7 @@ for bit. \code{decompose = TRUE} needs \code{n_reps >= 2}.}
 \item{summary_probs}{The three probabilities of every band and prediction
 interval in the population summary (the \code{LO}, \code{MED} and
 \code{HI} columns), strictly inside (0, 1) and strictly increasing
-(default \code{c(0.05, 0.5, 0.95)}; otherwise refused, coded
+(default \code{c(0.05, 0.5, 0.95)}; otherwise refused before the run, coded
 \code{E_ADAPTIVE_OPTIONS}).}
 
 \item{summary_thresholds}{Optional thresholds for the population summary:
@@ -158,7 +158,10 @@ monitor's latent signal at one decision (\code{DECISION} numbered as in
 \code{N_NOT_DUE}, \code{DISCONTINUED} (as 1/0), \code{SIGNAL_MIN},
 \code{SIGNAL_MAX}, \code{SIGNAL_MEAN}, \code{PCT_READINGS_IN_WINDOW},
 \code{AUC_TARGET_ATTAINMENT} and \code{SIGNAL}. A non-finite threshold is
-refused, coded \code{E_ADAPTIVE_OPTIONS}.}
+refused before the run, coded \code{E_ADAPTIVE_OPTIONS}. A
+\code{"SIGNAL"} threshold whose analyte and decision no run recorded (a
+mistyped \code{ANALYTE}, a \code{DECISION} past the schedule) gives
+\code{NA} rows and a warning naming what the runs did record.}
 
 \item{decompose}{If \code{TRUE}, also split the variance of every summary
 metric into its parameter-uncertainty, between-subject and within-subject

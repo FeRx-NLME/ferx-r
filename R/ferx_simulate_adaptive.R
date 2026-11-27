@@ -150,7 +150,7 @@
 #' @param summary_probs The three probabilities of every band and prediction
 #'   interval in the population summary (the \code{LO}, \code{MED} and
 #'   \code{HI} columns), strictly inside (0, 1) and strictly increasing
-#'   (default \code{c(0.05, 0.5, 0.95)}; otherwise refused, coded
+#'   (default \code{c(0.05, 0.5, 0.95)}; otherwise refused before the run, coded
 #'   \code{E_ADAPTIVE_OPTIONS}).
 #' @param summary_thresholds Optional thresholds for the population summary:
 #'   each adds a \code{"fraction_at_least"} statistic, the fraction of runs
@@ -165,7 +165,10 @@
 #'   \code{N_NOT_DUE}, \code{DISCONTINUED} (as 1/0), \code{SIGNAL_MIN},
 #'   \code{SIGNAL_MAX}, \code{SIGNAL_MEAN}, \code{PCT_READINGS_IN_WINDOW},
 #'   \code{AUC_TARGET_ATTAINMENT} and \code{SIGNAL}. A non-finite threshold is
-#'   refused, coded \code{E_ADAPTIVE_OPTIONS}.
+#'   refused before the run, coded \code{E_ADAPTIVE_OPTIONS}. A
+#'   \code{"SIGNAL"} threshold whose analyte and decision no run recorded (a
+#'   mistyped \code{ANALYTE}, a \code{DECISION} past the schedule) gives
+#'   \code{NA} rows and a warning naming what the runs did record.
 #' @param decompose If \code{TRUE}, also split the variance of every summary
 #'   metric into its parameter-uncertainty, between-subject and within-subject
 #'   layers (\code{variance_components}, \code{variance_skipped}). The design
@@ -473,6 +476,8 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
     )
   }
 
+  .ferx_adaptive_warn_unrecorded_signals(res, run_options)
+
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run (ferx-r #426).
   .ferx_surface_sim_warnings(res, "ferx_simulate_adaptive")
@@ -516,6 +521,40 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   )
 }
 
+# A `SIGNAL` threshold whose analyte and decision no run recorded - a
+# mistyped ANALYTE, a DECISION past the schedule - gives summary rows that are
+# NA throughout, as core reports a metric no run carries. Not an error: a late
+# decision every run stopped before is a real, empty answer. But a typo should
+# not pass as one, so warn, naming what was recorded (#779 review, finding 2).
+.ferx_adaptive_warn_unrecorded_signals <- function(res, run_options) {
+  is_sig <- run_options$threshold_metric == "SIGNAL"
+  if (!any(is_sig)) return(invisible())
+  rows <- res$summary_rows
+  sig <- rows[rows$METRIC == "SIGNAL" & rows$STATISTIC == "mean", , drop = FALSE]
+  recorded <- sig[sig$N_MISSING < sig$N_RUNS, , drop = FALSE]
+  key <- function(a, d) paste0("ANALYTE \"", a, "\" at DECISION ", d)
+  asked <- unique(key(run_options$threshold_analyte[is_sig],
+                      run_options$threshold_decision[is_sig]))
+  missing <- setdiff(asked, unique(key(recorded$ANALYTE, recorded$DECISION)))
+  if (length(missing) == 0L) return(invisible())
+  seen <- if (nrow(recorded) == 0L) {
+    "no signal at all"
+  } else {
+    ranges <- vapply(split(recorded$DECISION, recorded$ANALYTE), function(d) {
+      paste0(range(d), collapse = "-")
+    }, character(1))
+    paste0("ANALYTE \"", names(ranges), "\" at DECISION ", ranges,
+           collapse = ", ")
+  }
+  warning(
+    "ferx_simulate_adaptive: no run recorded a signal for the ",
+    "`summary_thresholds` row(s) ", paste(missing, collapse = "; "),
+    ", so their summary rows are NA. The runs recorded ", seen, ".",
+    call. = FALSE
+  )
+  invisible()
+}
+
 # `summary_thresholds =` as four parallel vectors. A named list or named
 # numeric vector maps a `metrics` column name to one or more thresholds
 # (`list(PCT_READINGS_IN_WINDOW = 0.8, CUM_DOSE = c(5000, 8000))`); a data
@@ -542,10 +581,14 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
     decision <- col_or_na("DECISION", NA_integer_)
     if (!is.numeric(decision) && !all(is.na(decision))) bad()
     if (any(!is.na(decision) & decision != round(decision))) bad()
+    # A table read with `read.csv()` has "" where a scalar row has no
+    # analyte: the same as NA (#779 review, finding 7).
+    analyte <- as.character(col_or_na("ANALYTE", NA_character_))
+    analyte[!is.na(analyte) & analyte == ""] <- NA_character_
     return(list(
       metric = as.character(x$METRIC),
       value = as.double(x$THRESHOLD),
-      analyte = as.character(col_or_na("ANALYTE", NA_character_)),
+      analyte = analyte,
       decision = as.integer(decision)
     ))
   }

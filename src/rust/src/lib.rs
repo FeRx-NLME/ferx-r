@@ -1514,7 +1514,13 @@ fn simulate_adaptive(
                 None
             };
             attach_sim_warnings(
-                adaptive_result_to_list(&result, &parsed.model, &summary, decomposition.as_ref())?,
+                adaptive_result_to_list(
+                    &result,
+                    &parsed.model,
+                    &summary,
+                    extras.summary.probs,
+                    decomposition.as_ref(),
+                )?,
                 occasion_notes,
                 &result,
             )
@@ -1576,16 +1582,70 @@ impl AdaptiveRunExtras {
         if value.len() != n || analyte.len() != n || decision.len() != n {
             return Err("internal: the `run_options` threshold vectors differ in length".to_string());
         }
+        // The checks `summarize_adaptive` makes, made here first so the refusal
+        // names the R argument and the R metric spelling, not the Rust enum
+        // (`CumulativeDose`, `[0.5, 0.1, 0.9]`); the code is core's, and core's
+        // own check stays behind it (#779 review, finding 1). Before the run,
+        // so a bad option costs no simulation.
+        let increasing = probs.windows(2).all(|w| w[0] < w[1]);
+        if !probs.iter().all(|p| p.is_finite() && *p > 0.0 && *p < 1.0) || !increasing {
+            let shown: Vec<String> = probs.iter().map(|p| r_number(*p)).collect();
+            return Err(adaptive_options_refusal(format!(
+                "`summary_probs` c({}) must be three probabilities strictly inside (0, 1) and \
+                 strictly increasing",
+                shown.join(", ")
+            )));
+        }
         let mut summary = ferx_core::AdaptiveSummaryOptions::default();
         summary.probs = probs;
         for i in 0..n {
             let m = summary_metric_from_r(&metric[i], analyte[i].clone(), decision[i])?;
+            if !value[i].is_finite() {
+                let what = match (&analyte[i], decision[i]) {
+                    (Some(a), Some(d)) => format!("SIGNAL (ANALYTE \"{a}\", DECISION {d})"),
+                    _ => metric[i].clone(),
+                };
+                return Err(adaptive_options_refusal(format!(
+                    "`summary_thresholds`: the threshold for {what} is {}; it must be finite",
+                    r_number(value[i])
+                )));
+            }
             summary.thresholds.push((m, value[i]));
         }
         let decompose = col("decompose")?
             .as_bool()
             .ok_or_else(|| mistyped("decompose", "a single logical"))?;
         Ok(Self { n_reps: n_reps.max(0) as usize, summary, decompose })
+    }
+}
+
+/// A refusal of the adaptive summary options this glue makes before the run,
+/// recorded with core's code for them (`E_ADAPTIVE_OPTIONS`), so R classes it
+/// exactly as the engine's own refusal of the same options.
+fn adaptive_options_refusal(message: String) -> String {
+    let message = format!("ferx_simulate_adaptive: {message}");
+    let text = format!("{message} [E_ADAPTIVE_OPTIONS]");
+    *PENDING_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) = Some(EngineDiagnostic {
+        kind: RecordKind::Engine,
+        message,
+        code: "E_ADAPTIVE_OPTIONS".to_string(),
+        block: None,
+        line: None,
+        suggestion: None,
+        text: text.clone(),
+    });
+    text
+}
+
+/// `x` as R prints a double: `NA` for R's `NA_real_` and `NaN` alike (both
+/// reach Rust as a NaN), `Inf` / `-Inf`, else the shortest round-trip form.
+fn r_number(x: f64) -> String {
+    if x.is_nan() {
+        "NA".to_string()
+    } else if x.is_infinite() {
+        if x > 0.0 { "Inf" } else { "-Inf" }.to_string()
+    } else {
+        format!("{x}")
     }
 }
 
@@ -1627,6 +1687,10 @@ fn summary_metric_from_r(
                 analyte,
                 decision_idx: d as usize,
             }),
+            (Some(_), Some(d)) => Err(format!(
+                "ferx_simulate_adaptive: a `SIGNAL` threshold's `DECISION` is {d}; decisions are \
+                 numbered from 0, as `decisions$DECISION`"
+            )),
             _ => Err(
                 "ferx_simulate_adaptive: a `SIGNAL` threshold needs an `ANALYTE` (the monitor's \
                  name) and a `DECISION` (the 0-based decision index, as `decisions$DECISION`)"
@@ -1721,17 +1785,13 @@ fn quantile_cols(q: &[[Option<f64>; 3]]) -> Vec<(&'static str, Robj)> {
 
 /// [`ferx_core::AdaptivePopulationSummary`] as three R data frames:
 /// `summary_rows`, `summary_bands` and `prediction_intervals`. The bands and
-/// intervals carry the probabilities of LO / MED / HI as a `probs` attribute.
+/// intervals carry the probabilities of LO / MED / HI as a `probs` attribute:
+/// `probs`, the options the summary ran with, never read back from a row
+/// (#779 review, finding 8).
 fn adaptive_summary_to_r(
     s: &ferx_core::AdaptivePopulationSummary,
+    probs: [f64; 3],
 ) -> std::result::Result<(Robj, Robj, Robj), String> {
-    // Every interval carries the probabilities the summary ran with (one set
-    // per run), and there is always one per scalar metric.
-    let probs = s
-        .prediction_intervals
-        .first()
-        .map(|p| p.quantiles.probs)
-        .unwrap_or(ferx_core::AdaptiveSummaryOptions::default().probs);
 
     // -- rows: one per (metric, statistic, draw) --
     let mut mc = MetricCols::default();
@@ -1910,6 +1970,7 @@ fn adaptive_result_to_list(
     result: &ferx_core::AdaptiveSimulationResult,
     model: &CompiledModel,
     summary: &ferx_core::AdaptivePopulationSummary,
+    summary_probs: [f64; 3],
     decomposition: Option<&ferx_core::AdaptiveDecomposition>,
 ) -> std::result::Result<Robj, String> {
     let trajectories = sim_results_to_df(&result.trajectories);
@@ -1998,7 +2059,7 @@ fn adaptive_result_to_list(
         DOSE_ORACLE = m.iter().map(|e| e.dose_oracle).collect::<Vec<bool>>()
     );
 
-    let (summary_rows, summary_bands, prediction_intervals) = adaptive_summary_to_r(summary)?;
+    let (summary_rows, summary_bands, prediction_intervals) = adaptive_summary_to_r(summary, summary_probs)?;
     let (variance_components, variance_skipped) = match decomposition {
         Some(d) => adaptive_decomposition_to_r(d)?,
         None => (Robj::from(()), Robj::from(())),

@@ -12,7 +12,7 @@
 # A 1-cpt IV adaptive model titrating on the noise-free (Ipred) signal and with
 # no IOV: nothing is redrawn per assay replicate, so every replicate of a
 # (SIM, ID) must repeat the first exactly if its eta is held fixed.
-.write_ipred_model <- function() {
+.write_ipred_model <- function(rules = "  when signal < 10 : increase 25%") {
   path <- tempfile(fileext = ".ferx")
   writeLines(c(
     "[parameters]",
@@ -38,7 +38,7 @@
     "  route       = bolus(cmt=1)",
     "  dose_bounds = [0, 2000]",
     "  confirm     = 1",
-    "  when signal < 10 : increase 25%"
+    rules
   ), path)
   path
 }
@@ -193,11 +193,31 @@ test_that("a SIGNAL threshold is given by data frame, with its analyte and decis
 })
 
 test_that("summary options are refused: bad probs and non-finite thresholds coded, unknown metrics named", {
-  e <- tryCatch(.tdm_run(summary_probs = c(0.5, 0.1, 0.9)), error = function(e) e)
-  expect_identical(e$code, "E_ADAPTIVE_OPTIONS")
-  e <- tryCatch(.tdm_run(summary_thresholds = list(CUM_DOSE = Inf)),
-                error = function(e) e)
-  expect_identical(e$code, "E_ADAPTIVE_OPTIONS")
+  # Refused in R's spelling - the argument and the metrics column, never the
+  # Rust enum or array (#779 review, finding 1) - and still coded.
+  coded <- function(expr, pattern) {
+    e <- tryCatch(expr, error = function(e) e)
+    expect_s3_class(e, "ferx_engine_error")
+    expect_identical(e$code, "E_ADAPTIVE_OPTIONS")
+    expect_match(conditionMessage(e), pattern, fixed = TRUE)
+    expect_false(grepl("summarize_adaptive|CumulativeDose|Signal \\{|\\[0",
+                       conditionMessage(e)))
+  }
+  coded(.tdm_run(summary_probs = c(0.5, 0.1, 0.9)),
+        "`summary_probs` c(0.5, 0.1, 0.9) must be three probabilities")
+  coded(.tdm_run(summary_probs = c(0, 0.5, 1)), "`summary_probs` c(0, 0.5, 1)")
+  coded(.tdm_run(summary_thresholds = list(CUM_DOSE = Inf)),
+        "the threshold for CUM_DOSE is Inf; it must be finite")
+  coded(.tdm_run(summary_thresholds = list(PCT_READINGS_IN_WINDOW = NA_real_)),
+        "the threshold for PCT_READINGS_IN_WINDOW is NA")
+  coded(.tdm_run(summary_thresholds = data.frame(
+          METRIC = "SIGNAL", THRESHOLD = -Inf, ANALYTE = "signal", DECISION = 1L)),
+        "the threshold for SIGNAL (ANALYTE \"signal\", DECISION 1) is -Inf")
+  # A negative decision is named as such, not as a missing one (finding 7).
+  expect_error(.tdm_run(summary_thresholds = data.frame(
+                 METRIC = "SIGNAL", THRESHOLD = 1, ANALYTE = "signal",
+                 DECISION = -1L)),
+               "`DECISION` is -1; decisions are numbered from 0")
   expect_error(.tdm_run(summary_thresholds = list(FOO = 1)),
                "`FOO` is not a summary metric")
   expect_error(.tdm_run(summary_thresholds = data.frame(METRIC = "SIGNAL",
@@ -219,9 +239,42 @@ test_that("a run with one draw has no band: STATUS not_drawn, never a zero-width
   expect_true(all(res$summary_rows$DRAW == 1L))
 })
 
-test_that("custom summary_probs reach the prediction intervals", {
+test_that("a read.csv threshold table (\"\" for no analyte) is accepted", {
+  thr <- data.frame(METRIC = c("CUM_DOSE", "SIGNAL"), THRESHOLD = c(9000, 10),
+                    ANALYTE = c("", "signal"), DECISION = c(NA, 3L))
+  res <- expect_silent(.tdm_run(n_sim = 3L, summary_thresholds = thr))
+  fr <- res$summary_rows[res$summary_rows$STATISTIC == "fraction_at_least", ]
+  expect_setequal(fr$METRIC, c("CUM_DOSE", "SIGNAL"))
+  expect_equal(fr$VALUE[fr$METRIC == "CUM_DOSE"], mean(res$metrics$CUM_DOSE >= 9000))
+})
+
+test_that("a SIGNAL threshold no run recorded warns, naming what was recorded", {
+  # A mistyped analyte, or a decision past the schedule: NA rows, and a
+  # warning rather than silence (#779 review, finding 2).
+  for (thr in list(
+    data.frame(METRIC = "SIGNAL", THRESHOLD = 10, ANALYTE = "signal_typo", DECISION = 1L),
+    data.frame(METRIC = "SIGNAL", THRESHOLD = 10, ANALYTE = "signal", DECISION = 999L)
+  )) {
+    expect_warning(
+      res <- .tdm_run(n_sim = 3L, summary_thresholds = thr),
+      paste0("no run recorded a signal for the `summary_thresholds` row\\(s\\) ",
+             "ANALYTE \"", thr$ANALYTE, "\" at DECISION ", thr$DECISION,
+             ".*recorded ANALYTE \"signal\" at DECISION 0-8")
+    )
+    r <- res$summary_rows
+    hit <- r[r$METRIC == "SIGNAL" & r$ANALYTE == thr$ANALYTE &
+               r$DECISION == thr$DECISION, ]
+    expect_true(all(is.na(hit$VALUE) & hit$N_MISSING == hit$N_RUNS))
+  }
+  # A recorded one does not warn.
+  expect_silent(.tdm_run(n_sim = 3L, summary_thresholds = data.frame(
+    METRIC = "SIGNAL", THRESHOLD = 10, ANALYTE = "signal", DECISION = 8L)))
+})
+
+test_that("custom summary_probs reach the prediction intervals and the bands", {
   res <- .tdm_run(n_sim = 5L, summary_probs = c(0.25, 0.5, 0.75))
   expect_identical(attr(res$prediction_intervals, "probs"), c(0.25, 0.5, 0.75))
+  expect_identical(attr(res$summary_bands, "probs"), c(0.25, 0.5, 0.75))
   pi <- res$prediction_intervals[res$prediction_intervals$METRIC == "CUM_DOSE", ]
   expect_equal(unname(unlist(pi[c("LO", "MED", "HI")])),
                unname(stats::quantile(res$metrics$CUM_DOSE, c(0.25, 0.5, 0.75))))
