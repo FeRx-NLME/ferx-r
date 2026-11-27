@@ -14,7 +14,11 @@ ferx_simulate_adaptive(
   fit = NULL,
   etas = NULL,
   unmatched = c("refuse", "draw"),
-  uncertainty = NULL
+  uncertainty = NULL,
+  n_reps = 1L,
+  summary_probs = c(0.05, 0.5, 0.95),
+  summary_thresholds = NULL,
+  decompose = FALSE
 )
 }
 \arguments{
@@ -123,9 +127,49 @@ evaluated at the fit's estimate in every draw, while a
 \code{dose_knowledge = oracle} subject is dosed from its own draw's
 parameters. Warnings and refusals name the replicate as
 \code{"(draw d, sim s)"} only in a run with uncertainty.}
+
+\item{n_reps}{Assay replicates per subject run (ferx-core #946), a whole
+number >= 1 (default \code{1L}). Each subject's eta (and \code{[mixture]}
+class) is drawn once per \code{(DRAW, SIM)} and held fixed across
+replicates \code{1..n_reps}, while the IOV kappas and the controller's
+assay noise are drawn afresh for each, so the controller re-runs on the
+same patient under new within-subject noise. \code{doses},
+\code{decisions} and \code{metrics} carry each row's \code{REP};
+\code{trajectories} holds replicate 1 only (join it on
+\code{REP == 1}). \code{n_reps = 1} is the run without replicates, bit
+for bit. \code{decompose = TRUE} needs \code{n_reps >= 2}.}
+
+\item{summary_probs}{The three probabilities of every band and prediction
+interval in the population summary (the \code{LO}, \code{MED} and
+\code{HI} columns), strictly inside (0, 1) and strictly increasing
+(default \code{c(0.05, 0.5, 0.95)}; otherwise refused, coded
+\code{E_ADAPTIVE_OPTIONS}).}
+
+\item{summary_thresholds}{Optional thresholds for the population summary:
+each adds a \code{"fraction_at_least"} statistic, the fraction of runs
+whose value is at least the threshold. Either a named list (or named
+numeric vector) from a \code{metrics} column name to one or more
+thresholds, e.g. \code{list(PCT_READINGS_IN_WINDOW = 0.8)}, or a data
+frame with \code{METRIC} and \code{THRESHOLD} columns, plus
+\code{ANALYTE} and \code{DECISION} for a \code{"SIGNAL"} threshold on one
+monitor's latent signal at one decision (\code{DECISION} numbered as in
+\code{decisions$DECISION}). The metrics are \code{CUM_DOSE},
+\code{N_DOSES}, \code{N_INCREASES}, \code{N_DECREASES}, \code{N_HOLDS},
+\code{N_NOT_DUE}, \code{DISCONTINUED} (as 1/0), \code{SIGNAL_MIN},
+\code{SIGNAL_MAX}, \code{SIGNAL_MEAN}, \code{PCT_READINGS_IN_WINDOW},
+\code{AUC_TARGET_ATTAINMENT} and \code{SIGNAL}. A non-finite threshold is
+refused, coded \code{E_ADAPTIVE_OPTIONS}.}
+
+\item{decompose}{If \code{TRUE}, also split the variance of every summary
+metric into its parameter-uncertainty, between-subject and within-subject
+layers (\code{variance_components}, \code{variance_skipped}). The design
+has to separate the layers: \code{n_reps >= 2}, \code{n_sim >= 2}, and
+with \code{uncertainty} at least two draws; otherwise the call is refused,
+coded \code{E_ADAPTIVE_OPTIONS}. Default \code{FALSE}.}
 }
 \value{
-A list of five data frames:
+A list of data frames (five run tables, three summary tables and
+two decomposition tables):
 \describe{
 \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 OBSERVED - the per-observation predictions, as in
@@ -186,6 +230,55 @@ rows of \code{fit$cov_matrix} (\code{TVCL}, \code{ETA_CL},
 \code{DRAW}; a parameter itself named \code{DRAW} is renamed
 \code{DRAW.1}, as \code{make.unique()} would. Without \code{uncertainty} it has these columns and
 no rows.}
+\item{\code{summary_rows}}{The population summary (ferx-core #946),
+one row per metric, statistic and draw: DRAW, METRIC (a
+\code{metrics} column name, or \code{"SIGNAL"} for one monitor's
+latent signal at one decision), ANALYTE and DECISION (the monitor's
+name and the decision index, as in \code{decisions$DECISION}, for
+\code{"SIGNAL"}; \code{NA} otherwise), STATISTIC (\code{"mean"},
+\code{"median"} or \code{"fraction_at_least"}), THRESHOLD (the
+\code{summary_thresholds} value of a \code{"fraction_at_least"} row,
+\code{NA} otherwise), VALUE (over the draw's runs that carry the
+metric; \code{NA} when none does), N_RUNS (runs in the draw, every
+subject, SIM and REP counted equally) and N_MISSING (runs carrying no
+value, which are skipped, never imputed). \code{DISCONTINUED} is
+summarised as 1/0, so its mean is the fraction discontinued;
+\code{TIME_TO_DISCONT} is censored and not summarised.}
+\item{\code{summary_bands}}{The parameter-uncertainty band of each
+per-draw statistic, its quantiles across draws: METRIC, ANALYTE,
+DECISION, STATISTIC, THRESHOLD, N_DRAWS_PRESENT, N_DRAWS_MISSING,
+STATUS (\code{"not_drawn"} for a run with one draw, which has no
+band and is never reported as a zero-width one, else
+\code{"quantiles"}), LO, MED, HI at \code{summary_probs} (type 7;
+\code{NA} until there are enough values to resolve a quantile, e.g.
+19 for 5\\% / 95\\%). The probabilities are its \code{probs}
+attribute.}
+\item{\code{prediction_intervals}}{Each metric's individual values
+pooled over every run of every draw - where one simulated patient
+falls, parameter uncertainty included: METRIC, ANALYTE, DECISION, LO,
+MED, HI, N_RUNS, N_MISSING, with the same quantile rule and
+\code{probs} attribute as \code{summary_bands}.}
+\item{\code{variance_components}}{With \code{decompose = TRUE}
+(\code{NULL} otherwise): the nested variance decomposition of each
+metric, long form. METRIC, ANALYTE, DECISION, SCOPE
+(\code{"subject"} or \code{"population"}), ID (the subject;
+\code{NA} on a population row), LAYER (\code{"parameter"},
+\code{"bsv"}, \code{"within"} - IOV and assay noise -,
+\code{"between_subject"} on population rows, and \code{"total"}),
+STATUS (\code{"estimated"}, \code{"not_drawn"} for the parameter
+layer of a run without \code{uncertainty}, \code{"supplied"} for the
+BSV of a subject run at its own \code{etas}), VALUE (as estimated: a
+negative estimate is not truncated), MC_SE (its jackknife Monte Carlo
+standard error; \code{NA} when the design cannot form one) and
+N_SUBJECTS. A subject's total is the sum of its estimated layers; the
+population total is the mean subject total plus the between-subject
+line, which is the sum of the population lines when no subject's eta
+was supplied. Attributes \code{n_draws}, \code{n_sims} and
+\code{n_reps} give the design.}
+\item{\code{variance_skipped}}{With \code{decompose = TRUE}: the
+(metric, subject) pairs left out because the metric is missing in
+some of the subject's runs: METRIC, ANALYTE, DECISION, ID,
+N_MISSING.}
 }
 
 \code{DRAW} on every table is the parameter draw a row was simulated
@@ -261,6 +354,14 @@ known <- data.frame(ID = c("1", "2"), ETA_CL = c(0.3, -0.2))
 res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L,
                               etas = known, unmatched = "draw")
 table(res$metrics$ID, res$metrics$ETA_SUPPLIED)
+
+# Three assay replicates per patient, the fraction of runs with at least
+# 80\% of readings in the target window, and the variance decomposition.
+res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L,
+                              n_reps = 3L, decompose = TRUE,
+                              summary_thresholds = list(PCT_READINGS_IN_WINDOW = 0.8))
+subset(res$summary_rows, METRIC == "PCT_READINGS_IN_WINDOW")
+subset(res$variance_components, SCOPE == "population" & METRIC == "CUM_DOSE")
 
 # With a fit to observed data, each fitted subject at its own EBEs:
 # ferx_simulate_adaptive(model, data, fit = fit, etas = fit$ebe_etas)

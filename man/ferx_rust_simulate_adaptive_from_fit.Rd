@@ -32,7 +32,8 @@ ferx_rust_simulate_adaptive_from_fit(
   sir_resamples_flat,
   sir_resamples_n,
   sir_resamples_dim,
-  n_draws
+  n_draws,
+  run_options
 )
 }
 \description{

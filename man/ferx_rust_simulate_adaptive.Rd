@@ -15,7 +15,8 @@ ferx_rust_simulate_adaptive(
   eta_ids,
   eta_names,
   eta_flat,
-  unmatched
+  unmatched,
+  run_options
 )
 }
 \description{

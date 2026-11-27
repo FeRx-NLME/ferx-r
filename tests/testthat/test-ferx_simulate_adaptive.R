@@ -52,11 +52,13 @@
 
 
 
-test_that("ferx_simulate_adaptive returns five named data frames", {
+test_that("ferx_simulate_adaptive returns its named data frames", {
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 1L)
   expect_type(res, "list")
-  expect_named(res, c("trajectories", "doses", "decisions", "metrics", "parameters"))
+  expect_named(res, c("trajectories", "doses", "decisions", "metrics", "parameters",
+                      "summary_rows", "summary_bands", "prediction_intervals",
+                      "variance_components", "variance_skipped"))
   expect_s3_class(res$trajectories, "data.frame")
   expect_s3_class(res$doses, "data.frame")
   expect_s3_class(res$decisions, "data.frame")
@@ -160,7 +162,9 @@ test_that("verify = FALSE skips the replay verifier and still returns results", 
   ex  <- ferx_example("adaptive_tdm")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 1L, seed = 1L,
                                 verify = FALSE)
-  expect_named(res, c("trajectories", "doses", "decisions", "metrics", "parameters"))
+  expect_named(res, c("trajectories", "doses", "decisions", "metrics", "parameters",
+                      "summary_rows", "summary_bands", "prediction_intervals",
+                      "variance_components", "variance_skipped"))
   expect_gt(nrow(res$doses), 0L)
 })
 test_that("a non-logical `verify` is rejected before touching the engine", {
@@ -409,7 +413,9 @@ test_that("a dosed base subject (pre-scheduled loading dose) now simulates", {
   # This used to be rejected outright ("requires a dose-free base subject").
   ex  <- ferx_example("adaptive_vanco_loading")
   res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 2L, seed = 1L)
-  expect_named(res, c("trajectories", "doses", "decisions", "metrics", "parameters"))
+  expect_named(res, c("trajectories", "doses", "decisions", "metrics", "parameters",
+                      "summary_rows", "summary_bands", "prediction_intervals",
+                      "variance_components", "variance_skipped"))
   expect_gt(nrow(res$doses), 0L)
 })
 
@@ -1534,4 +1540,45 @@ test_that("uncertainty: method = \"sir\" draws are rows of the fit's kept pool",
   }
   # More than one row of the pool is used.
   expect_gt(length(unique(p[, "TVCL"])), 1L)
+})
+
+# The population summary under parameter uncertainty (ferx-core #946 PR2): a
+# band across draws, read from the per-draw rows. With 3 draws only the median
+# is resolvable (the 5% / 95% quantiles need 19 values). Mutation that reddens
+# this: the glue dropping the band's quantiles, or mislabelling its status.
+test_that("uncertainty: summary bands are the quantiles across draws of the per-draw rows", {
+  res <- .run_unc(uncertainty = list(n_draws = 3L))
+  rows <- res$summary_rows
+  expect_identical(sort(unique(rows$DRAW)), 1:3)
+  b <- res$summary_bands
+  expect_true(all(b$STATUS == "quantiles"))
+  cum <- b[b$METRIC == "CUM_DOSE" & b$STATISTIC == "mean", ]
+  per_draw <- rows$VALUE[rows$METRIC == "CUM_DOSE" & rows$STATISTIC == "mean"]
+  expect_length(per_draw, 3L)
+  expect_identical(cum$N_DRAWS_PRESENT, 3L)
+  expect_equal(cum$MED, stats::median(per_draw))
+  expect_true(is.na(cum$LO) && is.na(cum$HI))
+  # Each draw's mean is its own runs' mean.
+  m <- res$metrics
+  expect_equal(per_draw, as.vector(tapply(m$CUM_DOSE, m$DRAW, mean)))
+})
+
+# n_reps reaches the from-fit / uncertainty glue path too, and with two draws
+# the decomposition estimates a parameter layer. Mutation that reddens this:
+# the from-fit entry point not passing `run_options` on.
+test_that("uncertainty: n_reps and decompose on the from-fit path estimate a parameter layer", {
+  res <- .run_unc(uncertainty = list(n_draws = 2L), n_reps = 2L, decompose = TRUE)
+  for (tbl in c("doses", "decisions", "metrics")) {
+    expect_identical(sort(unique(res[[tbl]]$REP)), 1:2, label = tbl)
+  }
+  vc <- res$variance_components
+  expect_identical(attr(vc, "n_draws"), 2L)
+  expect_identical(attr(vc, "n_reps"), 2L)
+  par <- vc[vc$LAYER == "parameter" & vc$METRIC == "CUM_DOSE", ]
+  expect_true(all(par$STATUS == "estimated"))
+  # One draw under uncertainty cannot estimate it: refused, in R's spelling.
+  e <- tryCatch(.run_unc(uncertainty = list(n_draws = 1L), n_reps = 2L,
+                         decompose = TRUE), error = function(e) e)
+  expect_identical(e$code, "E_ADAPTIVE_OPTIONS")
+  expect_match(conditionMessage(e), "in `uncertainty`", fixed = TRUE)
 })

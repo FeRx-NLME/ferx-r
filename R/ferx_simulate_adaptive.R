@@ -137,8 +137,44 @@
 #'   \code{dose_knowledge = oracle} subject is dosed from its own draw's
 #'   parameters. Warnings and refusals name the replicate as
 #'   \code{"(draw d, sim s)"} only in a run with uncertainty.
+#' @param n_reps Assay replicates per subject run (ferx-core #946), a whole
+#'   number >= 1 (default \code{1L}). Each subject's eta (and \code{[mixture]}
+#'   class) is drawn once per \code{(DRAW, SIM)} and held fixed across
+#'   replicates \code{1..n_reps}, while the IOV kappas and the controller's
+#'   assay noise are drawn afresh for each, so the controller re-runs on the
+#'   same patient under new within-subject noise. \code{doses},
+#'   \code{decisions} and \code{metrics} carry each row's \code{REP};
+#'   \code{trajectories} holds replicate 1 only (join it on
+#'   \code{REP == 1}). \code{n_reps = 1} is the run without replicates, bit
+#'   for bit. \code{decompose = TRUE} needs \code{n_reps >= 2}.
+#' @param summary_probs The three probabilities of every band and prediction
+#'   interval in the population summary (the \code{LO}, \code{MED} and
+#'   \code{HI} columns), strictly inside (0, 1) and strictly increasing
+#'   (default \code{c(0.05, 0.5, 0.95)}; otherwise refused, coded
+#'   \code{E_ADAPTIVE_OPTIONS}).
+#' @param summary_thresholds Optional thresholds for the population summary:
+#'   each adds a \code{"fraction_at_least"} statistic, the fraction of runs
+#'   whose value is at least the threshold. Either a named list (or named
+#'   numeric vector) from a \code{metrics} column name to one or more
+#'   thresholds, e.g. \code{list(PCT_READINGS_IN_WINDOW = 0.8)}, or a data
+#'   frame with \code{METRIC} and \code{THRESHOLD} columns, plus
+#'   \code{ANALYTE} and \code{DECISION} for a \code{"SIGNAL"} threshold on one
+#'   monitor's latent signal at one decision (\code{DECISION} numbered as in
+#'   \code{decisions$DECISION}). The metrics are \code{CUM_DOSE},
+#'   \code{N_DOSES}, \code{N_INCREASES}, \code{N_DECREASES}, \code{N_HOLDS},
+#'   \code{N_NOT_DUE}, \code{DISCONTINUED} (as 1/0), \code{SIGNAL_MIN},
+#'   \code{SIGNAL_MAX}, \code{SIGNAL_MEAN}, \code{PCT_READINGS_IN_WINDOW},
+#'   \code{AUC_TARGET_ATTAINMENT} and \code{SIGNAL}. A non-finite threshold is
+#'   refused, coded \code{E_ADAPTIVE_OPTIONS}.
+#' @param decompose If \code{TRUE}, also split the variance of every summary
+#'   metric into its parameter-uncertainty, between-subject and within-subject
+#'   layers (\code{variance_components}, \code{variance_skipped}). The design
+#'   has to separate the layers: \code{n_reps >= 2}, \code{n_sim >= 2}, and
+#'   with \code{uncertainty} at least two draws; otherwise the call is refused,
+#'   coded \code{E_ADAPTIVE_OPTIONS}. Default \code{FALSE}.
 #'
-#' @return A list of five data frames:
+#' @return A list of data frames (five run tables, three summary tables and
+#'   two decomposition tables):
 #'   \describe{
 #'     \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 #'       OBSERVED - the per-observation predictions, as in
@@ -199,6 +235,55 @@
 #'       \code{DRAW}; a parameter itself named \code{DRAW} is renamed
 #'       \code{DRAW.1}, as \code{make.unique()} would. Without \code{uncertainty} it has these columns and
 #'       no rows.}
+#'     \item{\code{summary_rows}}{The population summary (ferx-core #946),
+#'       one row per metric, statistic and draw: DRAW, METRIC (a
+#'       \code{metrics} column name, or \code{"SIGNAL"} for one monitor's
+#'       latent signal at one decision), ANALYTE and DECISION (the monitor's
+#'       name and the decision index, as in \code{decisions$DECISION}, for
+#'       \code{"SIGNAL"}; \code{NA} otherwise), STATISTIC (\code{"mean"},
+#'       \code{"median"} or \code{"fraction_at_least"}), THRESHOLD (the
+#'       \code{summary_thresholds} value of a \code{"fraction_at_least"} row,
+#'       \code{NA} otherwise), VALUE (over the draw's runs that carry the
+#'       metric; \code{NA} when none does), N_RUNS (runs in the draw, every
+#'       subject, SIM and REP counted equally) and N_MISSING (runs carrying no
+#'       value, which are skipped, never imputed). \code{DISCONTINUED} is
+#'       summarised as 1/0, so its mean is the fraction discontinued;
+#'       \code{TIME_TO_DISCONT} is censored and not summarised.}
+#'     \item{\code{summary_bands}}{The parameter-uncertainty band of each
+#'       per-draw statistic, its quantiles across draws: METRIC, ANALYTE,
+#'       DECISION, STATISTIC, THRESHOLD, N_DRAWS_PRESENT, N_DRAWS_MISSING,
+#'       STATUS (\code{"not_drawn"} for a run with one draw, which has no
+#'       band and is never reported as a zero-width one, else
+#'       \code{"quantiles"}), LO, MED, HI at \code{summary_probs} (type 7;
+#'       \code{NA} until there are enough values to resolve a quantile, e.g.
+#'       19 for 5\% / 95\%). The probabilities are its \code{probs}
+#'       attribute.}
+#'     \item{\code{prediction_intervals}}{Each metric's individual values
+#'       pooled over every run of every draw - where one simulated patient
+#'       falls, parameter uncertainty included: METRIC, ANALYTE, DECISION, LO,
+#'       MED, HI, N_RUNS, N_MISSING, with the same quantile rule and
+#'       \code{probs} attribute as \code{summary_bands}.}
+#'     \item{\code{variance_components}}{With \code{decompose = TRUE}
+#'       (\code{NULL} otherwise): the nested variance decomposition of each
+#'       metric, long form. METRIC, ANALYTE, DECISION, SCOPE
+#'       (\code{"subject"} or \code{"population"}), ID (the subject;
+#'       \code{NA} on a population row), LAYER (\code{"parameter"},
+#'       \code{"bsv"}, \code{"within"} - IOV and assay noise -,
+#'       \code{"between_subject"} on population rows, and \code{"total"}),
+#'       STATUS (\code{"estimated"}, \code{"not_drawn"} for the parameter
+#'       layer of a run without \code{uncertainty}, \code{"supplied"} for the
+#'       BSV of a subject run at its own \code{etas}), VALUE (as estimated: a
+#'       negative estimate is not truncated), MC_SE (its jackknife Monte Carlo
+#'       standard error; \code{NA} when the design cannot form one) and
+#'       N_SUBJECTS. A subject's total is the sum of its estimated layers; the
+#'       population total is the mean subject total plus the between-subject
+#'       line, which is the sum of the population lines when no subject's eta
+#'       was supplied. Attributes \code{n_draws}, \code{n_sims} and
+#'       \code{n_reps} give the design.}
+#'     \item{\code{variance_skipped}}{With \code{decompose = TRUE}: the
+#'       (metric, subject) pairs left out because the metric is missing in
+#'       some of the subject's runs: METRIC, ANALYTE, DECISION, ID,
+#'       N_MISSING.}
 #'   }
 #'
 #'   \code{DRAW} on every table is the parameter draw a row was simulated
@@ -220,6 +305,14 @@
 #'                               etas = known, unmatched = "draw")
 #' table(res$metrics$ID, res$metrics$ETA_SUPPLIED)
 #'
+#' # Three assay replicates per patient, the fraction of runs with at least
+#' # 80% of readings in the target window, and the variance decomposition.
+#' res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L,
+#'                               n_reps = 3L, decompose = TRUE,
+#'                               summary_thresholds = list(PCT_READINGS_IN_WINDOW = 0.8))
+#' subset(res$summary_rows, METRIC == "PCT_READINGS_IN_WINDOW")
+#' subset(res$variance_components, SCOPE == "population" & METRIC == "CUM_DOSE")
+#'
 #' # With a fit to observed data, each fitted subject at its own EBEs:
 #' # ferx_simulate_adaptive(model, data, fit = fit, etas = fit$ebe_etas)
 #'
@@ -235,8 +328,13 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
                                    verify = TRUE, max_decisions = 0L,
                                    fit = NULL, etas = NULL,
                                    unmatched = c("refuse", "draw"),
-                                   uncertainty = NULL) {
+                                   uncertainty = NULL, n_reps = 1L,
+                                   summary_probs = c(0.05, 0.5, 0.95),
+                                   summary_thresholds = NULL,
+                                   decompose = FALSE) {
   uncertainty <- .ferx_adaptive_uncertainty(uncertainty, fit)
+  run_options <- .ferx_adaptive_run_options(n_reps, summary_probs,
+                                            summary_thresholds, decompose)
   if (!missing(unmatched) && is.null(etas)) {
     warning("ferx_simulate_adaptive: `unmatched` has no effect without ",
             "`etas`; every subject's eta is drawn.", call. = FALSE)
@@ -270,7 +368,14 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   supplied <- .ferx_adaptive_etas(etas)
   # The engine's unmatched-subject refusal names `UnmatchedSubjects::Draw`,
   # the Rust spelling of `unmatched = "draw"`.
-  res <- .ferx_engine_spelling(if (is.null(fit)) {
+  # The decomposition's refusal of a design that cannot separate a layer
+  # (ferx-core #946) names the Rust options; here they are these arguments.
+  options_spelling <- function(call) {
+    .ferx_engine_spelling(.ferx_engine_spelling(
+      call, "E_ADAPTIVE_OPTIONS", "`AdaptiveSimulateOptions::n_reps`", "`n_reps`"
+    ), "E_ADAPTIVE_OPTIONS", "in `UncertaintySpec`", "in `uncertainty`")
+  }
+  res <- options_spelling(.ferx_engine_spelling(if (is.null(fit)) {
     .ferx_engine_call(
       ferx_rust_simulate_adaptive(
         model_path = normalizePath(model),
@@ -283,7 +388,8 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
         eta_ids = supplied$ids,
         eta_names = supplied$names,
         eta_flat = supplied$flat,
-        unmatched = unmatched
+        unmatched = unmatched,
+        run_options = run_options
       ),
       model, data
     )
@@ -342,11 +448,12 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
         sir_resamples_flat = unc_pieces$sir_resamples_flat,
         sir_resamples_n = unc_pieces$sir_resamples_n,
         sir_resamples_dim = unc_pieces$sir_resamples_dim,
-        n_draws = if (is.null(uncertainty)) 0L else uncertainty$n_draws
+        n_draws = if (is.null(uncertainty)) 0L else uncertainty$n_draws,
+        run_options = run_options
       ),
       model, data
     ), "`with_uncertainty`", "`uncertainty`"), "`with_etas`", "`etas`")
-  }, "E_SUPPLIED_ETAS", "`UnmatchedSubjects::Draw`", "`unmatched = \"draw\"`")
+  }, "E_SUPPLIED_ETAS", "`UnmatchedSubjects::Draw`", "`unmatched = \"draw\"`"))
 
   # Under "draw" an `etas` keyed differently from the data (`01` against `1`)
   # matches nobody and every subject is drawn - the mistake "refuse" exists to
@@ -369,6 +476,93 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run (ferx-r #426).
   .ferx_surface_sim_warnings(res, "ferx_simulate_adaptive")
+}
+
+# `n_reps`, `summary_probs`, `summary_thresholds` and `decompose` checked for
+# shape and flattened into the `run_options` list the glue reads (ferx-core
+# #946 PR2-4). Only what the glue cannot pass on is refused here: `n_reps` that
+# is not a whole number >= 1 (the glue casts it to an unsigned count), a
+# `summary_probs` that is not three numbers, a malformed threshold table. The
+# values themselves (probabilities strictly inside (0, 1) and increasing, a
+# finite threshold, a known metric name) are the engine's and the glue's to
+# refuse, so the rules live in one place.
+.ferx_adaptive_run_options <- function(n_reps = 1L,
+                                       summary_probs = c(0.05, 0.5, 0.95),
+                                       summary_thresholds = NULL,
+                                       decompose = FALSE) {
+  if (!is.numeric(n_reps) || length(n_reps) != 1L || !is.finite(n_reps) ||
+      n_reps != round(n_reps) || n_reps < 1 || n_reps > .Machine$integer.max) {
+    stop("ferx_simulate_adaptive: `n_reps` must be a single whole number ",
+         ">= 1 (assay replicates per subject run; 1 is a run without ",
+         "replicates).", call. = FALSE)
+  }
+  if (!is.numeric(summary_probs) || length(summary_probs) != 3L) {
+    stop("ferx_simulate_adaptive: `summary_probs` must be three ",
+         "probabilities, e.g. c(0.05, 0.5, 0.95).", call. = FALSE)
+  }
+  if (length(decompose) != 1L || is.na(decompose) || !is.logical(decompose)) {
+    stop("ferx_simulate_adaptive: `decompose` must be a single TRUE or FALSE.",
+         call. = FALSE)
+  }
+  thr <- .ferx_adaptive_thresholds(summary_thresholds)
+  list(
+    n_reps = as.integer(n_reps),
+    probs = as.double(summary_probs),
+    threshold_metric = thr$metric,
+    threshold_value = thr$value,
+    threshold_analyte = thr$analyte,
+    threshold_decision = thr$decision,
+    decompose = decompose
+  )
+}
+
+# `summary_thresholds =` as four parallel vectors. A named list or named
+# numeric vector maps a `metrics` column name to one or more thresholds
+# (`list(PCT_READINGS_IN_WINDOW = 0.8, CUM_DOSE = c(5000, 8000))`); a data
+# frame has METRIC and THRESHOLD columns, plus ANALYTE and DECISION for a
+# `SIGNAL` threshold (one analyte's latent signal at one decision).
+.ferx_adaptive_thresholds <- function(x) {
+  empty <- list(metric = character(0), value = numeric(0),
+                analyte = character(0), decision = integer(0))
+  if (is.null(x) || length(x) == 0L) return(empty)
+  bad <- function() {
+    stop("ferx_simulate_adaptive: `summary_thresholds` must be NULL, a ",
+         "named list (or named numeric vector) of thresholds per metrics ",
+         "column, e.g. `list(PCT_READINGS_IN_WINDOW = 0.8)`, or a data frame ",
+         "with METRIC and THRESHOLD columns (plus ANALYTE and DECISION for a ",
+         "SIGNAL threshold).", call. = FALSE)
+  }
+  if (is.data.frame(x)) {
+    if (!all(c("METRIC", "THRESHOLD") %in% names(x)) ||
+        !is.numeric(x$THRESHOLD)) bad()
+    n <- nrow(x)
+    col_or_na <- function(name, na) {
+      if (name %in% names(x)) x[[name]] else rep(na, n)
+    }
+    decision <- col_or_na("DECISION", NA_integer_)
+    if (!is.numeric(decision) && !all(is.na(decision))) bad()
+    if (any(!is.na(decision) & decision != round(decision))) bad()
+    return(list(
+      metric = as.character(x$METRIC),
+      value = as.double(x$THRESHOLD),
+      analyte = as.character(col_or_na("ANALYTE", NA_character_)),
+      decision = as.integer(decision)
+    ))
+  }
+  nms <- names(x)
+  if (is.null(nms) || any(is.na(nms) | nms == "")) bad()
+  if (is.list(x)) {
+    if (!all(vapply(x, is.numeric, logical(1)))) bad()
+  } else if (!is.numeric(x)) {
+    bad()
+  }
+  lens <- lengths(x)
+  list(
+    metric = rep(nms, lens),
+    value = as.double(unlist(x, use.names = FALSE)),
+    analyte = rep(NA_character_, sum(lens)),
+    decision = rep(NA_integer_, sum(lens))
+  )
 }
 
 # `uncertainty =` checked and normalised to list(method, n_draws), or NULL

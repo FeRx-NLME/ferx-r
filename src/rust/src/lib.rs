@@ -1111,6 +1111,11 @@ fn ferx_rust_simulate_from_fit(
 /// @param eta_flat Row-major `length(eta_ids)` x `length(eta_names)` etas.
 /// @param unmatched "refuse" or "draw": what to do with a data subject that has
 ///   no row in the supplied etas.
+/// @param run_options List of `n_reps` (assay replicates per subject run,
+///   ferx-core #946), `probs` (the three summary quantile probabilities),
+///   `threshold_metric` / `threshold_value` / `threshold_analyte` /
+///   `threshold_decision` (the summary's `FractionAtLeast` thresholds) and
+///   `decompose` (also run the variance decomposition).
 /// @return Named list of four data frames: `trajectories` (DRAW, SIM, ID, TIME,
 ///   CMT, IPRED, DV_SIM, OBSERVED), `doses` (the realized dose ledger), `decisions` (one row
 ///   per decision, including holds), and `metrics` (one row per realized run —
@@ -1132,10 +1137,12 @@ fn ferx_rust_simulate_adaptive(
     eta_names: Vec<String>,
     eta_flat: Vec<f64>,
     unmatched: &str,
+    run_options: List,
 ) -> Robj {
     entry(move || {
         let etas = AdaptiveEtas::from_r(supply_etas, eta_ids, eta_names, eta_flat, unmatched)?;
-        simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, None, etas)
+        let extras = AdaptiveRunExtras::from_r(&run_options)?;
+        simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, None, etas, extras)
     })
 }
 
@@ -1182,6 +1189,7 @@ fn ferx_rust_simulate_adaptive(
 ///   The fit's uncertainty payload, as in `ferx_rust_simulate_with_uncertainty`;
 ///   ignored when `uncertainty_method` is `""`
 /// @param n_draws Number of parameter draws; ignored without uncertainty
+/// @param run_options As in `ferx_rust_simulate_adaptive`
 /// @return The list `ferx_rust_simulate_adaptive` returns; `parameters` holds
 ///   one row per draw under uncertainty.
 /// @export
@@ -1216,9 +1224,11 @@ fn ferx_rust_simulate_adaptive_from_fit(
     sir_resamples_n: i32,
     sir_resamples_dim: i32,
     n_draws: i32,
+    run_options: List,
 ) -> Robj {
     entry(move || {
         let etas = AdaptiveEtas::from_r(supply_etas, eta_ids, eta_names, eta_flat, unmatched)?;
+        let extras = AdaptiveRunExtras::from_r(&run_options)?;
         let uncertainty = if uncertainty_method.is_empty() {
             None
         } else {
@@ -1249,7 +1259,7 @@ fn ferx_rust_simulate_adaptive_from_fit(
             fit_bindings: &fit_bindings,
             uncertainty,
         };
-        simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, Some(fit), etas)
+        simulate_adaptive(model_path, data_path, n_sim, seed, verify, max_decisions, Some(fit), etas, extras)
     })
 }
 
@@ -1330,6 +1340,7 @@ fn simulate_adaptive(
     max_decisions: i32,
     fit: Option<AdaptiveFit>,
     etas: Option<AdaptiveEtas>,
+    extras: AdaptiveRunExtras,
 ) -> std::result::Result<Robj, String> {
     let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
@@ -1440,6 +1451,9 @@ fn simulate_adaptive(
     if max_decisions > 0 {
         opts.max_decisions = max_decisions as usize;
     }
+    // Assay replicates (ferx-core #946 PR3). R refuses anything but a whole
+    // number >= 1; the engine refuses 0 (`E_ADAPTIVE_OPTIONS`).
+    opts.n_reps = extras.n_reps;
 
     // A failure here (analytical model, an unsupported dosing/covariate
     // combination, or a verify divergence that taints the result) is raised as an
@@ -1483,14 +1497,398 @@ fn simulate_adaptive(
         // filter, which on this path also withholds `W_NO_DOSES`: the controller
         // supplies the whole regimen, so an observation grid alone is the normal
         // input (ferx-r #426).
-        Ok(result) => attach_sim_warnings(
-            adaptive_result_to_list(&result, &parsed.model),
-            occasion_notes,
-            &result,
-        ),
+        // The population summary and the variance decomposition (ferx-core
+        // #946 PR2/PR3) read the engine's result, which R never holds, so they
+        // are computed here, right after the run, and ride on the list. A
+        // refusal (probabilities, a non-finite threshold, a design that cannot
+        // separate a layer) is the call's error, coded `E_ADAPTIVE_OPTIONS`.
+        Ok(result) => {
+            let summary = ferx_core::summarize_adaptive(&result, &extras.summary)
+                .map_err(|e| engine_refusal("ferx_simulate_adaptive: ", e))?;
+            let decomposition = if extras.decompose {
+                Some(
+                    ferx_core::decompose_adaptive(&result)
+                        .map_err(|e| engine_refusal("ferx_simulate_adaptive: ", e))?,
+                )
+            } else {
+                None
+            };
+            attach_sim_warnings(
+                adaptive_result_to_list(&result, &parsed.model, &summary, decomposition.as_ref())?,
+                occasion_notes,
+                &result,
+            )
+        }
         Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
     })
 }
+
+/// The R side's options for an adaptive run beyond the run itself (ferx-core
+/// #946 PR2-4), read from the `run_options` list `ferx_simulate_adaptive()`
+/// builds: `n_reps` (integer), `probs` (three doubles), the summary thresholds
+/// as four parallel vectors `threshold_metric` / `threshold_value` /
+/// `threshold_analyte` / `threshold_decision` (the last two `NA` for a scalar
+/// metric), and `decompose` (logical).
+struct AdaptiveRunExtras {
+    n_reps: usize,
+    summary: ferx_core::AdaptiveSummaryOptions,
+    decompose: bool,
+}
+
+impl AdaptiveRunExtras {
+    fn from_r(r: &List) -> std::result::Result<Self, String> {
+        let cols: HashMap<&str, Robj> = r.iter().collect();
+        let col = |name: &str| -> std::result::Result<Robj, String> {
+            cols.get(name)
+                .cloned()
+                .ok_or_else(|| format!("internal: `run_options${name}` is missing"))
+        };
+        let mistyped = |name: &str, ty: &str| format!("internal: `run_options${name}` is not {ty}");
+        let n_reps = col("n_reps")?
+            .as_integer()
+            .ok_or_else(|| mistyped("n_reps", "a single integer"))?;
+        let probs = col("probs")?
+            .as_real_vector()
+            .ok_or_else(|| mistyped("probs", "a double vector"))?;
+        let probs: [f64; 3] = probs.as_slice().try_into().map_err(|_| {
+            format!(
+                "ferx_simulate_adaptive: `summary_probs` must hold exactly three probabilities, not {}",
+                probs.len()
+            )
+        })?;
+        let metric = col("threshold_metric")?
+            .as_string_vector()
+            .ok_or_else(|| mistyped("threshold_metric", "a character vector"))?;
+        let value = col("threshold_value")?
+            .as_real_vector()
+            .ok_or_else(|| mistyped("threshold_value", "a double vector"))?;
+        let analyte: Vec<Option<String>> = Strings::try_from(col("threshold_analyte")?)
+            .map_err(|_| mistyped("threshold_analyte", "a character vector"))?
+            .iter()
+            .map(|s| if s.is_na() { None } else { Some(s.to_string()) })
+            .collect();
+        let decision: Vec<Option<i32>> = Integers::try_from(col("threshold_decision")?)
+            .map_err(|_| mistyped("threshold_decision", "an integer vector"))?
+            .iter()
+            .map(Option::<i32>::from)
+            .collect();
+        let n = metric.len();
+        if value.len() != n || analyte.len() != n || decision.len() != n {
+            return Err("internal: the `run_options` threshold vectors differ in length".to_string());
+        }
+        let mut summary = ferx_core::AdaptiveSummaryOptions::default();
+        summary.probs = probs;
+        for i in 0..n {
+            let m = summary_metric_from_r(&metric[i], analyte[i].clone(), decision[i])?;
+            summary.thresholds.push((m, value[i]));
+        }
+        let decompose = col("decompose")?
+            .as_bool()
+            .ok_or_else(|| mistyped("decompose", "a single logical"))?;
+        Ok(Self { n_reps: n_reps.max(0) as usize, summary, decompose })
+    }
+}
+
+/// The scalar summary metrics (ferx-core `AdaptiveSummaryMetric`) and the R
+/// spelling of each: the `metrics` column it summarises, so a summary row joins
+/// back to the column it came from. The one table both directions read; the
+/// per-decision latent signal (`Signal { analyte, decision_idx }`) is `SIGNAL`
+/// with its own `ANALYTE` / `DECISION` columns. Core has no label method on the
+/// enum, so this glue owns the spelling.
+fn scalar_summary_metrics() -> [(&'static str, ferx_core::AdaptiveSummaryMetric); 12] {
+    use ferx_core::AdaptiveSummaryMetric as M;
+    [
+        ("CUM_DOSE", M::CumulativeDose),
+        ("N_DOSES", M::NDoses),
+        ("N_INCREASES", M::NIncreases),
+        ("N_DECREASES", M::NDecreases),
+        ("N_HOLDS", M::NHolds),
+        ("N_NOT_DUE", M::NNotDue),
+        ("DISCONTINUED", M::Discontinued),
+        ("SIGNAL_MIN", M::SignalMin),
+        ("SIGNAL_MAX", M::SignalMax),
+        ("SIGNAL_MEAN", M::SignalMean),
+        ("PCT_READINGS_IN_WINDOW", M::PctReadingsInWindow),
+        ("AUC_TARGET_ATTAINMENT", M::AucTargetAttainment),
+    ]
+}
+
+/// A summary threshold's metric from its R spelling: a `metrics` column name of
+/// [`scalar_summary_metrics`], or `SIGNAL` with an analyte and a 0-based
+/// decision index (as `decisions$DECISION` numbers them).
+fn summary_metric_from_r(
+    token: &str,
+    analyte: Option<String>,
+    decision: Option<i32>,
+) -> std::result::Result<ferx_core::AdaptiveSummaryMetric, String> {
+    if token == "SIGNAL" {
+        return match (analyte, decision) {
+            (Some(analyte), Some(d)) if d >= 0 => Ok(ferx_core::AdaptiveSummaryMetric::Signal {
+                analyte,
+                decision_idx: d as usize,
+            }),
+            _ => Err(
+                "ferx_simulate_adaptive: a `SIGNAL` threshold needs an `ANALYTE` (the monitor's \
+                 name) and a `DECISION` (the 0-based decision index, as `decisions$DECISION`)"
+                    .to_string(),
+            ),
+        };
+    }
+    if analyte.is_some() || decision.is_some() {
+        return Err(format!(
+            "ferx_simulate_adaptive: `{token}` is a per-run metric; `ANALYTE` and `DECISION` \
+             belong to a `SIGNAL` threshold only"
+        ));
+    }
+    scalar_summary_metrics()
+        .into_iter()
+        .find(|(name, _)| *name == token)
+        .map(|(_, m)| m)
+        .ok_or_else(|| {
+            let known: Vec<&str> = scalar_summary_metrics().iter().map(|(n, _)| *n).collect();
+            format!(
+                "ferx_simulate_adaptive: `{token}` is not a summary metric; expected one of {}, or SIGNAL",
+                known.join(", ")
+            )
+        })
+}
+
+/// A summary metric as its R columns `(METRIC, ANALYTE, DECISION)`. A metric
+/// this glue has no spelling for (ferx-core added one) is an error, never a
+/// mislabelled row.
+fn summary_metric_to_r(
+    m: &ferx_core::AdaptiveSummaryMetric,
+) -> std::result::Result<(String, Option<String>, Option<i32>), String> {
+    if let ferx_core::AdaptiveSummaryMetric::Signal { analyte, decision_idx } = m {
+        return Ok(("SIGNAL".to_string(), Some(analyte.clone()), Some(*decision_idx as i32)));
+    }
+    scalar_summary_metrics()
+        .into_iter()
+        .find(|(_, known)| known == m)
+        .map(|(name, _)| (name.to_string(), None, None))
+        .ok_or_else(|| {
+            format!("internal: ferx-core reports an adaptive summary metric this glue cannot name: {m:?}")
+        })
+}
+
+/// A per-draw statistic as its R columns `(STATISTIC, THRESHOLD)`.
+fn summary_statistic_to_r(
+    s: ferx_core::AdaptiveSummaryStatistic,
+) -> std::result::Result<(&'static str, Option<f64>), String> {
+    use ferx_core::AdaptiveSummaryStatistic as S;
+    match s {
+        S::Mean => Ok(("mean", None)),
+        S::Median => Ok(("median", None)),
+        S::FractionAtLeast(a) => Ok(("fraction_at_least", Some(a))),
+        other => Err(format!(
+            "internal: ferx-core reports an adaptive summary statistic this glue cannot name: {other:?}"
+        )),
+    }
+}
+
+/// The metric's three columns, shared by every summary and decomposition frame.
+#[derive(Default)]
+struct MetricCols {
+    metric: Vec<String>,
+    analyte: Vec<Option<String>>,
+    decision: Vec<Option<i32>>,
+}
+
+impl MetricCols {
+    fn push(&mut self, m: &ferx_core::AdaptiveSummaryMetric) -> std::result::Result<(), String> {
+        let (metric, analyte, decision) = summary_metric_to_r(m)?;
+        self.metric.push(metric);
+        self.analyte.push(analyte);
+        self.decision.push(decision);
+        Ok(())
+    }
+
+    fn into_pairs(self) -> Vec<(&'static str, Robj)> {
+        vec![
+            ("METRIC", self.metric.into()),
+            ("ANALYTE", self.analyte.into()),
+            ("DECISION", self.decision.into()),
+        ]
+    }
+}
+
+/// Three quantiles per row as the R columns LO / MED / HI (`NA` where core
+/// reports none: too few values to resolve that quantile).
+fn quantile_cols(q: &[[Option<f64>; 3]]) -> Vec<(&'static str, Robj)> {
+    let col = |k: usize| -> Robj { q.iter().map(|v| v[k]).collect::<Vec<Option<f64>>>().into() };
+    vec![("LO", col(0)), ("MED", col(1)), ("HI", col(2))]
+}
+
+/// [`ferx_core::AdaptivePopulationSummary`] as three R data frames:
+/// `summary_rows`, `summary_bands` and `prediction_intervals`. The bands and
+/// intervals carry the probabilities of LO / MED / HI as a `probs` attribute.
+fn adaptive_summary_to_r(
+    s: &ferx_core::AdaptivePopulationSummary,
+) -> std::result::Result<(Robj, Robj, Robj), String> {
+    // Every interval carries the probabilities the summary ran with (one set
+    // per run), and there is always one per scalar metric.
+    let probs = s
+        .prediction_intervals
+        .first()
+        .map(|p| p.quantiles.probs)
+        .unwrap_or(ferx_core::AdaptiveSummaryOptions::default().probs);
+
+    // -- rows: one per (metric, statistic, draw) --
+    let mut mc = MetricCols::default();
+    let (mut stat, mut thr) = (Vec::new(), Vec::new());
+    for r in &s.rows {
+        mc.push(&r.metric)?;
+        let (st, th) = summary_statistic_to_r(r.statistic)?;
+        stat.push(st.to_string());
+        thr.push(th);
+    }
+    let mut cols: Vec<(&str, Robj)> =
+        vec![("DRAW", s.rows.iter().map(|r| r.draw as i32).collect::<Vec<i32>>().into())];
+    cols.extend(mc.into_pairs());
+    cols.push(("STATISTIC", stat.into()));
+    cols.push(("THRESHOLD", thr.into()));
+    cols.push(("VALUE", s.rows.iter().map(|r| r.value).collect::<Vec<Option<f64>>>().into()));
+    cols.push(("N_RUNS", s.rows.iter().map(|r| r.n_runs as i32).collect::<Vec<i32>>().into()));
+    cols.push(("N_MISSING", s.rows.iter().map(|r| r.n_missing as i32).collect::<Vec<i32>>().into()));
+    let rows = finish_df(cols, s.rows.len());
+
+    // -- bands: one per (metric, statistic), across draws --
+    let mut mc = MetricCols::default();
+    let (mut stat, mut thr, mut status, mut q) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for b in &s.bands {
+        mc.push(&b.metric)?;
+        let (st, th) = summary_statistic_to_r(b.statistic)?;
+        stat.push(st.to_string());
+        thr.push(th);
+        let (label, values) = match b.status {
+            ferx_core::AdaptiveBandStatus::NotDrawn => ("not_drawn", [None; 3]),
+            ferx_core::AdaptiveBandStatus::Quantiles(qs) => ("quantiles", qs.values),
+            other => {
+                return Err(format!(
+                    "internal: ferx-core reports an adaptive band status this glue cannot name: {other:?}"
+                ))
+            }
+        };
+        status.push(label.to_string());
+        q.push(values);
+    }
+    let mut cols: Vec<(&str, Robj)> = mc.into_pairs();
+    cols.push(("STATISTIC", stat.into()));
+    cols.push(("THRESHOLD", thr.into()));
+    cols.push((
+        "N_DRAWS_PRESENT",
+        s.bands.iter().map(|b| b.n_draws_present as i32).collect::<Vec<i32>>().into(),
+    ));
+    cols.push((
+        "N_DRAWS_MISSING",
+        s.bands.iter().map(|b| b.n_draws_missing as i32).collect::<Vec<i32>>().into(),
+    ));
+    cols.push(("STATUS", status.into()));
+    cols.extend(quantile_cols(&q));
+    let mut bands = finish_df(cols, s.bands.len());
+    bands.set_attrib("probs", probs.to_vec()).unwrap();
+
+    // -- prediction intervals: one per metric, pooled over every run --
+    let pis = &s.prediction_intervals;
+    let mut mc = MetricCols::default();
+    let mut q = Vec::new();
+    for p in pis {
+        mc.push(&p.metric)?;
+        q.push(p.quantiles.values);
+    }
+    let mut cols: Vec<(&str, Robj)> = mc.into_pairs();
+    cols.extend(quantile_cols(&q));
+    cols.push(("N_RUNS", pis.iter().map(|p| p.n_runs as i32).collect::<Vec<i32>>().into()));
+    cols.push(("N_MISSING", pis.iter().map(|p| p.n_missing as i32).collect::<Vec<i32>>().into()));
+    let mut intervals = finish_df(cols, pis.len());
+    intervals.set_attrib("probs", probs.to_vec()).unwrap();
+    Ok((rows, bands, intervals))
+}
+
+/// [`ferx_core::AdaptiveDecomposition`] as two R data frames:
+/// `variance_components` (the design's `n_draws`, `n_sims` and `n_reps` as
+/// attributes) and `variance_skipped`. A subject row is `SCOPE = "subject"`
+/// with its `ID`; a population row is `SCOPE = "population"` with `ID = NA`, so
+/// a subject whose ID happens to be spelled "population" stays apart.
+fn adaptive_decomposition_to_r(
+    d: &ferx_core::AdaptiveDecomposition,
+) -> std::result::Result<(Robj, Robj), String> {
+    use ferx_core::{
+        AdaptiveComponentStatus as St, AdaptiveVarianceLayer as L, AdaptiveVarianceScope as Sc,
+    };
+    let mut mc = MetricCols::default();
+    let (mut scope, mut id, mut layer, mut status, mut value, mut mc_se) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for c in &d.components {
+        mc.push(&c.metric)?;
+        let (sc, who) = match &c.scope {
+            Sc::Population => ("population", None),
+            Sc::Subject(s) => ("subject", Some(s.clone())),
+            other => {
+                return Err(format!(
+                    "internal: ferx-core reports a variance scope this glue cannot name: {other:?}"
+                ))
+            }
+        };
+        scope.push(sc.to_string());
+        id.push(who);
+        let ly = match c.layer {
+            L::Parameter => "parameter",
+            L::Bsv => "bsv",
+            L::Within => "within",
+            L::BetweenRow => "between_subject",
+            L::Total => "total",
+            other => {
+                return Err(format!(
+                    "internal: ferx-core reports a variance layer this glue cannot name: {other:?}"
+                ))
+            }
+        };
+        layer.push(ly.to_string());
+        let (st, v, se) = match c.status {
+            St::Estimated { value, mc_se } => ("estimated", Some(value), mc_se),
+            St::NotDrawn => ("not_drawn", None, None),
+            St::Supplied => ("supplied", None, None),
+            other => {
+                return Err(format!(
+                    "internal: ferx-core reports a variance component status this glue cannot name: {other:?}"
+                ))
+            }
+        };
+        status.push(st.to_string());
+        value.push(v);
+        mc_se.push(se);
+    }
+    let mut cols: Vec<(&str, Robj)> = mc.into_pairs();
+    cols.push(("SCOPE", scope.into()));
+    cols.push(("ID", id.into()));
+    cols.push(("LAYER", layer.into()));
+    cols.push(("STATUS", status.into()));
+    cols.push(("VALUE", value.into()));
+    cols.push(("MC_SE", mc_se.into()));
+    cols.push((
+        "N_SUBJECTS",
+        d.components.iter().map(|c| c.n_subjects as i32).collect::<Vec<i32>>().into(),
+    ));
+    let mut components = finish_df(cols, d.components.len());
+    components.set_attrib("n_draws", d.n_draws as i32).unwrap();
+    components.set_attrib("n_sims", d.n_sims as i32).unwrap();
+    components.set_attrib("n_reps", d.n_reps as i32).unwrap();
+
+    let mut mc = MetricCols::default();
+    for k in &d.skipped {
+        mc.push(&k.metric)?;
+    }
+    let mut cols: Vec<(&str, Robj)> = mc.into_pairs();
+    cols.push(("ID", d.skipped.iter().map(|k| k.subject.clone()).collect::<Vec<String>>().into()));
+    cols.push((
+        "N_MISSING",
+        d.skipped.iter().map(|k| k.n_missing as i32).collect::<Vec<i32>>().into(),
+    ));
+    let skipped = finish_df(cols, d.skipped.len());
+    Ok((components, skipped))
+}
+
 
 /// Convert an [`AdaptiveSimulationResult`] into a named R list of four data
 /// frames: `trajectories` (reusing the standard simulation converter), `doses`
@@ -1503,7 +1901,17 @@ fn simulate_adaptive(
 /// (ferx-core #946). `REP`, after `SIM` in the ledger, decision and metrics frames,
 /// is the 1-based assay replicate of `AdaptiveSimulateOptions::n_reps` (ferx-core
 /// #946 PR3): `1` on every row of a run without replicates.
-fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: &CompiledModel) -> Robj {
+///
+/// The population summary (`summary_rows`, `summary_bands`,
+/// `prediction_intervals`) and, when requested, the variance decomposition
+/// (`variance_components`, `variance_skipped`; `NULL` otherwise) follow the run's
+/// own tables (ferx-core #946 PR2/PR3).
+fn adaptive_result_to_list(
+    result: &ferx_core::AdaptiveSimulationResult,
+    model: &CompiledModel,
+    summary: &ferx_core::AdaptivePopulationSummary,
+    decomposition: Option<&ferx_core::AdaptiveDecomposition>,
+) -> std::result::Result<Robj, String> {
     let trajectories = sim_results_to_df(&result.trajectories);
 
     // -- doses: one row per realized dose --
@@ -1590,14 +1998,25 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: 
         DOSE_ORACLE = m.iter().map(|e| e.dose_oracle).collect::<Vec<bool>>()
     );
 
-    list!(
-        trajectories = trajectories,
-        doses = doses,
-        decisions = decisions,
-        metrics = metrics,
-        parameters = drawn_parameters_to_df(&result.parameters, model)
-    )
-    .into()
+    let (summary_rows, summary_bands, prediction_intervals) = adaptive_summary_to_r(summary)?;
+    let (variance_components, variance_skipped) = match decomposition {
+        Some(d) => adaptive_decomposition_to_r(d)?,
+        None => (Robj::from(()), Robj::from(())),
+    };
+
+    Ok(List::from_pairs(vec![
+        ("trajectories", trajectories),
+        ("doses", doses),
+        ("decisions", decisions),
+        ("metrics", metrics),
+        ("parameters", drawn_parameters_to_df(&result.parameters, model)),
+        ("summary_rows", summary_rows),
+        ("summary_bands", summary_bands),
+        ("prediction_intervals", prediction_intervals),
+        ("variance_components", variance_components),
+        ("variance_skipped", variance_skipped),
+    ])
+    .into())
 }
 
 /// An adaptive run's parameter draws (ferx-core #946) as an R data frame: one
