@@ -2918,14 +2918,9 @@ fn vpc_tte_to_list(vpc: &ferx_core::TteVpc) -> Robj {
                 surv = km.surv.clone(),
                 cumhaz = km.cumhaz.clone()
             );
-            let band = vpc_band_frame(VpcBandSlices {
-                time: &s.grid,
-                obs: &s.obs_on_grid,
-                lo: &s.lo,
-                med: &s.med,
-                hi: &s.hi,
-                n_used: &s.n_used,
-            });
+            let band = vpc_band_frame(VpcBandSlices::new(
+                &s.grid, [&s.obs_on_grid, &s.lo, &s.med, &s.hi], &s.n_used,
+            ));
             list!(
                 label = s.label.clone(),
                 value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
@@ -3040,6 +3035,13 @@ struct VpcBandSlices<'a> {
     n_used: &'a [usize],
 }
 
+impl<'a> VpcBandSlices<'a> {
+    /// The grid, the four NA-able series `[obs, lo, med, hi]`, then `n_used`.
+    fn new(time: &'a [f64], [obs, lo, med, hi]: [&'a [Option<f64>]; 4], n_used: &'a [usize]) -> Self {
+        VpcBandSlices { time, obs, lo, med, hi, n_used }
+    }
+}
+
 /// A band as the R data frame every VPC returns: `time`, `obs`, `lo`, `med`,
 /// `hi`, `n_used`, an empty entry being `NA`.
 fn vpc_band_frame(b: VpcBandSlices<'_>) -> Robj {
@@ -3112,18 +3114,9 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
         );
         let band = vpc_long_band(
             "order",
-            bands.iter().map(|band| {
-                (
-                    band.order as i32,
-                    VpcBandSlices {
-                        time: &band.grid,
-                        obs: &band.obs_on_grid,
-                        lo: &band.lo,
-                        med: &band.med,
-                        hi: &band.hi,
-                        n_used: &band.n_used,
-                    },
-                )
+            bands.iter().map(|b| {
+                let slices = VpcBandSlices::new(&b.grid, [&b.obs_on_grid, &b.lo, &b.med, &b.hi], &b.n_used);
+                (b.order as i32, slices)
             }),
         );
         (observed.into(), band)
@@ -3139,14 +3132,9 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
                 n_event = vpc_ints(&m.observed.n_event),
                 mcf = m.observed.mcf.clone()
             );
-            let mcf_band = vpc_band_frame(VpcBandSlices {
-                time: &m.grid,
-                obs: &m.obs_on_grid,
-                lo: &m.lo,
-                med: &m.med,
-                hi: &m.hi,
-                n_used: &m.n_used,
-            });
+            let mcf_band = vpc_band_frame(VpcBandSlices::new(
+                &m.grid, [&m.obs_on_grid, &m.lo, &m.med, &m.hi], &m.n_used,
+            ));
             let (absolute, absolute_band) = curves(&s.absolute);
             let (gap, gap_band) = curves(&s.gap);
             let fam = |name: &str, n: usize| std::iter::repeat_n(name.to_string(), n);
@@ -3206,14 +3194,9 @@ fn vpc_kmmc_to_list(vpc: &ferx_core::KmmcVpc) -> Robj {
                 n_censor = vpc_ints(&c.n_censor),
                 mean = c.mean.clone()
             );
-            let band = vpc_band_frame(VpcBandSlices {
-                time: &s.grid,
-                obs: &s.obs_on_grid,
-                lo: &s.lo,
-                med: &s.med,
-                hi: &s.hi,
-                n_used: &s.n_used,
-            });
+            let band = vpc_band_frame(VpcBandSlices::new(
+                &s.grid, [&s.obs_on_grid, &s.lo, &s.med, &s.hi], &s.n_used,
+            ));
             list!(
                 label = s.label.clone(),
                 value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
@@ -3271,14 +3254,7 @@ fn vpc_cif_to_list(vpc: &ferx_core::CifVpc) -> Robj {
             );
 
             fn slices<'a>(grid: &'a [f64], b: &'a ferx_core::CifVpcBand) -> VpcBandSlices<'a> {
-                VpcBandSlices {
-                    time: grid,
-                    obs: &b.obs_on_grid,
-                    lo: &b.lo,
-                    med: &b.med,
-                    hi: &b.hi,
-                    n_used: &b.n_used,
-                }
+                VpcBandSlices::new(grid, [&b.obs_on_grid, &b.lo, &b.med, &b.hi], &b.n_used)
             }
             let band = vpc_long_band(
                 "cmt",
