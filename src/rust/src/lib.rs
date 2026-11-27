@@ -9534,10 +9534,18 @@ fn resolve_eta_names(result: &FitResult, n_eta: usize) -> Vec<String> {
 /// then panics (#778 review finding 5, #780); `tools/check-glue-data-frame.sh`
 /// keeps the macro out of `src/rust/src/`.
 fn r_data_frame(columns: Vec<(&str, Robj)>, nrow: usize) -> Robj {
+    // `data.frame()` refuses columns of unequal length; building the list by
+    // hand would not, and would hand R a malformed frame. A real `assert!`,
+    // not `debug_assert!`, since R builds the glue in release: every caller
+    // runs inside `entry()`, so a failure is an R error naming the column.
+    let nrow_i32 = i32::try_from(nrow).expect("internal: data frame rows exceed i32::MAX");
+    for (name, col) in &columns {
+        assert!(col.len() == nrow, "internal: column `{name}` has {} rows, the table {nrow}", col.len());
+    }
     let mut df = List::from_pairs(columns);
     df.set_class(&["data.frame"]).unwrap();
     // `i32::MIN` is R's NA_integer_; `data.frame()` gives 0 rows `integer(0)`.
-    let row_names: Vec<i32> = if nrow == 0 { Vec::new() } else { vec![i32::MIN, -(nrow as i32)] };
+    let row_names: Vec<i32> = if nrow == 0 { Vec::new() } else { vec![i32::MIN, -nrow_i32] };
     df.set_attrib("row.names", row_names).unwrap();
     df.into()
 }
