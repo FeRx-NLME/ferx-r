@@ -46,10 +46,16 @@
 #      ferx-core bump script's whole-graph update - from moving extendr on
 #      their own; this check explains why when someone moves them by hand.
 #
-# `//` and `/* .. */` comments are stripped before every test, so naming a
-# helper in prose is free. Neither strip knows about string literals, so the
-# first `https://` inside a message would blind every check on that line - keep
-# URLs in comments, where they cost nothing.
+# Code is read with tools/rust-code.awk, the scan the R-lookup guard uses:
+# one pass per file, left to right, so comments and literal contents never
+# trigger a check (naming a helper in prose or in a message is free), braces
+# inside a string or char literal do not move the `mod raise` depth count,
+# and a `/*` or `//` inside a string or a line comment no longer blinds what
+# follows it. Before, the comments were stripped by regex, `/* .. */` first:
+# a `/*` in a line comment switched every later line of the file to "comment",
+# and a URL in a message hid the rest of its line (#781 review finding 1). A
+# file the scan ends inside a comment or literal is reported, not passed.
+# Every `.rs` file under the directory is scanned, nested modules included.
 # Exercised by tools/test-check-glue-raise.sh.
 #
 # Usage: tools/check-glue-raise.sh [dir [lock]]
@@ -75,8 +81,11 @@ fail() { # file, line, message
   status=1
 }
 
-shopt -s nullglob
-sources=("$DIR"/*.rs)
+SCAN="$(cat "$ROOT/tools/rust-code.awk")"
+sources=()
+if [[ -d "$DIR" ]]; then
+  while IFS= read -r f; do sources+=("$f"); done < <(find "$DIR" -type f -name '*.rs' | LC_ALL=C sort)
+fi
 if [[ ${#sources[@]} -eq 0 ]]; then
   echo "error: no .rs sources under $DIR" >&2
   exit 1
@@ -87,20 +96,13 @@ fi
 # per file. `@shadow` and `@raise` are tallies rather than findings.
 scan() {
   for f in "${sources[@]}"; do
-    awk -v file="${f#"$ROOT"/}" '
+    LC_ALL=C awk -v file="${f#"$ROOT"/}" "$SCAN"'
+      END {
+        if ((what = rust_scan_open()) != "")
+          printf "%s\t%d\tfinding\t%s\n", file, NR, "the scan reached the end of the file inside " what ", so it lost track of what is code and checked nothing after that point. Fix the source, or teach tools/rust-code.awk the syntax it misread."
+      }
       {
-        code = $0
-        if (in_block) {
-          if (match(code, /\*\//)) { code = substr(code, RSTART + 2); in_block = 0 }
-          else code = ""
-        }
-        while (match(code, /\/\*/)) {
-          head = substr(code, 1, RSTART - 1)
-          tail = substr(code, RSTART + 2)
-          if (match(tail, /\*\//)) code = head substr(tail, RSTART + 2)
-          else { code = head; in_block = 1; break }
-        }
-        sub(/[[:space:]]*\/\/.*$/, "", code)
+        code = rust_code($0)
         trimmed = code
         sub(/^[[:space:]]+/, "", trimmed)
       }
