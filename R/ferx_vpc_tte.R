@@ -508,9 +508,13 @@ plot.ferx_vpc_tte <- function(x, y = NULL, engine = c("auto", "vpc", "base"),
                        y = rep(0.95, length(empty)),
                        label = rep(.ferx_vpc_no_band_label, length(empty)))
     if (nrow(x$strata) > 1L) note$STRATUM <- factor(empty, levels = levs)
+    # The mapping is built from symbols: ggplot2 is only suggested, so its
+    # `.data` pronoun cannot be imported, and `ggplot2::.data$x` is not the
+    # pronoun inside aes() (it fails "while computing aesthetics").
+    mapping <- do.call(ggplot2::aes, lapply(c(x = "x", y = "y", label = "label"),
+                                            as.name))
     p <- p + ggplot2::geom_text(
-      data = note, mapping = ggplot2::aes(x = ggplot2::.data$x, y = ggplot2::.data$y,
-                             label = ggplot2::.data$label),
+      data = note, mapping = mapping,
       inherit.aes = FALSE, colour = "firebrick", size = 3
     )
   }
