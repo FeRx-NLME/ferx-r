@@ -341,3 +341,51 @@ test_that("a supplied-eta subject's BSV is `supplied`", {
   expect_true(all(bsv$STATUS[bsv$ID == "1"] == "supplied"))
   expect_true(all(bsv$STATUS[bsv$ID != "1"] == "estimated"))
 })
+
+# Runs that stop early record no signal at the later decisions, so those
+# SIGNAL metrics are partly missing: the summary is over the present runs and
+# counts the rest, and the decomposition skips the (metric, subject) pairs
+# with a gap. Mutations that redden this: MC_SE always NA, the skipped table's
+# N_MISSING always 0, N_MISSING not reaching R (#779 review, finding 3).
+test_that("partly missing metrics: summary over present runs, skipped pairs counted, MC_SE finite", {
+  ex <- ferx_example("adaptive_tdm")
+  model <- .write_ipred_model(c("  when signal > 11 : stop",
+                                "  when signal < 10 : increase 25%"))
+  res <- ferx_simulate_adaptive(model, ex$data, n_sim = 4L, seed = 3L,
+                                n_reps = 2L, decompose = TRUE)
+  m <- res$metrics
+  expect_true(any(m$DISCONTINUED) && nrow(m) == 5L * 4L * 2L)
+  d <- res$decisions
+  rows <- res$summary_rows
+  sig <- rows[rows$METRIC == "SIGNAL" & rows$STATISTIC == "mean", ]
+  partial <- sig[sig$N_MISSING > 0L & sig$N_MISSING < sig$N_RUNS, ]
+  expect_gt(nrow(partial), 0L)
+  for (k in seq_len(nrow(sig))) {
+    lat <- d$LATENT[d$DECISION == sig$DECISION[k]]
+    expect_identical(sig$N_RUNS[k], nrow(m))
+    expect_identical(sig$N_MISSING[k], nrow(m) - length(lat))
+    expect_equal(sig$VALUE[k], mean(lat), tolerance = 1e-12)
+  }
+  # The decomposition skips a subject's SIGNAL at a decision some of its runs
+  # never reached, counting the runs without it.
+  sk <- res$variance_skipped
+  expect_gt(nrow(sk), 0L)
+  expect_true(all(sk$METRIC == "SIGNAL"))
+  for (k in seq_len(nrow(sk))) {
+    present <- sum(d$ID == sk$ID[k] & d$DECISION == sk$DECISION[k])
+    expect_identical(sk$N_MISSING[k], 4L * 2L - present)
+  }
+  vc <- res$variance_components
+  # A skipped pair has no subject rows for that metric.
+  for (k in seq_len(nrow(sk))) {
+    expect_false(any(vc$SCOPE == "subject" & vc$ID == sk$ID[k] &
+                       vc$METRIC == "SIGNAL" & vc$DECISION %in% sk$DECISION[k]))
+  }
+  # A jackknife MC SE for every estimated BSV line of CUM_DOSE. The model has
+  # no assay error and no IOV, so the within layer is exactly 0.
+  cum <- vc[vc$METRIC == "CUM_DOSE", ]
+  bsv <- cum[cum$LAYER == "bsv", ]
+  expect_true(all(bsv$STATUS == "estimated"))
+  expect_true(all(is.finite(bsv$MC_SE) & bsv$MC_SE > 0))
+  expect_true(all(cum$VALUE[cum$LAYER == "within"] == 0))
+})
