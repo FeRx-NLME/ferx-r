@@ -91,6 +91,103 @@ test_that("ferx_predict_survival() ignores a data.frame in the global environmen
   )
 })
 
+# -- The layout `r_data_frame()` builds, checked against what `data_frame!`
+# (that is, `data.frame()`) gave on `main` (#781 review finding 6). The
+# shadow tests above compare one build with itself, so a wrong `nrow` or a
+# column of the wrong type passes them; these pin the frame as R would have
+# built it. The tables are taken straight from the glue, before any R code
+# reshapes them, by wrapping each `ferx_rust_*` binding.
+
+# Run `expr`, collecting every value the namespace function `fn` returns.
+capture_glue <- function(fn, expr) {
+  orig <- get(fn, envir = asNamespace("ferx"))
+  seen <- list()
+  wrapper <- function(...) {
+    out <- orig(...)
+    seen[[length(seen) + 1L]] <<- out
+    out
+  }
+  do.call(local_mocked_bindings, c(setNames(list(wrapper), fn), .package = "ferx"))
+  force(expr)
+  seen
+}
+
+# A frame laid out as `data.frame()` lays it out: these columns in this order
+# with these classes, all of one length, compact automatic row names counted
+# from the columns themselves (not from `nrow()`, which reads the row names).
+expect_data_frame_layout <- function(x, classes) {
+  expect_identical(class(x), "data.frame")
+  expect_identical(vapply(x, function(col) class(col)[1], ""), classes)
+  n <- length(x[[1]])
+  expect_true(all(lengths(x) == n))
+  expect_identical(.row_names_info(x, 0L),
+                   if (n == 0L) integer(0) else c(NA_integer_, -n))
+}
+
+test_that("every glue table has data.frame()'s layout (#780, #781 review)", {
+  ex <- ferx_example("warfarin")
+  pred_cols <- c(ID = "character", TIME = "numeric", PRED = "numeric")
+  pop <- capture_glue("ferx_rust_predict", ferx_predict(ex$model, ex$data))
+  expect_length(pop, 1L)
+  expect_gt(length(pop[[1]][[1]]), 0L)
+  expect_data_frame_layout(pop[[1]], pred_cols)
+  at_fit <- capture_glue("ferx_rust_predict_from_fit",
+                         ferx_predict(ex$model, ex$data, fit = warfarin_fit()))
+  expect_data_frame_layout(at_fit[[1]], pred_cols)
+
+  surv_cols <- c(ID = "character", CMT = "integer", TIME = "numeric",
+                 survival = "numeric", cum_hazard = "numeric", hazard = "numeric",
+                 cif = "numeric", survival_all = "numeric",
+                 median_survival = "numeric", mean_survival = "numeric")
+  pk <- ferx_example("pktte_joint")
+  surv <- capture_glue("ferx_rust_predict_survival",
+                       ferx_predict_survival(pk$model, pk$data, times = c(0, 12)))
+  expect_gt(length(surv[[1]][[1]]), 0L)
+  expect_data_frame_layout(surv[[1]], surv_cols)
+  surv_fit <- capture_glue("ferx_rust_predict_survival_from_fit",
+                           ferx_predict_survival(pk$model, pk$data, times = c(0, 12),
+                                                 fit = pktte_fit()))
+  expect_data_frame_layout(surv_fit[[1]], surv_cols)
+  # No TTE endpoint: 0 rows, which data.frame() gives `integer(0)` row names.
+  iv <- ferx_example("one_cpt_iv")
+  empty <- capture_glue("ferx_rust_predict_survival",
+                        ferx_predict_survival(iv$model, iv$data, times = c(0, 12)))
+  expect_length(empty[[1]][[1]], 0L)
+  expect_data_frame_layout(empty[[1]], surv_cols)
+
+  ad <- ferx_example("adaptive_tdm")
+  run <- capture_glue("ferx_rust_simulate_adaptive",
+                      ferx_simulate_adaptive(ad$model, ad$data, n_sim = 2L, seed = 1L))[[1]]
+  for (tbl in c("doses", "decisions", "metrics")) expect_gt(length(run[[tbl]][[1]]), 0L)
+  expect_data_frame_layout(run$doses, c(
+    DRAW = "integer", SIM = "integer", REP = "integer", ID = "character",
+    TIME = "numeric", AMT = "numeric", CMT = "integer", RATE = "numeric",
+    DECISION = "integer", SIGNAL = "numeric", LATENT = "numeric", RULE = "character"))
+  expect_data_frame_layout(run$decisions, c(
+    DRAW = "integer", SIM = "integer", REP = "integer", ID = "character",
+    DECISION = "integer", TIME = "numeric", SIGNAL = "numeric", LATENT = "numeric",
+    OUTCOME = "character", N_DOSED = "integer", INTERVAL = "numeric"))
+  expect_data_frame_layout(run$metrics, c(
+    DRAW = "integer", SIM = "integer", REP = "integer", ID = "character",
+    CUM_DOSE = "numeric", N_DOSES = "integer", N_INCREASES = "integer",
+    N_DECREASES = "integer", N_HOLDS = "integer", N_NOT_DUE = "integer",
+    DISCONTINUED = "logical", TIME_TO_DISCONT = "numeric", SIGNAL_MIN = "numeric",
+    SIGNAL_MAX = "numeric", SIGNAL_MEAN = "numeric",
+    PCT_READINGS_IN_WINDOW = "numeric", PCT_TIME_IN_WINDOW = "numeric",
+    AUC_TARGET_ATTAINMENT = "numeric", ETA_SUPPLIED = "logical",
+    DOSE_ORACLE = "logical"))
+
+  npde <- capture_glue("ferx_rust_npde_from_fit",
+                       suppressWarnings(ferx_calc_npde(pktte_fit(), nsim = 50L, seed = 5L)))[[1]]
+  expect_data_frame_layout(npde, c(
+    ID = "numeric", TIME = "numeric", NPDE = "numeric", NPD = "numeric",
+    EPRED = "numeric", EWRES = "numeric", PWRES = "numeric"))
+  tte <- attr(npde, "tte_npde", exact = TRUE)
+  expect_gt(length(tte[[1]]), 0L)
+  expect_data_frame_layout(tte, c(ID = "numeric", TIME = "numeric",
+                                  CMT = "integer", NPDE = "numeric"))
+})
+
 test_that("ferx_calc_npde() on a TTE fit ignores a data.frame in the global environment (#780)", {
   # The time-to-event records are scored in a table of their own
   # (`tte_npde_table` in the glue) and placed on the sdtab's TTE rows.
