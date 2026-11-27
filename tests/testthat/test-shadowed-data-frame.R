@@ -2,7 +2,7 @@
 # (#780). extendr's `data_frame!` evaluated `data.frame(..)` from there, so a
 # shadowing function made each of these entry points panic and print the whole
 # table. The glue now builds every table with `r_data_frame()`, which never
-# calls R; `tools/check-glue-data-frame.sh` keeps the macro out. Each test
+# calls R; `tools/check-glue-r-lookups.sh` keeps the macro out. Each test
 # compares the shadowed result with the unshadowed one: identical, not merely
 # "no error", since the glue's frame is what the user gets back.
 

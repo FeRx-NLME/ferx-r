@@ -9531,8 +9531,9 @@ fn resolve_eta_names(result: &FitResult, n_eta: usize) -> Vec<String> {
 /// lays it out (compact automatic row names, `c(NA, -nrow)`), without calling
 /// R. extendr's `data_frame!` evaluates `data.frame` from the global
 /// environment, where a user's own `data.frame` shadows base's and the glue
-/// then panics (#778 review finding 5, #780); `tools/check-glue-data-frame.sh`
-/// keeps the macro out of `src/rust/src/`.
+/// then panics (#778 review finding 5, #780); `tools/check-glue-r-lookups.sh`
+/// keeps that macro, and every other global-environment lookup, out of
+/// `src/rust/src/`.
 fn r_data_frame(columns: Vec<(&str, Robj)>, nrow: usize) -> Robj {
     // `data.frame()` refuses columns of unequal length; building the list by
     // hand would not, and would hand R a malformed frame. A real `assert!`,
