@@ -370,16 +370,28 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   # prose and no code, never another finding's code.
   verify_arg <- if (isTRUE(verify)) "true" else "false"
   supplied <- .ferx_adaptive_etas(etas)
-  # The engine's unmatched-subject refusal names `UnmatchedSubjects::Draw`,
-  # the Rust spelling of `unmatched = "draw"`.
-  # The decomposition's refusal of a design that cannot separate a layer
-  # (ferx-core #946) names the Rust options; here they are these arguments.
-  options_spelling <- function(call) {
-    .ferx_engine_spelling(.ferx_engine_spelling(
-      call, "E_ADAPTIVE_OPTIONS", "`AdaptiveSimulateOptions::n_reps`", "`n_reps`"
-    ), "E_ADAPTIVE_OPTIONS", "in `UncertaintySpec`", "in `uncertainty`")
+  # Engine refusals name Rust spellings; here they are this function's
+  # arguments. E_SUPPLIED_ETAS: the refusal of supplied etas under parameter
+  # uncertainty (ferx-core #946) names the two `AdaptiveInputs` builders, and
+  # the unmatched-subject refusal names `UnmatchedSubjects::Draw`.
+  # E_ADAPTIVE_OPTIONS: the decomposition's refusal of a design that cannot
+  # separate a layer names the Rust options (the glue now refuses those
+  # designs before the run, but core's check stays behind it).
+  supplied_etas_spelling <- function(call) {
+    .ferx_engine_spelling(
+      call, "E_SUPPLIED_ETAS",
+      c("`with_uncertainty`", "`with_etas`", "`UnmatchedSubjects::Draw`"),
+      c("`uncertainty`", "`etas`", "`unmatched = \"draw\"`")
+    )
   }
-  res <- options_spelling(.ferx_engine_spelling(if (is.null(fit)) {
+  options_spelling <- function(call) {
+    .ferx_engine_spelling(
+      call, "E_ADAPTIVE_OPTIONS",
+      c("`AdaptiveSimulateOptions::n_reps`", "in `UncertaintySpec`"),
+      c("`n_reps`", "in `uncertainty`")
+    )
+  }
+  res <- options_spelling(supplied_etas_spelling(if (is.null(fit)) {
     .ferx_engine_call(
       ferx_rust_simulate_adaptive(
         model_path = normalizePath(model),
@@ -417,13 +429,7 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
         }
       )
     }
-    # The engine's refusal of supplied etas under parameter uncertainty
-    # (ferx-core #946) names the two `AdaptiveInputs` builders; here they
-    # are these two arguments.
-    spell <- function(call, from, to) {
-      .ferx_engine_spelling(call, "E_SUPPLIED_ETAS", from, to)
-    }
-    spell(spell(.ferx_engine_call(
+    .ferx_engine_call(
       ferx_rust_simulate_adaptive_from_fit(
         model_path = normalizePath(model),
         data_path = normalizePath(data),
@@ -456,8 +462,8 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
         run_options = run_options
       ),
       model, data
-    ), "`with_uncertainty`", "`uncertainty`"), "`with_etas`", "`etas`")
-  }, "E_SUPPLIED_ETAS", "`UnmatchedSubjects::Draw`", "`unmatched = \"draw\"`"))
+    )
+  }))
 
   # Under "draw" an `etas` keyed differently from the data (`01` against `1`)
   # matches nobody and every subject is drawn - the mistake "refuse" exists to
