@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Bump the ferx-core / ferx-tools pin in src/rust/Cargo.lock to current main HEAD.
+# Bump the ferx-core / ferx-tools / ferx-search pin in src/rust/Cargo.lock to
+# current main HEAD.
 #
-# Both crates live in the one ferx-core repository and are patched to the local
-# sibling checkout together, so they are bumped together and must end up on the
-# same revision.
+# All three crates live in the one ferx-core repository and are patched to the
+# local sibling checkout together, so they are bumped together and must end up
+# on the same revision.
 #
 # Why this script exists: src/rust/.cargo/config.toml used to carry a [patch]
 # redirecting ferx-core to a sibling ../ferx-core checkout. If you ran any
@@ -57,7 +58,7 @@ fi
 
 ( cd "$RUST_DIR" && cargo update )
 
-# Verify the lock pins both crates via a git source line, on one revision - the
+# Verify the lock pins every crate via a git source line, on one revision - the
 # same check the R-CMD-check workflow runs. Only its error lines are shown: its
 # generic repair advice would point back at this script.
 if ! bash tools/check-ferx-core-pin.sh "$LOCK" >/dev/null 2>"$CHECK_ERR"; then
@@ -72,6 +73,6 @@ SHA=$(grep -m1 '^source = "git+https://github.com/FeRx-NLME/ferx-core' "$RUST_DI
   | sed -E 's/.*#([0-9a-f]+).*/\1/')
 
 echo
-echo "ferx-core and ferx-tools now pinned to: $SHA"
+echo "ferx-core, ferx-tools and ferx-search now pinned to: $SHA"
 echo "Commit suggestion:"
 echo "  chore(deps): update Cargo.lock to ferx-core main (${SHA:0:7})"

@@ -82,8 +82,9 @@
 - [ ] `DESCRIPTION` version bumped if warranted
 - [ ] `DESCRIPTION` ferx-core git dep points to merged engine commit (not a branch)
 - [ ] `src/rust/Cargo.lock` updated to pin ferx-core to the correct commit
-  <!-- From the repo root: tools/update-ferx-core-lock.sh (moves the ferx-core and
-       ferx-tools pins to ferx-core main with the local [patch] out of the way),
+  <!-- From the repo root: tools/update-ferx-core-lock.sh (moves the ferx-core,
+       ferx-tools and ferx-search pins to ferx-core main with the local [patch]
+       out of the way),
        then commit src/rust/Cargo.lock. Verify with tools/check-ferx-core-pin.sh,
        which runs no cargo and is the same check CI runs. -->
 - [ ] Not applicable (no ferx-core dependency change in this PR)

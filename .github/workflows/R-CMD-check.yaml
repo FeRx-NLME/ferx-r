@@ -42,8 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Guard against an accidentally-unpinned ferx-core / ferx-tools dependency.
-      # A local build with a sibling ../ferx-core checkout patches both crates to
+      # Guard against an accidentally-unpinned ferx-core / ferx-tools /
+      # ferx-search dependency.
+      # A local build with a sibling ../ferx-core checkout patches all three crates to
       # it, and a cargo run that resolves with that patch applied strips the
       # `source = "git+..."` lines, silently unpinning them for everyone who
       # builds without the sibling; one whose patch went unused appends
@@ -52,11 +53,11 @@ jobs:
       # checkout still holding the pre-#353 [patch] in src/rust/.cargo/config.toml
       # all reach the lock anyway.
       #
-      # Both crates come from the one repository, so they must also sit on the
-      # same revision: a lock pinning them apart is two halves of a workspace
+      # All three come from the one repository, so they must also sit on the
+      # same revision: a lock pinning them apart is parts of a workspace
       # that is only ever tested together. The check lives in a script so
       # contributors run exactly what CI runs (AGENTS.md, "ferx-core dependency").
-      - name: Verify ferx-core and ferx-tools are pinned in Cargo.lock
+      - name: Verify ferx-core, ferx-tools and ferx-search are pinned in Cargo.lock
         run: bash tools/check-ferx-core-pin.sh
 
       # The step above only ever sees the committed lock, so nothing there would

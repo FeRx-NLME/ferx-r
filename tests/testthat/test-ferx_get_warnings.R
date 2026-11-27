@@ -947,12 +947,24 @@ test_that("every covariance message ferx-core emits gets non-contradictory guida
     list(cat = "covariance_failed",
          # covariance_method = "s": S itself is singular, and the remedy is an
          # estimator that does not invert it (#308).
+         # The design case of ferx-core #1780's s_singular_msg() at 13e6c8bf.
          msg = paste0("Covariance step failed: the score cross-product matrix S ",
-                      "is singular or rank-deficient (covariance_method = s); ",
-                      "typically fewer subjects than free parameters, or ",
-                      "collinear per-subject scores. Use covariance_method = r ",
-                      "or rsr. SE estimates not available."),
+                      "is singular (covariance_method = s). With 6 subjects and ",
+                      "7 free parameters S has rank at most 6, so it is singular ",
+                      "on this design at any estimate. Use covariance_method = r ",
+                      "or rsr, which never invert S; both need R positive ",
+                      "definite at the estimate, which after saem, imp, impmap or ",
+                      "vi it may not be. SE estimates not available."),
          ok = "covariance_method = \"rsr\"", never = "identifiability"),
+    list(cat = "covariance_failed",
+         # A collinear pair (#1780): R is singular along the same direction,
+         # so the R-matrix estimators are not the remedy.
+         msg = paste0("Covariance step failed: the score cross-product matrix S ",
+                      "is singular (covariance_method = s). The per-subject ",
+                      "scores of TVCL, TVV are collinear, so the data inform only ",
+                      "a combination of them; fix or remove one of them. SE ",
+                      "estimates not available."),
+         ok = "Fix or remove those", never = "ferx_covariance\\(fit"),
     # The profiled theta level block's covariance step (ferx-core profile.rs,
     # #1065). Before these arms every one fell to the generic fallback.
     list(cat = "covariance_failed",
@@ -1577,12 +1589,19 @@ test_that("the ode_solver escalation note keeps its informational guidance", {
     "W_ODE_SOLVER_ESCALATION_NOTE: ode_method = auto escalated 240 integration ",
     "segment(s) to a stiff stepper at the final estimates; every other segment ",
     "used rk45, no escalation was rejected, and no step clamped at the minimum ",
-    "step size. Informational — set ode_method = rk45 to pin the explicit ",
-    "stepper, or name a stiff method to pin the other half."
+    "step size. Informational. The escalated segments are the ones the ",
+    "stiffness probe judged stiff, a verdict that can be wrong on a model that ",
+    "is not stiff. To skip the probe, name a stiff method (ode_method = rodas5p ",
+    "or rodas4), which then runs every segment. Pin rk45 only if those segments ",
+    "are not stiff (ferx-core #3154)."
   )
   g <- ferx:::.ferx_warning_guidance("ode_solver", message = note)
   expect_match(g, "(informational)", fixed = TRUE)
   expect_false(.recommends_solver_settings(g))
+  # ferx-core #3154 / ferx-r #775: a stiff method is the way to skip the probe;
+  # rk45 is no longer offered as an equal choice.
+  expect_match(g, "name a stiff method", fixed = TRUE)
+  expect_match(g, "Do not pin ode_method = \"rk45\"", fixed = TRUE)
 })
 
 test_that("the ODE tolerance-settlement warnings get their own guidance", {
@@ -1620,6 +1639,18 @@ test_that("the ODE tolerance-settlement warnings get their own guidance", {
     "ode_reltol / ode_abstol at most 1e-7 / 1e-9 and compare again, tightening ",
     "until the OFV stops moving (#2994)."
   )
+  # The same token for a check the user switched off (ferx-core #3157):
+  # ode_tolerance_check.rs unchecked_warning() at 13e6c8bf.
+  switched_off <- paste0(
+    "W_ODE_OFV_SETTLEMENT_UNCHECKED: whether the OFV is settled at the fit's ODE ",
+    "tolerance was not checked, because `ode_ofv_check = false`. The fit and its ",
+    "OFV are unaffected; refit once with tighter ode_reltol / ode_abstol and ",
+    "compare the OFV before comparing models by it (#2994)."
+  )
+  g_off <- ferx:::.ferx_warning_guidance("ode_solver", message = switched_off)
+  expect_match(g_off, "ode_ofv_check = FALSE) asked for it", fixed = TRUE)
+  expect_match(g_off, "Leave ode_ofv_check at its default (TRUE)", fixed = TRUE)
+  expect_false(grepl("could not be completed", g_off, fixed = TRUE))
   # Every sentence of each guidance is asserted, so deleting one reddens a test.
   g1 <- ferx:::.ferx_warning_guidance("ode_solver", message = not_settled)
   expect_match(g1, "tenfold tighter ODE tolerance", fixed = TRUE)
@@ -2111,4 +2142,33 @@ test_that("print() of a reloaded fit tallies the recovered severities", {
   expect_match(out, "critical", fixed = TRUE)
   expect_match(out, "covariance_failed", fixed = TRUE)
   expect_false(grepl("inspect fit$warnings", out, fixed = TRUE))
+})
+
+test_that("the gn rank and twin-analytical notes get their own guidance (ferx-core #2438, #1580)", {
+  # gauss_newton.rs gn_rank_deficient_warning() at 13e6c8bf, counts filled in.
+  gn <- paste0(
+    "Gauss-Newton (BHHH): 6 subjects for 7 free parameters, so the BHHH ",
+    "information has rank at most 6 and is singular; its steps can stall short ",
+    "of the optimum. Use method = gn_hybrid, or a different optimizer."
+  )
+  for (cat in c("convergence", "optimizer_health", "general")) {
+    g <- ferx:::.ferx_warning_guidance(cat, message = gn)
+    expect_match(g, "gn_hybrid", fixed = TRUE, info = cat)
+    expect_false(grepl("n_starts", g, fixed = TRUE), info = cat)
+  }
+  # Another Gauss-Newton warning keeps the category's advice.
+  other <- "Gauss-Newton (BHHH): trust radius collapsed without convergence."
+  expect_false(grepl("rank", ferx:::.ferx_warning_guidance("convergence", message = other)))
+
+  # api/fit.rs derived_cmt_warnings() at 13e6c8bf.
+  twin <- paste0(
+    "W_DERIVED_CMT_TWIN_ANALYTICAL: closed-form transit/IG model with subjects its ",
+    "ODE equivalent serves (for example a steady-state or infusion dose, a ",
+    "TIME-reading parameter, or the flip-flop regime) - compartment states are ",
+    "not available for those subjects; [derived] expressions that reference ",
+    "compartments[i] evaluate to NaN for them."
+  )
+  g <- ferx:::.ferx_warning_guidance("general", message = twin)
+  expect_match(g, "explicit ODE transit() / igd() model", fixed = TRUE)
+  expect_match(g, "IPRED and the fit are unaffected", fixed = TRUE)
 })

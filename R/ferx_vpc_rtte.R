@@ -165,5 +165,15 @@ plot.ferx_vpc_rtte <- function(x, y = NULL, which = c("mcf", "absolute", "gap"),
   if (length(obs_time)) {
     graphics::lines(c(0, obs_time), c(start, obs_y), type = step, lwd = 2)
   }
+  if (!nrow(b)) .ferx_vpc_no_band_note()
   invisible()
+}
+
+# The note a panel with no band carries, so it is never drawn as if the band
+# were merely narrow (ferx-core #2947): the engine says why in its
+# W_VPC_EMPTY_STRATUM warning, which the result's print method shows.
+.ferx_vpc_no_band_label <- "No simulated band here (W_VPC_EMPTY_STRATUM; see $warnings)"
+.ferx_vpc_no_band_note <- function() {
+  graphics::mtext(.ferx_vpc_no_band_label, side = 3, line = -1.5, cex = 0.75,
+                  col = "firebrick")
 }

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Check that src/rust/Cargo.lock still pins ferx-core and ferx-tools to the
-# ferx-core GitHub repository, on one revision, with no [[patch.unused]] tables.
+# Check that src/rust/Cargo.lock still pins every ferx-core repository crate
+# (ferx-core, ferx-tools, ferx-search: FERX_CRATES in tools/ferx-core-lock-lib.sh)
+# to the ferx-core GitHub repository, on one revision, with no [[patch.unused]]
+# tables.
 #
 # Why: any cargo command that resolves while a [patch] to a sibling ../ferx-core
-# checkout is in place rewrites the lock. An applied patch deletes both
+# checkout is in place rewrites the lock. An applied patch deletes every
 # `source = "git+..."` lines (unpinning the crates for CI and everyone who
 # builds without the sibling); an unused one appends [[patch.unused]] tables
 # instead. Since #353 only tools/sibling-cargo-build.sh passes such a patch, to
@@ -43,18 +45,22 @@ if [[ ! -f "$LOCK" ]]; then
   exit 1
 fi
 
-for pkg in ferx-core ferx-tools; do
+for pkg in $FERX_CRATES; do
   case "$(ferx_lock_source_of "$pkg" "$LOCK")" in
     "$FERX_GIT_SOURCE_PREFIX"*) ;;
     *) fail "$pkg lacks a git source pin - a cargo run with the sibling ../ferx-core [patch] applied strips it." ;;
   esac
 done
 
-core_rev=$(ferx_lock_source_of ferx-core "$LOCK" | sed -E 's/.*#([0-9a-f]+).*/\1/')
-tools_rev=$(ferx_lock_source_of ferx-tools "$LOCK" | sed -E 's/.*#([0-9a-f]+).*/\1/')
-if [[ -n "$core_rev" && -n "$tools_rev" && "$core_rev" != "$tools_rev" ]]; then
-  fail "ferx-core ($core_rev) and ferx-tools ($tools_rev) are pinned to different revisions of the same repository."
-fi
+rev_of() { ferx_lock_source_of "$1" "$LOCK" | sed -E 's/.*#([0-9a-f]+).*/\1/'; }
+core_rev=$(rev_of ferx-core)
+for pkg in $FERX_CRATES; do
+  [[ "$pkg" == ferx-core ]] && continue
+  rev=$(rev_of "$pkg")
+  if [[ -n "$core_rev" && -n "$rev" && "$core_rev" != "$rev" ]]; then
+    fail "ferx-core ($core_rev) and $pkg ($rev) are pinned to different revisions of the same repository."
+  fi
+done
 
 if grep -q '^\[\[patch\.unused\]\]' "$LOCK"; then
   fail "Cargo.lock carries [[patch.unused]] tables - written by a cargo run whose sibling [patch] went unused; they belong to no change."
@@ -83,4 +89,4 @@ EOF
   exit 1
 fi
 
-echo "ferx-core and ferx-tools pinned to $core_rev"
+echo "$(ferx_crates_phrase) pinned to $core_rev"

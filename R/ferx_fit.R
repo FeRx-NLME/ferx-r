@@ -300,7 +300,8 @@
 #'       cold solves \code{inner_restarts} gates (so \code{inner_restarts = 0}
 #'       disables it too), each subject scores this many Sobol points drawn
 #'       from \eqn{N(0, 4\Omega)} on its individual objective, descends from
-#'       the 3 lowest, and keeps a result only when it is lower than the mode
+#'       up to 3 of the 32 lowest, lowest first, each more than 0.5 from those
+#'       before it in the \eqn{\Omega^{-1}} metric (ferx-core #2863), and keeps a result only when it is lower than the mode
 #'       it already has and clearly distinct from it. It reaches modes that lie
 #'       off every axis, such as the flip-flop twin of a one-compartment oral
 #'       subject, which the per-coordinate restarts cannot. The points depend
@@ -316,6 +317,15 @@
 #'       too. Applies only where \code{V} and \code{KA} each carry a log-normal
 #'       random effect of their own and every dose goes into the depot; any
 #'       other model or subject solves exactly as with \code{FALSE}.}
+#'     \item{\code{inner_kick}}{(default \code{FALSE}) Kick every inner
+#'       (EBE) solve: restart it from a small kick of each coordinate and keep
+#'       a lower mode, which reaches the second local minimum a clipped
+#'       prediction (\code{max}, \code{min}, \code{if}) can put a kink away,
+#'       out of reach of \code{inner_restarts} and \code{inner_screen}. It
+#'       also checks a stall at a large gradient against the gradients around
+#'       it (gradient sampling) and leaves a kink's valley floor along it. Off
+#'       by default because the kicks run whether or not the model has a kink:
+#'       2-20x slower on fast ODE models without one (ferx-core #3159).}
 #'     \item{\code{inner_optimizer}}{\code{"auto"} (default), \code{"bfgs"},
 #'       \code{"lbfgs"} or \code{"nelder_mead"}. Inner-loop algorithm.
 #'       \code{"auto"} uses dense BFGS, switching to limited-memory L-BFGS above
@@ -542,6 +552,14 @@
 #'       \code{[fit_options]} block.}
 #'     \item{\code{ode_abstol}}{Absolute tolerance for ODE models and the
 #'       absorption ODE twin, as for \code{ode_reltol} (default \code{1e-6}).}
+#'     \item{\code{ode_ofv_check}}{(default \code{TRUE}) Run the post-fit OFV
+#'       settlement check on an integrated ODE model: the objective at the
+#'       estimates is re-scored at tolerances a decade tighter, and
+#'       \code{W_ODE_OFV_NOT_SETTLED} reports a move. \code{FALSE} skips it,
+#'       which saves up to the cost of the evaluation itself on a run that only
+#'       scores a model at given estimates (\code{maxiter = 0}); the fit then
+#'       carries \code{W_ODE_OFV_SETTLEMENT_UNCHECKED} naming
+#'       \code{ode_ofv_check = false} (ferx-core #3157).}
 #'     \item{\code{ode_max_steps}}{Maximum solver steps per integration segment
 #'       (default \code{10000}). Raise if a tight \code{ode_reltol} exhausts the
 #'       step budget on stiff multi-compartment systems -- or switch
@@ -1624,7 +1642,7 @@
 #'     the stage that produced the estimates scored the objective under:
 #'     \code{inner_maxiter}, \code{inner_tol} (as the stage ran it, after the
 #'     tightening ferx applies for LTBS and quadrature), \code{inner_restarts},
-#'     \code{inner_screen}, \code{inner_twin_seed}, \code{mu_referencing}, \code{n_agq}, \code{inner_optimizer},
+#'     \code{inner_screen}, \code{inner_twin_seed}, \code{inner_kick}, \code{mu_referencing}, \code{n_agq}, \code{inner_optimizer},
 #'     \code{ebe_warm_start}, \code{ode_reltol}, \code{ode_abstol},
 #'     \code{ode_max_steps}, \code{ode_method}, \code{ode_stiff_abort_after}
 #'     (\code{NA} when off), \code{ode_auto_switch},

@@ -25,7 +25,7 @@ failures=0
 
 PIN_PREFIX='source = "git+https://github.com/FeRx-NLME/ferx-core'
 
-# The lock version both crates carry in the committed lock; the fixtures below
+# The lock version the crates carry in the committed lock; the fixtures below
 # match or mismatch it deliberately.
 LOCK_VERSION="$(awk '
   $0 == "name = \"ferx-core\"" { in_pkg = 1; next }
@@ -41,12 +41,14 @@ report() { # headline, captured output
 # -- fixtures ----------------------------------------------------------------
 
 # A package tree with a stub cargo on PATH and a sibling checkout beside it.
-#   make_case <name> <core version> <tools version> [lock variant]
+#   make_case <name> <core version> <tools version> [lock variant] [search version]
 # The lock variant is `pinned` (the committed lock) or `stripped` (what a direct
-# cargo run with the old persistent [patch] left behind).
-make_case() { # name, core version, tools version, lock variant
-  local dir="$TMP/$1" core=$2 tools=$3 variant=${4:-pinned}
-  mkdir -p "$dir/pkg/src/rust" "$dir/ferx-core/crates/ferx-tools" "$dir/bin"
+# cargo run with the old persistent [patch] left behind). ferx-search takes the
+# tools version unless given its own.
+make_case() { # name, core version, tools version, lock variant, search version
+  local dir="$TMP/$1" core=$2 tools=$3 variant=${4:-pinned} search=${5:-$3}
+  mkdir -p "$dir/pkg/src/rust" "$dir/ferx-core/crates/ferx-tools" \
+    "$dir/ferx-core/crates/ferx-search" "$dir/bin"
 
   if [[ "$variant" == stripped ]]; then
     awk -v pfx="$PIN_PREFIX" 'index($0, pfx) != 1' "$REAL_LOCK" > "$dir/pkg/src/rust/Cargo.lock"
@@ -57,6 +59,7 @@ make_case() { # name, core version, tools version, lock variant
 
   printf '[package]\nname = "ferx-core"\nversion = "%s"\n' "$core" > "$dir/ferx-core/Cargo.toml"
   printf '[package]\nname = "ferx-tools"\nversion = "%s"\n' "$tools" > "$dir/ferx-core/crates/ferx-tools/Cargo.toml"
+  printf '[package]\nname = "ferx-search"\nversion = "%s"\n' "$search" > "$dir/ferx-core/crates/ferx-search/Cargo.toml"
 
   # The stub records how it was called, then rewrites ./Cargo.lock (cargo's cwd
   # is src/rust) the way the resolve it stands in for would have.
@@ -79,9 +82,11 @@ mark_unused() { # crate
   printf '\n[[patch.unused]]\nname = "%s"\nversion = "0.0.0"\n' "$1" >> Cargo.lock
 }
 case "${STUB_MODE:-apply}" in
-  apply)  strip_pin ferx-core; strip_pin ferx-tools ;;
-  unused) mark_unused ferx-core; mark_unused ferx-tools ;;
-  mixed)  strip_pin ferx-core; mark_unused ferx-tools ;;
+  apply)  strip_pin ferx-core; strip_pin ferx-tools; strip_pin ferx-search ;;
+  unused) mark_unused ferx-core; mark_unused ferx-tools; mark_unused ferx-search ;;
+  mixed)  strip_pin ferx-core; mark_unused ferx-tools; strip_pin ferx-search ;;
+  # The case #3185 added: ferx-core and ferx-tools patched, ferx-search not.
+  mixed-search) strip_pin ferx-core; strip_pin ferx-tools; mark_unused ferx-search ;;
   noop)   ;;
 esac
 # Sit on the rewritten lock until released, so a second build can be started
@@ -145,17 +150,18 @@ check() {
 
 # -- the cases ---------------------------------------------------------------
 
-# 1. The patch applies to both crates: the happy path.
+# 1. The patch applies to every crate: the happy path.
 dir=$(make_case applied "$LOCK_VERSION" "$LOCK_VERSION")
 out=$(STUB_MODE=apply run_case "$dir" /bin/sh); rc=$?
-check "patch applies to both" "$dir" 0 "$out" "$rc" \
-  "supplied BOTH ferx-core and ferx-tools" "Cargo.lock restored to its pin"
+check "patch applies to all three" "$dir" 0 "$out" "$rc" \
+  "supplied ALL of ferx-core, ferx-tools and ferx-search" "Cargo.lock restored to its pin"
 # and the patch really was passed per crate, to that one cargo run
 args=$(cat "$dir/args")
 for want in 'patch."https://github.com/FeRx-NLME/ferx-core".ferx-core.path' \
-            'patch."https://github.com/FeRx-NLME/ferx-core".ferx-tools.path'; do
+            'patch."https://github.com/FeRx-NLME/ferx-core".ferx-tools.path' \
+            'patch."https://github.com/FeRx-NLME/ferx-core".ferx-search.path'; do
   if [[ "$args" != *"$want"* ]]; then
-    report "patch applies to both: cargo was not given $want" "$args"
+    report "patch applies to all three: cargo was not given $want" "$args"
   else
     echo "ok   cargo received --config for ${want##*core\".}"
   fi
@@ -164,9 +170,9 @@ done
 # 2. Both versions differ from the lock, so cargo ignores the patch entirely.
 dir=$(make_case unused 9.9.9 9.9.9)
 out=$(STUB_MODE=unused run_case "$dir" /bin/sh); rc=$?
-check "patch unused for both" "$dir" 0 "$out" "$rc" \
-  "the sibling was NOT used" "patch entries unused: ferx-core ferx-tools" \
-  "sibling 9.9.9" "!supplied BOTH"
+check "patch unused for all three" "$dir" 0 "$out" "$rc" \
+  "the sibling was NOT used" "patch entries unused: ferx-core ferx-tools ferx-search" \
+  "sibling 9.9.9" "!supplied ALL"
 
 # 3. A mixed-revision build that cargo's own resolve produced. The version
 #    pre-check cannot see it (both manifests match the lock), so only the
@@ -174,14 +180,20 @@ check "patch unused for both" "$dir" 0 "$out" "$rc" \
 dir=$(make_case mixed "$LOCK_VERSION" "$LOCK_VERSION")
 out=$(STUB_MODE=mixed run_case "$dir" /bin/sh); rc=$?
 check "mixed revisions refused" "$dir" 1 "$out" "$rc" \
-  "MIXED revisions" "ferx-core came from the sibling" \
+  "MIXED revisions" "ferx-core from the sibling" \
   "ferx-tools from the pinned revision" "!the sibling was NOT used"
+
+dir=$(make_case mixed-search "$LOCK_VERSION" "$LOCK_VERSION")
+out=$(STUB_MODE=mixed-search run_case "$dir" /bin/sh); rc=$?
+check "ferx-search left unpatched is refused" "$dir" 1 "$out" "$rc" \
+  "MIXED revisions" "ferx-tools from the sibling" \
+  "ferx-search from the pinned revision"
 
 # 4. A mixed build the versions predict: refused before cargo runs at all.
 dir=$(make_case mixed-preflight "$LOCK_VERSION" 9.9.9)
 out=$(run_case "$dir" /bin/sh); rc=$?
 check "mixed versions refused before building" "$dir" 1 "$out" "$rc" \
-  "would supply only one of the two crates" "Refusing to build"
+  "would supply only some of the crates" "Refusing to build"
 if [[ -f "$dir/ran" ]]; then
   report "mixed versions refused before building: cargo ran anyway" "$out"
 else
@@ -241,6 +253,12 @@ dir=$(make_case no-ferx-tools "$LOCK_VERSION" "$LOCK_VERSION")
 rm -rf "$dir/ferx-core/crates"
 out=$(run_case "$dir" /bin/sh); rc=$?
 check "sibling without crates/ferx-tools" "$dir" 2 "$out" "$rc" "has no crates/ferx-tools"
+
+# A sibling from between the ferx-tools split and the ferx-search one (#3185).
+dir=$(make_case no-ferx-search "$LOCK_VERSION" "$LOCK_VERSION")
+rm -rf "$dir/ferx-core/crates/ferx-search"
+out=$(run_case "$dir" /bin/sh); rc=$?
+check "sibling without crates/ferx-search" "$dir" 2 "$out" "$rc" "has no crates/ferx-search"
 
 # 9. A POSIX path with a backslash in it: a legal directory name, but not
 #    something a TOML string can carry, and not something to rewrite either -

@@ -79,8 +79,9 @@ distinct time per stratum: \code{STRATUM}, \code{time},
 Nelson-Aalen \code{cumhaz}.}
 \item{\code{band}}{The replicate band, one row per grid time per
 stratum: \code{STRATUM}, \code{time}, \code{obs} (the observed curve
-read at \code{time}; \code{NA} past its last time unless it reached
-0), \code{lo}, \code{med}, \code{hi} (the band at \code{probs};
+read at \code{time}; \code{NA} past its last time, also where it
+has reached 0, ferx-core #2930), \code{lo}, \code{med},
+\code{hi} (the band at \code{probs};
 \code{NA} where too few replicates are still under follow-up) and
 \code{n_used}, the number of replicate curves defined there.}
 \item{\code{strata}}{One row per stratum: \code{STRATUM} (its label:

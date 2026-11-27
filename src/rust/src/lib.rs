@@ -1500,7 +1500,9 @@ fn simulate_adaptive(
 /// controller actually observed — assay-noised when `with_assay_error`) and the
 /// `LATENT` column next to it (the noise-free readout it was drawn from; equal to
 /// `SIGNAL` for an `Ipred` monitor). The outcome metrics are scored on `LATENT`
-/// (ferx-core #946).
+/// (ferx-core #946). `REP`, after `SIM` in the ledger, decision and metrics frames,
+/// is the 1-based assay replicate of `AdaptiveSimulateOptions::n_reps` (ferx-core
+/// #946 PR3): `1` on every row of a run without replicates.
 fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: &CompiledModel) -> Robj {
     let trajectories = sim_results_to_df(&result.trajectories);
 
@@ -1511,6 +1513,7 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: 
     let doses = data_frame!(
         DRAW = l.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
         SIM = l.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
+        REP = l.iter().map(|e| e.rep as i32).collect::<Vec<i32>>(),
         ID = l.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
         TIME = l.iter().map(|e| e.time).collect::<Vec<f64>>(),
         AMT = l.iter().map(|e| e.amt).collect::<Vec<f64>>(),
@@ -1531,6 +1534,7 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: 
     let decisions = data_frame!(
         DRAW = d.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
         SIM = d.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
+        REP = d.iter().map(|e| e.rep as i32).collect::<Vec<i32>>(),
         ID = d.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
         DECISION = d.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>(),
         TIME = d.iter().map(|e| e.time).collect::<Vec<f64>>(),
@@ -1549,6 +1553,7 @@ fn adaptive_result_to_list(result: &ferx_core::AdaptiveSimulationResult, model: 
     let metrics = data_frame!(
         DRAW = m.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
         SIM = m.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
+        REP = m.iter().map(|e| e.rep as i32).collect::<Vec<i32>>(),
         ID = m.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
         CUM_DOSE = m.iter().map(|e| e.cumulative_dose).collect::<Vec<f64>>(),
         N_DOSES = m.iter().map(|e| e.n_doses as i32).collect::<Vec<i32>>(),
@@ -6259,6 +6264,8 @@ fn default_fit_result(
         exclusions: None,
         method_wall_times_secs: Vec::new(),
         covariance_wall_time_secs: 0.0,
+        ofv_settlement_wall_time_secs: 0.0,
+        subject_results_wall_time_secs: 0.0,
         environment: ferx_core::environment::EnvironmentInfo::default(),
         #[cfg(feature = "nn")]
         neural_networks: Vec::new(),
@@ -10604,6 +10611,9 @@ const SCORING_KEYS: &[RecordKey] = &[
     // flip-flop twin seed: `false`, as ferx-core's wire fills it - not today's
     // default (`true`), which would seed where the fit did not.
     record_key("inner_twin_seed", "inner_twin_seed", MissingKey::Fill("false")),
+    // Absent from a record written before ferx-core #3159, whose fit kicked no
+    // inner solve: `false`, as ferx-core's wire fills it (also today's default).
+    record_key("inner_kick", "inner_kick", MissingKey::Fill("false")),
     record_key("mu_referencing", "mu_referencing", MissingKey::Refuse),
     record_key("n_agq", "n_agq", MissingKey::Refuse),
     record_key("inner_optimizer", "inner_optimizer", MissingKey::Refuse),
@@ -10685,6 +10695,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         inner_restarts,
         inner_screen,
         inner_twin_seed,
+        inner_kick,
         mu_referencing,
         n_agq,
         inner_optimizer,
@@ -10706,6 +10717,7 @@ fn scoring_settings_to_r(s: &ferx_core::ScoringSettings) -> std::result::Result<
         inner_restarts = count_to_r(*inner_restarts),
         inner_screen = count_to_r(*inner_screen),
         inner_twin_seed = *inner_twin_seed,
+        inner_kick = *inner_kick,
         mu_referencing = *mu_referencing,
         n_agq = count_to_r(*n_agq),
         inner_optimizer = fit_option_token(serde_json::to_value(inner_optimizer))?,
@@ -12563,7 +12575,7 @@ fn ferx_rust_gam_screen(
 //  Model-space search: the shared surface (ferx-r #332 Part 1)
 // ---------------------------------------------------------------------------
 //
-// `ferx_tools::search` owns the `.ferxsearch` loader, the MFL parser, the
+// `ferx_search::search` owns the `.ferxsearch` loader, the MFL parser, the
 // coverage check and the `@`-symbol resolver. These bindings expose the
 // *validation* half of it, so a search space can be inspected and refused
 // before the first candidate is fitted. None of them runs a fit; the runner
@@ -12577,7 +12589,7 @@ fn ferx_rust_gam_screen(
 /// Split an MFL program into the parallel vectors the R side assembles into a
 /// feature data frame: the rendered feature, its keyword, and whether it is
 /// exploratory (`COVARIATE?` vs `COVARIATE`).
-fn search_feature_columns(mfl: &ferx_tools::search::Mfl) -> (Vec<String>, Vec<String>, Vec<bool>) {
+fn search_feature_columns(mfl: &ferx_search::search::Mfl) -> (Vec<String>, Vec<String>, Vec<bool>) {
     let mut feature = Vec::new();
     let mut keyword = Vec::new();
     let mut optional = Vec::new();
@@ -12600,17 +12612,17 @@ fn search_feature_columns(mfl: &ferx_tools::search::Mfl) -> (Vec<String>, Vec<St
 /// is that an unsupported feature is a *row*, not an aborted run. A gap names
 /// the offending mode (`ELIMINATION(MM)`) rather than the source statement
 /// (`ELIMINATION(*)`), which is the more useful of the two identities.
-fn search_coverage_rows(mfl: &ferx_tools::search::Mfl) -> (Vec<String>, Vec<bool>, Vec<String>) {
+fn search_coverage_rows(mfl: &ferx_search::search::Mfl) -> (Vec<String>, Vec<bool>, Vec<String>) {
     let mut feature = Vec::new();
     let mut covered = Vec::new();
     let mut reason = Vec::new();
     let mut gaps_seen: std::collections::HashSet<(String, String)> =
         std::collections::HashSet::new();
     for f in mfl.features() {
-        let one = ferx_tools::search::Mfl {
-            statements: vec![ferx_tools::search::Statement::Feature(f.clone())],
+        let one = ferx_search::search::Mfl {
+            statements: vec![ferx_search::search::Statement::Feature(f.clone())],
         };
-        match ferx_tools::search::check_coverage(&one) {
+        match ferx_search::search::check_coverage(&one) {
             Ok(()) => {
                 feature.push(f.to_string());
                 covered.push(true);
@@ -12643,17 +12655,17 @@ fn search_coverage_rows(mfl: &ferx_tools::search::Mfl) -> (Vec<String>, Vec<bool
 /// whichever tool runs the config (covsearch ranks on OFV, the others on their
 /// own default). It comes back as the empty string and reaches R as `NA`, the
 /// same "not stated" convention `[rank] cutoff` already uses.
-fn search_rank_label(kind: Option<ferx_tools::search::RankType>) -> &'static str {
+fn search_rank_label(kind: Option<ferx_search::search::RankType>) -> &'static str {
     let Some(kind) = kind else { return "" };
     match kind {
-        ferx_tools::search::RankType::Ofv => "ofv",
-        ferx_tools::search::RankType::Aic => "aic",
-        ferx_tools::search::RankType::Bic => "bic",
-        ferx_tools::search::RankType::BicMixed => "bic_mixed",
-        ferx_tools::search::RankType::BicIiv => "bic_iiv",
-        ferx_tools::search::RankType::BicRandom => "bic_random",
-        ferx_tools::search::RankType::BicFixed => "bic_fixed",
-        ferx_tools::search::RankType::Penalized => "penalized",
+        ferx_search::search::RankType::Ofv => "ofv",
+        ferx_search::search::RankType::Aic => "aic",
+        ferx_search::search::RankType::Bic => "bic",
+        ferx_search::search::RankType::BicMixed => "bic_mixed",
+        ferx_search::search::RankType::BicIiv => "bic_iiv",
+        ferx_search::search::RankType::BicRandom => "bic_random",
+        ferx_search::search::RankType::BicFixed => "bic_fixed",
+        ferx_search::search::RankType::Penalized => "penalized",
     }
 }
 
@@ -12668,9 +12680,9 @@ fn search_rank_label(kind: Option<ferx_tools::search::RankType>) -> &'static str
 /// restates a default is indistinguishable from one that omits it, which is
 /// the honest reading: the two runs are the same run.
 fn search_penalty_columns(
-    p: &ferx_tools::search::Penalties,
+    p: &ferx_search::search::Penalties,
 ) -> (Vec<String>, Vec<f64>, Vec<String>) {
-    let d = ferx_tools::search::Penalties::default();
+    let d = ferx_search::search::Penalties::default();
     let rows: [(&str, f64, f64); 12] = [
         ("theta", p.theta, d.theta),
         ("omega", p.omega, d.omega),
@@ -12721,7 +12733,7 @@ fn search_penalty_columns(
 #[extendr]
 fn ferx_rust_search_config_load(path: &str) -> List {
     entry(move || {
-        let cfg = match ferx_tools::search::SearchConfig::load(path) {
+        let cfg = match ferx_search::search::SearchConfig::load(path) {
             Ok(cfg) => cfg,
             Err(e) => return Err(e),
         };
@@ -12818,9 +12830,9 @@ fn ferx_rust_search_config_load(path: &str) -> List {
 #[extendr]
 fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) -> List {
     entry(move || {
-        use ferx_tools::search::mfl::Mode as _;
+        use ferx_search::search::mfl::Mode as _;
 
-        let parsed = match ferx_tools::search::Mfl::parse(mfl) {
+        let parsed = match ferx_search::search::Mfl::parse(mfl) {
             Ok(m) => m,
             Err(e) => return Err(e),
         };
@@ -12864,7 +12876,7 @@ fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) ->
             Ok(t) => t,
             Err(e) => return Err(e),
         };
-        let ctx = match ferx_tools::search::ModelContext::from_model(
+        let ctx = match ferx_search::search::ModelContext::from_model(
             &prepared.parsed,
             &text,
             &prepared.population,
@@ -12872,7 +12884,7 @@ fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) ->
             Ok(c) => c,
             Err(e) => return Err(e),
         };
-        let resolved = match ferx_tools::search::resolve(&parsed, &ctx) {
+        let resolved = match ferx_search::search::resolve(&parsed, &ctx) {
             Ok(r) => r,
             Err(e) => return Err(e),
         };
@@ -12920,7 +12932,7 @@ fn ferx_rust_search_space_parse(mfl: &str, model_path: &str, data_path: &str) ->
 #[extendr]
 fn ferx_rust_search_coverage(mfl: &str) -> List {
     entry(move || {
-        let parsed = match ferx_tools::search::Mfl::parse(mfl) {
+        let parsed = match ferx_search::search::Mfl::parse(mfl) {
             Ok(m) => m,
             Err(e) => return Err(e),
         };
@@ -12936,7 +12948,7 @@ fn ferx_rust_search_coverage(mfl: &str) -> List {
 #[extendr]
 fn ferx_rust_search_table_columns() -> Vec<String> {
     entry(move || {
-        Ok(ferx_tools::search::TABLE_COLUMNS
+        Ok(ferx_search::search::TABLE_COLUMNS
             .iter()
             .map(|s| s.to_string())
             .collect())
@@ -12947,7 +12959,7 @@ fn ferx_rust_search_table_columns() -> Vec<String> {
 //  Model-space search: the tools (ferx-r #332 Parts 2 and 3)
 // ---------------------------------------------------------------------------
 //
-// covsearch and allometry, over `ferx_tools::covsearch` / `ferx_tools::
+// covsearch and allometry, over `ferx_search::covsearch` / `ferx_search::
 // allometry` (ferx-core #1180). Two rules hold for every tool added here:
 //
 //  1. **One grammar.** The inline entry form does not translate R arguments
@@ -13026,11 +13038,11 @@ fn search_config_for_tool(
     threads: i32,
     retries: i32,
     resume: bool,
-) -> std::result::Result<ferx_tools::search::SearchConfig, String> {
+) -> std::result::Result<ferx_search::search::SearchConfig, String> {
     let mut config = if config_path.is_empty() {
-        ferx_tools::search::SearchConfig::from_str(inline_text, inline_dir)?
+        ferx_search::search::SearchConfig::from_str(inline_text, inline_dir)?
     } else {
-        ferx_tools::search::SearchConfig::load(Path::new(config_path))?
+        ferx_search::search::SearchConfig::load(Path::new(config_path))?
     };
     if threads > 0 {
         config.run.threads = Some(threads as usize);
@@ -13087,7 +13099,7 @@ impl SearchLog {
     /// One candidate's line; only the `"lines"` mode carries them. `tool`
     /// names the tool that fitted it, for a pipeline (`ferx_amd()`) that runs
     /// several.
-    fn candidate(&self, c: &ferx_tools::search::CandidateFinished, tool: Option<&str>) {
+    fn candidate(&self, c: &ferx_search::search::CandidateFinished, tool: Option<&str>) {
         if self.mode >= 2 {
             self.line(candidate_line(c, tool));
         }
@@ -13120,7 +13132,7 @@ macro_rules! slog {
 ///
 /// `failed (<gate>)` in place of `passed` names the strictness gates it
 /// failed, or the compile / fit error.
-fn candidate_line(c: &ferx_tools::search::CandidateFinished, tool: Option<&str>) -> String {
+fn candidate_line(c: &ferx_search::search::CandidateFinished, tool: Option<&str>) -> String {
     let num = |v: Option<f64>| {
         v.filter(|v| v.is_finite())
             .map(|v| format!("{v:.3}"))
@@ -13365,7 +13377,7 @@ fn ferx_rust_covsearch(
         };
         // Refuse a space covsearch cannot honour before the dataset is read - a
         // structural feature here is a file meant for modelsearch.
-        if let Err(e) = ferx_tools::covsearch::CovsearchOptions::from_config(&config) {
+        if let Err(e) = ferx_search::covsearch::CovsearchOptions::from_config(&config) {
             return Err(format!("ferx_covsearch: {e}"));
         }
         let mut base = match config.load_base() {
@@ -13381,8 +13393,8 @@ fn ferx_rust_covsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let log = SearchLog::new(progress);
-        let report = |event: ferx_tools::covsearch::CovsearchEvent| {
-            use ferx_tools::covsearch::{CovsearchEvent as E, Phase};
+        let report = |event: ferx_search::covsearch::CovsearchEvent| {
+            use ferx_search::covsearch::{CovsearchEvent as E, Phase};
             if log.off() {
                 return;
             }
@@ -13424,10 +13436,10 @@ fn ferx_rust_covsearch(
         };
 
         let result = match run_search_cancellable(&cancel, Some(&log), || {
-            ferx_tools::covsearch::run_covsearch(
+            ferx_search::covsearch::run_covsearch(
                 &config,
                 &base,
-                ferx_tools::covsearch::CovsearchRun {
+                ferx_search::covsearch::CovsearchRun {
                     dir: dir.clone(),
                     threads: config.run.threads,
                     cancel: Some(cancel.clone()),
@@ -13533,7 +13545,7 @@ fn ferx_rust_covsearch(
             final_ofv = result.final_ofv,
             final_step = result.final_step as i32,
             final_fit = final_fit,
-            algorithm = ferx_tools::covsearch::CovsearchOptions::from_config(&config)
+            algorithm = ferx_search::covsearch::CovsearchOptions::from_config(&config)
                 .map(|o| o.algorithm.label().to_string())
                 .unwrap_or_default(),
             directory = directory.to_string(),
@@ -13607,16 +13619,16 @@ fn ferx_rust_allometry(
                 Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
             (
-                ferx_tools::search::BaseModel { prepared, text },
-                ferx_tools::allometry::AllometryOptions::default(),
-                ferx_tools::search::RunOptions::default(),
+                ferx_search::search::BaseModel { prepared, text },
+                ferx_search::allometry::AllometryOptions::default(),
+                ferx_search::search::RunOptions::default(),
             )
         } else {
-            let config = match ferx_tools::search::SearchConfig::load(Path::new(config_path)) {
+            let config = match ferx_search::search::SearchConfig::load(Path::new(config_path)) {
                 Ok(c) => c,
                 Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
-            let options = match ferx_tools::allometry::AllometryOptions::from_config(&config) {
+            let options = match ferx_search::allometry::AllometryOptions::from_config(&config) {
                 Ok(o) => o,
                 Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
@@ -13659,7 +13671,7 @@ fn ferx_rust_allometry(
             run_options.n_starts = retries as usize + 1;
         }
 
-        let scaling_columns = |scalings: &[ferx_tools::allometry::Scaling]| {
+        let scaling_columns = |scalings: &[ferx_search::allometry::Scaling]| {
             (
                 scalings.iter().map(|s| s.parameter.clone()).collect::<Vec<String>>(),
                 scalings.iter().map(|s| s.exponent).collect::<Vec<f64>>(),
@@ -13672,7 +13684,7 @@ fn ferx_rust_allometry(
         };
 
         if !fit {
-            let built = match ferx_tools::allometry::allometric_model(&base, &options) {
+            let built = match ferx_search::allometry::allometric_model(&base, &options) {
                 Ok(b) => b,
                 Err(e) => return Err(format!("ferx_allometry: {e}")),
             };
@@ -13699,10 +13711,10 @@ fn ferx_rust_allometry(
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let threads = (threads > 0).then_some(threads as usize);
         let result = match run_search_cancellable(&cancel, None, || {
-            ferx_tools::allometry::run_allometry(
+            ferx_search::allometry::run_allometry(
                 &base,
                 &options,
-                ferx_tools::allometry::AllometryRun {
+                ferx_search::allometry::AllometryRun {
                     dir: dir.clone(),
                     threads,
                     cancel: Some(cancel.clone()),
@@ -13769,7 +13781,7 @@ fn ferx_rust_allometry(
 #[extendr]
 fn ferx_rust_modelsearch_columns() -> Vec<String> {
     entry(move || {
-        Ok(ferx_tools::modelsearch::MODEL_COLUMNS
+        Ok(ferx_search::modelsearch::MODEL_COLUMNS
             .iter()
             .map(|s| s.to_string())
             .collect())
@@ -13850,11 +13862,11 @@ fn ferx_rust_modelsearch(
         // tool cannot honour, and a space that is not a structural one - a
         // covariate file handed to modelsearch would otherwise search nothing and
         // report the base model as the winner.
-        let options = match ferx_tools::modelsearch::ModelsearchOptions::from_config(&config) {
+        let options = match ferx_search::modelsearch::ModelsearchOptions::from_config(&config) {
             Ok(o) => o,
             Err(e) => return Err(format!("ferx_modelsearch: {e}")),
         };
-        if let Err(e) = ferx_tools::modelsearch::ModelsearchOptions::check_space(&config) {
+        if let Err(e) = ferx_search::modelsearch::ModelsearchOptions::check_space(&config) {
             return Err(format!("ferx_modelsearch: {e}"));
         }
         let mut base = match config.load_base() {
@@ -13870,8 +13882,8 @@ fn ferx_rust_modelsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let log = SearchLog::new(progress);
-        let report = |event: ferx_tools::modelsearch::ModelsearchEvent| {
-            use ferx_tools::modelsearch::ModelsearchEvent as E;
+        let report = |event: ferx_search::modelsearch::ModelsearchEvent| {
+            use ferx_search::modelsearch::ModelsearchEvent as E;
             if log.off() {
                 return;
             }
@@ -13898,10 +13910,10 @@ fn ferx_rust_modelsearch(
         };
 
         let result = match run_search_cancellable(&cancel, Some(&log), || {
-            ferx_tools::modelsearch::run_modelsearch(
+            ferx_search::modelsearch::run_modelsearch(
                 &config,
                 &base,
-                ferx_tools::modelsearch::ModelsearchRun {
+                ferx_search::modelsearch::ModelsearchRun {
                     dir: dir.clone(),
                     threads: config.run.threads,
                     cancel: Some(cancel.clone()),
@@ -13975,7 +13987,7 @@ fn ferx_rust_modelsearch(
             selected.push(r.selected);
             continued.push(r.continued);
             reused.push(r.reused);
-            structure.push(ferx_tools::modelsearch::structure_label(&r.structure));
+            structure.push(ferx_search::modelsearch::structure_label(&r.structure));
         }
 
         // Every candidate's text, so a user can read or refit the model the table
@@ -14027,7 +14039,7 @@ fn ferx_rust_modelsearch(
             model_text = model_text,
             input_model = result.input_model.render(),
             base_id = result.base_id.clone(),
-            base_structure = ferx_tools::modelsearch::structure_label(&result.base_structure),
+            base_structure = ferx_search::modelsearch::structure_label(&result.base_structure),
             base_ofv = base_row_ofv,
             base_criterion = base_criterion,
             final_id = result.final_id.clone(),
@@ -14038,7 +14050,7 @@ fn ferx_rust_modelsearch(
             criterion_label = result.criterion.label().to_string(),
             algorithm = options.algorithm.label().to_string(),
             iiv_strategy = options.iiv_strategy.label().to_string(),
-            summary = ferx_tools::modelsearch::render_summary(&result),
+            summary = ferx_search::modelsearch::render_summary(&result),
             directory = directory.to_string(),
             // The base model as the config resolved it, so the R object names the
             // same file in both entry forms.
@@ -14058,7 +14070,7 @@ fn ferx_rust_modelsearch(
 #[extendr]
 fn ferx_rust_ruvsearch_columns() -> Vec<String> {
     entry(move || {
-        Ok(ferx_tools::ruvsearch::STEP_COLUMNS
+        Ok(ferx_search::ruvsearch::STEP_COLUMNS
             .iter()
             .map(|s| s.to_string())
             .collect())
@@ -14075,7 +14087,7 @@ fn ferx_rust_ruvsearch_columns() -> Vec<String> {
 #[extendr]
 fn ferx_rust_covsearch_columns() -> Vec<String> {
     entry(move || {
-        Ok(ferx_tools::covsearch::STEP_COLUMNS
+        Ok(ferx_search::covsearch::STEP_COLUMNS
             .iter()
             .map(|s| s.to_string())
             .collect())
@@ -14164,7 +14176,7 @@ fn ferx_rust_ruvsearch(
         // Before the dataset is read: a file whose keys this tool cannot honour - a
         // `[space]`, or a `[rank]` asking for a BIC, which ruvsearch does not
         // select on - is refused by name rather than ignored.
-        let options = match ferx_tools::ruvsearch::RuvsearchOptions::from_config(&config) {
+        let options = match ferx_search::ruvsearch::RuvsearchOptions::from_config(&config) {
             Ok(o) => o,
             Err(e) => return Err(format!("ferx_ruvsearch: {e}")),
         };
@@ -14181,8 +14193,8 @@ fn ferx_rust_ruvsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let log = SearchLog::new(progress);
-        let report = |event: ferx_tools::ruvsearch::RuvsearchEvent| {
-            use ferx_tools::ruvsearch::RuvsearchEvent as E;
+        let report = |event: ferx_search::ruvsearch::RuvsearchEvent| {
+            use ferx_search::ruvsearch::RuvsearchEvent as E;
             if log.off() {
                 return;
             }
@@ -14224,10 +14236,10 @@ fn ferx_rust_ruvsearch(
         };
 
         let result = match run_search_cancellable(&cancel, Some(&log), || {
-            ferx_tools::ruvsearch::run_ruvsearch(
+            ferx_search::ruvsearch::run_ruvsearch(
                 &config,
                 &base,
-                ferx_tools::ruvsearch::RuvsearchRun {
+                ferx_search::ruvsearch::RuvsearchRun {
                     dir: dir.clone(),
                     threads: config.run.threads,
                     cancel: Some(cancel.clone()),
@@ -14359,7 +14371,7 @@ fn ferx_rust_ruvsearch(
             opt_max_iter = options.max_iter as i32,
             opt_cwres_prescreen = options.cwres_prescreen,
             opt_cutoff = options.cutoff(),
-            summary = ferx_tools::ruvsearch::render_summary(&result),
+            summary = ferx_search::ruvsearch::render_summary(&result),
             directory = directory.to_string(),
             // The base model as the config resolved it, so the R object names the
             // same file in both entry forms.
@@ -14376,7 +14388,7 @@ fn ferx_rust_ruvsearch(
 //  Model-space search: the variability-structure tools (ferx-r #337)
 // ---------------------------------------------------------------------------
 //
-// iivsearch and iovsearch, over `ferx_tools::iivsearch` / `ferx_tools::
+// iivsearch and iovsearch, over `ferx_search::iivsearch` / `ferx_search::
 // iovsearch` (ferx-core #1183). Both follow the two rules the tools above
 // hold to - one grammar, and the engine's own table - and add a third that is
 // particular to a variability search:
@@ -14509,7 +14521,7 @@ fn block_labels_of(members: &[String], blocks: &[Vec<String>], labels: &[String]
 #[extendr]
 fn ferx_rust_iivsearch_columns() -> Vec<String> {
     entry(move || {
-        Ok(ferx_tools::iivsearch::MODEL_COLUMNS
+        Ok(ferx_search::iivsearch::MODEL_COLUMNS
             .iter()
             .map(|s| s.to_string())
             .collect())
@@ -14527,7 +14539,7 @@ fn ferx_rust_iivsearch_columns() -> Vec<String> {
 #[extendr]
 fn ferx_rust_iovsearch_columns() -> Vec<String> {
     entry(move || {
-        Ok(ferx_tools::iovsearch::MODEL_COLUMNS
+        Ok(ferx_search::iovsearch::MODEL_COLUMNS
             .iter()
             .map(|s| s.to_string())
             .collect())
@@ -14624,7 +14636,7 @@ fn ferx_rust_iivsearch(
         // Before the dataset is read: a file whose `[iivsearch]` keys contradict
         // one another, or that names no variability space at all, is refused by
         // name rather than searching nothing and reporting the input as the winner.
-        let options = match ferx_tools::iivsearch::IivsearchOptions::from_config(&config) {
+        let options = match ferx_search::iivsearch::IivsearchOptions::from_config(&config) {
             Ok(o) => o,
             Err(e) => return Err(format!("ferx_iivsearch: {e}")),
         };
@@ -14641,8 +14653,8 @@ fn ferx_rust_iivsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let log = SearchLog::new(progress);
-        let report = |event: ferx_tools::iivsearch::IivsearchEvent| {
-            use ferx_tools::iivsearch::IivsearchEvent as E;
+        let report = |event: ferx_search::iivsearch::IivsearchEvent| {
+            use ferx_search::iivsearch::IivsearchEvent as E;
             if log.off() {
                 return;
             }
@@ -14684,10 +14696,10 @@ fn ferx_rust_iivsearch(
         };
 
         let result = match run_search_cancellable(&cancel, Some(&log), || {
-            ferx_tools::iivsearch::run_iivsearch(
+            ferx_search::iivsearch::run_iivsearch(
                 &config,
                 &base,
-                ferx_tools::iivsearch::IivsearchRun {
+                ferx_search::iivsearch::IivsearchRun {
                     dir: dir.clone(),
                     threads: config.run.threads,
                     cancel: Some(cancel.clone()),
@@ -14914,7 +14926,7 @@ fn ferx_rust_iivsearch(
             block_retries = options.block_retries as i32,
             starts_base = options.starts as i32,
             opt_cutoff = opt_f64(options.cutoff),
-            summary = ferx_tools::iivsearch::render_summary(&result),
+            summary = ferx_search::iivsearch::render_summary(&result),
             directory = directory.to_string(),
             // The base model as the config resolved it, so the R object names the
             // same file in both entry forms.
@@ -15020,7 +15032,7 @@ fn ferx_rust_iovsearch(
                 Ok(c) => c,
                 Err(e) => return Err(format!("ferx_iovsearch: {e}")),
             };
-        let options = match ferx_tools::iovsearch::IovsearchOptions::from_config(&config) {
+        let options = match ferx_search::iovsearch::IovsearchOptions::from_config(&config) {
             Ok(o) => o,
             Err(e) => return Err(format!("ferx_iovsearch: {e}")),
         };
@@ -15034,8 +15046,8 @@ fn ferx_rust_iovsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let log = SearchLog::new(progress);
-        let report = |event: ferx_tools::iovsearch::IovsearchEvent| {
-            use ferx_tools::iovsearch::IovsearchEvent as E;
+        let report = |event: ferx_search::iovsearch::IovsearchEvent| {
+            use ferx_search::iovsearch::IovsearchEvent as E;
             if log.off() {
                 return;
             }
@@ -15072,10 +15084,10 @@ fn ferx_rust_iovsearch(
         };
 
         let result = match run_search_cancellable(&cancel, Some(&log), || {
-            ferx_tools::iovsearch::run_iovsearch(
+            ferx_search::iovsearch::run_iovsearch(
                 &config,
                 &base,
-                ferx_tools::iovsearch::IovsearchRun {
+                ferx_search::iovsearch::IovsearchRun {
                     dir: dir.clone(),
                     threads: config.run.threads,
                     cancel: Some(cancel.clone()),
@@ -15323,7 +15335,7 @@ fn ferx_rust_iovsearch(
             block_retries = options.block_retries as i32,
             starts_base = options.starts as i32,
             opt_cutoff = opt_f64(options.cutoff),
-            summary = ferx_tools::iovsearch::render_summary(&result),
+            summary = ferx_search::iovsearch::render_summary(&result),
             directory = directory.to_string(),
             model = config.base.to_string_lossy().into_owned(),
             data = base.prepared.data_path.clone(),
@@ -15341,7 +15353,7 @@ fn ferx_rust_iovsearch(
 #[extendr]
 fn ferx_rust_amd_step_columns() -> Vec<String> {
     entry(move || {
-        Ok(ferx_tools::amd::STEP_COLUMNS
+        Ok(ferx_search::amd::STEP_COLUMNS
             .iter()
             .map(|s| s.to_string())
             .collect())
@@ -15355,7 +15367,7 @@ fn ferx_rust_amd_step_columns() -> Vec<String> {
 #[extendr]
 fn ferx_rust_amd_candidate_columns() -> Vec<String> {
     entry(move || {
-        Ok(ferx_tools::amd::CANDIDATE_COLUMNS
+        Ok(ferx_search::amd::CANDIDATE_COLUMNS
             .iter()
             .map(|s| s.to_string())
             .collect())
@@ -15399,9 +15411,9 @@ fn amd_config_and_base(
     resume: bool,
 ) -> Result<
     (
-        ferx_tools::search::SearchConfig,
-        ferx_tools::amd::AmdOptions,
-        ferx_tools::search::BaseModel,
+        ferx_search::search::SearchConfig,
+        ferx_search::amd::AmdOptions,
+        ferx_search::search::BaseModel,
     ),
     String,
 > {
@@ -15426,7 +15438,7 @@ fn amd_config_and_base(
     // Before the dataset is read: a `skip` naming a step this strategy does
     // not run, or a space carrying a statement no step of the pipeline can
     // read, is refused by name rather than searched half-silently.
-    let options = match ferx_tools::amd::AmdOptions::from_config(&config) {
+    let options = match ferx_search::amd::AmdOptions::from_config(&config) {
         Ok(o) => o,
         Err(e) => return Err(format!("ferx_amd: {e}")),
     };
@@ -15480,8 +15492,8 @@ fn ferx_rust_amd_plan(
             -1,
             false,
         )?;
-        let ctx = ferx_tools::amd::Context::from_base(&base);
-        let plan = match ferx_tools::amd::plan(&options, &config.mfl, &ctx) {
+        let ctx = ferx_search::amd::Context::from_base(&base);
+        let plan = match ferx_search::amd::plan(&options, &config.mfl, &ctx) {
             Ok(p) => p,
             Err(e) => return Err(format!("ferx_amd: {e}")),
         };
@@ -15593,8 +15605,8 @@ fn ferx_rust_amd(
         base.prepared.parsed.fit_options.cancel = Some(cancel.clone());
 
         let log = SearchLog::new(progress);
-        let report = |event: ferx_tools::amd::AmdEvent| {
-            use ferx_tools::amd::AmdEvent as E;
+        let report = |event: ferx_search::amd::AmdEvent| {
+            use ferx_search::amd::AmdEvent as E;
             if log.off() {
                 return;
             }
@@ -15670,10 +15682,10 @@ fn ferx_rust_amd(
 
         let dir = std::path::PathBuf::from(directory);
         let result = match run_search_cancellable(&cancel, Some(&log), || {
-            ferx_tools::amd::run_amd(
+            ferx_search::amd::run_amd(
                 &config,
                 &base,
-                ferx_tools::amd::AmdRun {
+                ferx_search::amd::AmdRun {
                     dir: dir.clone(),
                     threads: config.run.threads,
                     cancel: Some(cancel.clone()),
@@ -15824,15 +15836,15 @@ fn ferx_rust_amd(
                 .iter()
                 .map(|s| s.label().to_string())
                 .collect::<Vec<_>>(),
-            summary = ferx_tools::amd::render_summary(&result),
+            summary = ferx_search::amd::render_summary(&result),
             directory = directory.to_string(),
-            steps_csv = ferx_tools::amd::steps_path(&dir)
+            steps_csv = ferx_search::amd::steps_path(&dir)
                 .to_string_lossy()
                 .into_owned(),
-            candidates_csv = ferx_tools::amd::candidates_path(&dir)
+            candidates_csv = ferx_search::amd::candidates_path(&dir)
                 .to_string_lossy()
                 .into_owned(),
-            final_model_path = ferx_tools::amd::final_model_path(&dir)
+            final_model_path = ferx_search::amd::final_model_path(&dir)
                 .to_string_lossy()
                 .into_owned(),
             // The base model as the config resolved it, so the R object names the
@@ -15850,7 +15862,7 @@ fn ferx_rust_amd(
 //  Global model search (ferx-r #364)
 // ---------------------------------------------------------------------------
 //
-// The sixth search tool, over `ferx_tools::globalsearch` (ferx-core #1185).
+// The sixth search tool, over `ferx_search::globalsearch` (ferx-core #1185).
 // Where the stepwise tools walk one axis of the model space at a time, this
 // one lays the structural categories and the optional covariate pairs out as
 // a grid and searches it globally - every point (`exhaustive`) or a genetic
@@ -15869,7 +15881,7 @@ fn ferx_rust_amd(
 /// argument's type rules live here beside the field they belong to rather
 /// than in a second table on the R side.
 fn globalsearch_ga_columns(
-    g: &ferx_tools::globalsearch::GaOptions,
+    g: &ferx_search::globalsearch::GaOptions,
 ) -> (Vec<String>, Vec<f64>, Vec<String>) {
     let rows: [(&str, f64, &str); 14] = [
         ("population_size", g.population_size as f64, "count"),
@@ -15921,9 +15933,9 @@ fn globalsearch_ga_columns(
 fn ferx_rust_globalsearch_option_keys() -> Robj {
     entry(move || {
         let (ga_name, ga_value, ga_kind) =
-            globalsearch_ga_columns(&ferx_tools::globalsearch::GaOptions::default());
+            globalsearch_ga_columns(&ferx_search::globalsearch::GaOptions::default());
         let (penalty_name, penalty_value, _) =
-            search_penalty_columns(&ferx_tools::search::Penalties::default());
+            search_penalty_columns(&ferx_search::search::Penalties::default());
         Ok(list!(
             ga_name = ga_name,
             ga_value = ga_value,
@@ -15942,7 +15954,7 @@ fn ferx_rust_globalsearch_option_keys() -> Robj {
 #[extendr]
 fn ferx_rust_globalsearch_columns() -> Vec<String> {
     entry(move || {
-        Ok(ferx_tools::globalsearch::MODEL_COLUMNS
+        Ok(ferx_search::globalsearch::MODEL_COLUMNS
             .iter()
             .map(|s| s.to_string())
             .collect())
@@ -16079,11 +16091,11 @@ fn ferx_rust_globalsearch(
         // tool cannot honour, and a space it cannot lay out as a grid - an
         // ALLOMETRY or variability statement is another tool's axis and is named
         // rather than quietly dropped from the grid.
-        let options = match ferx_tools::globalsearch::GlobalsearchOptions::from_config(&config) {
+        let options = match ferx_search::globalsearch::GlobalsearchOptions::from_config(&config) {
             Ok(o) => o,
             Err(e) => return Err(format!("ferx_globalsearch: {e}")),
         };
-        if let Err(e) = ferx_tools::globalsearch::GlobalsearchOptions::check_space(&config) {
+        if let Err(e) = ferx_search::globalsearch::GlobalsearchOptions::check_space(&config) {
             return Err(format!("ferx_globalsearch: {e}"));
         }
         let mut base = match config.load_base() {
@@ -16099,8 +16111,8 @@ fn ferx_rust_globalsearch(
 
         let dir = (!directory.is_empty()).then(|| std::path::PathBuf::from(directory));
         let log = SearchLog::new(progress);
-        let report = |event: ferx_tools::globalsearch::GlobalsearchEvent| {
-            use ferx_tools::globalsearch::GlobalsearchEvent as E;
+        let report = |event: ferx_search::globalsearch::GlobalsearchEvent| {
+            use ferx_search::globalsearch::GlobalsearchEvent as E;
             if log.off() {
                 return;
             }
@@ -16133,10 +16145,10 @@ fn ferx_rust_globalsearch(
         };
 
         let result = match run_search_cancellable(&cancel, Some(&log), || {
-            ferx_tools::globalsearch::run_globalsearch(
+            ferx_search::globalsearch::run_globalsearch(
                 &config,
                 &base,
-                ferx_tools::globalsearch::GlobalsearchRun {
+                ferx_search::globalsearch::GlobalsearchRun {
                     dir: dir.clone(),
                     threads: config.run.threads,
                     cancel: Some(cancel.clone()),
@@ -16372,7 +16384,7 @@ fn ferx_rust_globalsearch(
             penalty_value = penalty_value,
             ga_name = ga_name,
             ga_value = ga_value,
-            summary = ferx_tools::globalsearch::render_summary(&result),
+            summary = ferx_search::globalsearch::render_summary(&result),
             directory = directory.to_string(),
             // The base model as the config resolved it, so the R object names the
             // same file in both entry forms.

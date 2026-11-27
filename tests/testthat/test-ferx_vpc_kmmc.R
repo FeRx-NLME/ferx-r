@@ -179,3 +179,44 @@ test_that("plot() draws one panel per stratum", {
   on.exit(dev.off())
   expect_identical(plot(v), v)
 })
+
+test_that("an empty stratum warns, with guidance, and its panel says so (ferx-core #2947)", {
+  ex <- ferx_example("tte_weibull")
+  d <- kmmc_data()
+  n_subjects <- length(unique(d$ID))
+  # A floor above the subject count: no risk set ever reaches it.
+  expect_warning(
+    v <- ferx_vpc_kmmc(ex$model, d, covariate = "WT", n_sim = 20L, seed = 1L,
+                       min_at_risk = n_subjects + 1L),
+    "W_VPC_EMPTY_STRATUM"
+  )
+  w <- grep("^W_VPC_EMPTY_STRATUM", v$warnings, value = TRUE)
+  expect_length(w, 1L)
+  expect_match(w, "fewer than `min_at_risk", fixed = TRUE)
+  expect_true(all(is.na(v$band$lo)))
+  expect_match(ferx:::.ferx_vpc_warning_guidance(w), "lower min_at_risk", fixed = TRUE)
+  expect_true(any(grepl("W_VPC_EMPTY_STRATUM: This stratum's panel has no simulated band",
+                        capture.output(print(v)), fixed = TRUE)))
+  # The panel carries the note instead of the observed curve alone.
+  notes <- 0L
+  testthat::local_mocked_bindings(
+    .ferx_vpc_no_band_note = function() notes <<- notes + 1L,
+    .package = "ferx"
+  )
+  pdf(NULL)
+  on.exit(dev.off(), add = TRUE)
+  plot(v)
+  expect_identical(notes, 1L)
+})
+
+test_that("the empty-stratum guidance follows the engine's reason (ferx-core #2947)", {
+  g <- function(why) ferx:::.ferx_vpc_warning_guidance(
+    paste0("W_VPC_EMPTY_STRATUM: stratum `all` has no band at any grid time.", why)
+  )
+  expect_match(g(" It has 5 subjects, fewer than `min_at_risk = 10`, so ..."),
+               "lower min_at_risk", fixed = TRUE)
+  expect_match(g(" Every grid time is past the last time of every replicate curve; ..."),
+               "grid times inside the simulated follow-up", fixed = TRUE)
+  expect_match(g(" At most 3 of the 20 replicate curves are defined at any grid time ..."),
+               "raise n_sim", fixed = TRUE)
+})
