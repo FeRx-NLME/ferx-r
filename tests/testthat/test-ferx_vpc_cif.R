@@ -342,3 +342,23 @@ test_that("the vpc_tte / vpc_kmmc refusal for several causes names ferx_vpc_cif(
     expect_false(grepl("`vpc_cif`", conditionMessage(e), fixed = TRUE))
   }
 })
+
+test_that("a data.frame() of the user's own does not reach the VPC glue (#778 review, finding 5)", {
+  skip_if(exists("data.frame", envir = globalenv(), inherits = FALSE))
+  cr <- ferx_example("tte_competing_risks")
+  tw <- ferx_example("tte_weibull")
+  d <- utils::read.csv(tw$data)
+  d$WT <- 50 + 3 * (d$ID %% 10)
+  runs <- function() list(
+    cif = vpc_cif_quiet(cr$model, cr$data, n_sim = 20L, seed = 1L),
+    tte = suppressWarnings(ferx_vpc_tte(tw$model, tw$data, n_sim = 20L, seed = 1L)),
+    kmmc = suppressWarnings(ferx_vpc_kmmc(tw$model, d, covariate = "WT",
+                                          n_sim = 20L, seed = 1L))
+  )
+  ref <- runs()
+  # The glue used to build its frames by evaluating `data.frame` in the global
+  # environment, where this one shadows base's.
+  assign("data.frame", function(...) stop("shadowed"), envir = globalenv())
+  on.exit(rm("data.frame", envir = globalenv()), add = TRUE)
+  expect_identical(runs(), ref)
+})

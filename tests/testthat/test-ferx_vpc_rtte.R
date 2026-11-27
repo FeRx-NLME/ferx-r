@@ -228,3 +228,12 @@ test_that("plot() draws the MCF and the curves by order", {
   expect_identical(plot(v, which = "gap", orders = 2), v)
   expect_error(plot(v, which = "gap", orders = 9), "Nothing to draw")
 })
+
+test_that("a data.frame() of the user's own does not reach the RTTE glue (#778 review, finding 5)", {
+  skip_if(exists("data.frame", envir = globalenv(), inherits = FALSE))
+  d <- rtte_data()
+  ref <- rtte_vpc(d, n_sim = 20L, seed = 1L)
+  assign("data.frame", function(...) stop("shadowed"), envir = globalenv())
+  on.exit(rm("data.frame", envir = globalenv()), add = TRUE)
+  expect_identical(rtte_vpc(d, n_sim = 20L, seed = 1L), ref)
+})

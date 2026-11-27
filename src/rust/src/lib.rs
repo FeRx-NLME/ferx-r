@@ -2910,13 +2910,16 @@ fn vpc_tte_to_list(vpc: &ferx_core::TteVpc) -> Robj {
         .iter()
         .map(|s| {
             let km = &s.observed;
-            let observed = data_frame!(
-                time = km.time.clone(),
-                n_risk = vpc_ints(&km.n_risk),
-                n_event = vpc_ints(&km.n_event),
-                n_censor = vpc_ints(&km.n_censor),
-                surv = km.surv.clone(),
-                cumhaz = km.cumhaz.clone()
+            let observed = vpc_frame(
+                vec![
+                    ("time", km.time.clone().into()),
+                    ("n_risk", vpc_ints(&km.n_risk).into()),
+                    ("n_event", vpc_ints(&km.n_event).into()),
+                    ("n_censor", vpc_ints(&km.n_censor).into()),
+                    ("surv", km.surv.clone().into()),
+                    ("cumhaz", km.cumhaz.clone().into()),
+                ],
+                km.time.len(),
             );
             let band = vpc_band_frame(VpcBandSlices::new(
                 &s.grid, [&s.obs_on_grid, &s.lo, &s.med, &s.hi], &s.n_used,
@@ -3042,23 +3045,41 @@ impl<'a> VpcBandSlices<'a> {
     }
 }
 
-/// A band as the R data frame every VPC returns: `time`, `obs`, `lo`, `med`,
-/// `hi`, `n_used`, an empty entry being `NA`.
+/// A data frame of `columns`, `nrow` rows each, laid out as R's `data.frame()`
+/// lays it out (compact automatic row names, `c(NA, -nrow)`), without calling
+/// R: `data_frame!` evaluates `data.frame` in the global environment, where a
+/// user's own `data.frame` shadows base's (#778 review, finding 5).
+fn vpc_frame(columns: Vec<(&str, Robj)>, nrow: usize) -> Robj {
+    let mut df = List::from_pairs(columns);
+    df.set_class(&["data.frame"]).unwrap();
+    // `i32::MIN` is R's NA_integer_; `data.frame()` gives 0 rows `integer(0)`.
+    let row_names: Vec<i32> = if nrow == 0 { Vec::new() } else { vec![i32::MIN, -(nrow as i32)] };
+    df.set_attrib("row.names", row_names).unwrap();
+    df.into()
+}
+
+/// The band columns every VPC returns after its own leading ones: `time`,
+/// `obs`, `lo`, `med`, `hi`, `n_used`, an empty entry being `NA`.
+fn vpc_band_columns(b: VpcBandSlices<'_>) -> [(&'static str, Robj); 6] {
+    [
+        ("time", b.time.to_vec().into()),
+        ("obs", vpc_na_opt(b.obs).into()),
+        ("lo", vpc_na_opt(b.lo).into()),
+        ("med", vpc_na_opt(b.med).into()),
+        ("hi", vpc_na_opt(b.hi).into()),
+        ("n_used", vpc_ints(b.n_used).into()),
+    ]
+}
+
+/// A band as the R data frame every VPC returns.
 fn vpc_band_frame(b: VpcBandSlices<'_>) -> Robj {
-    data_frame!(
-        time = b.time.to_vec(),
-        obs = vpc_na_opt(b.obs),
-        lo = vpc_na_opt(b.lo),
-        med = vpc_na_opt(b.med),
-        hi = vpc_na_opt(b.hi),
-        n_used = vpc_ints(b.n_used)
-    )
+    let n = b.time.len();
+    vpc_frame(vpc_band_columns(b).into(), n)
 }
 
 /// Several bands stacked long, each row led by its band's integer `key`
 /// column (`order` for RTTE event orders, `cmt` for competing-risks causes),
-/// then the columns of `vpc_band_frame`. Built by R's `data.frame()`, as
-/// `data_frame!` builds the others, since the key's name is only known here.
+/// then the columns of `vpc_band_frame`.
 fn vpc_long_band<'a>(key: &str, parts: impl IntoIterator<Item = (i32, VpcBandSlices<'a>)>) -> Robj {
     let (mut keys, mut time, mut n_used) = (Vec::new(), Vec::new(), Vec::new());
     let (mut obs, mut lo, mut med, mut hi) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -3071,19 +3092,10 @@ fn vpc_long_band<'a>(key: &str, parts: impl IntoIterator<Item = (i32, VpcBandSli
         hi.extend_from_slice(b.hi);
         n_used.extend_from_slice(b.n_used);
     }
-    extendr_api::functions::eval_string("data.frame")
-        .and_then(|f| {
-            f.call(Pairlist::from_pairs(&[
-                (key, Robj::from(keys)),
-                ("time", Robj::from(time)),
-                ("obs", Robj::from(vpc_na_opt(&obs))),
-                ("lo", Robj::from(vpc_na_opt(&lo))),
-                ("med", Robj::from(vpc_na_opt(&med))),
-                ("hi", Robj::from(vpc_na_opt(&hi))),
-                ("n_used", Robj::from(vpc_ints(&n_used))),
-            ]))
-        })
-        .unwrap()
+    let n = time.len();
+    let mut columns = vec![(key, Robj::from(keys))];
+    columns.extend(vpc_band_columns(VpcBandSlices::new(&time, [&obs, &lo, &med, &hi], &n_used)));
+    vpc_frame(columns, n)
 }
 
 /// An `RtteVpc` (ferx-core #1886 PR2) as an R list, every number read off core's
@@ -3104,13 +3116,17 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
             o.4.extend_from_slice(&km.n_censor);
             o.5.extend_from_slice(&km.surv);
         }
-        let observed = data_frame!(
-            order = o.0,
-            time = o.1,
-            n_risk = vpc_ints(&o.2),
-            n_event = vpc_ints(&o.3),
-            n_censor = vpc_ints(&o.4),
-            surv = o.5
+        let n = o.1.len();
+        let observed = vpc_frame(
+            vec![
+                ("order", o.0.into()),
+                ("time", o.1.into()),
+                ("n_risk", vpc_ints(&o.2).into()),
+                ("n_event", vpc_ints(&o.3).into()),
+                ("n_censor", vpc_ints(&o.4).into()),
+                ("surv", o.5.into()),
+            ],
+            n,
         );
         let band = vpc_long_band(
             "order",
@@ -3119,18 +3135,21 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
                 (b.order as i32, slices)
             }),
         );
-        (observed.into(), band)
+        (observed, band)
     };
     let strata: Vec<Robj> = vpc
         .strata
         .iter()
         .map(|s| {
             let m = &s.mcf;
-            let mcf = data_frame!(
-                time = m.observed.time.clone(),
-                n_risk = vpc_ints(&m.observed.n_risk),
-                n_event = vpc_ints(&m.observed.n_event),
-                mcf = m.observed.mcf.clone()
+            let mcf = vpc_frame(
+                vec![
+                    ("time", m.observed.time.clone().into()),
+                    ("n_risk", vpc_ints(&m.observed.n_risk).into()),
+                    ("n_event", vpc_ints(&m.observed.n_event).into()),
+                    ("mcf", m.observed.mcf.clone().into()),
+                ],
+                m.observed.time.len(),
             );
             let mcf_band = vpc_band_frame(VpcBandSlices::new(
                 &m.grid, [&m.obs_on_grid, &m.lo, &m.med, &m.hi], &m.n_used,
@@ -3138,17 +3157,20 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
             let (absolute, absolute_band) = curves(&s.absolute);
             let (gap, gap_band) = curves(&s.gap);
             let fam = |name: &str, n: usize| std::iter::repeat_n(name.to_string(), n);
-            let orders = data_frame!(
-                clock = fam("absolute", s.absolute.len())
-                    .chain(fam("gap", s.gap.len()))
-                    .collect::<Vec<String>>(),
-                order = s.absolute.iter().chain(&s.gap).map(|b| b.order as i32).collect::<Vec<i32>>(),
-                n_subjects = s
-                    .absolute
-                    .iter()
-                    .chain(&s.gap)
-                    .map(|b| b.n_subjects as i32)
-                    .collect::<Vec<i32>>()
+            let both = || s.absolute.iter().chain(&s.gap);
+            let orders = vpc_frame(
+                vec![
+                    (
+                        "clock",
+                        fam("absolute", s.absolute.len())
+                            .chain(fam("gap", s.gap.len()))
+                            .collect::<Vec<String>>()
+                            .into(),
+                    ),
+                    ("order", both().map(|b| b.order as i32).collect::<Vec<i32>>().into()),
+                    ("n_subjects", both().map(|b| b.n_subjects as i32).collect::<Vec<i32>>().into()),
+                ],
+                s.absolute.len() + s.gap.len(),
             );
             list!(
                 label = s.label.clone(),
@@ -3187,12 +3209,15 @@ fn vpc_kmmc_to_list(vpc: &ferx_core::KmmcVpc) -> Robj {
         .iter()
         .map(|s| {
             let c = &s.observed;
-            let observed = data_frame!(
-                time = c.time.clone(),
-                n_risk = vpc_ints(&c.n_risk),
-                n_event = vpc_ints(&c.n_event),
-                n_censor = vpc_ints(&c.n_censor),
-                mean = c.mean.clone()
+            let observed = vpc_frame(
+                vec![
+                    ("time", c.time.clone().into()),
+                    ("n_risk", vpc_ints(&c.n_risk).into()),
+                    ("n_event", vpc_ints(&c.n_event).into()),
+                    ("n_censor", vpc_ints(&c.n_censor).into()),
+                    ("mean", c.mean.clone().into()),
+                ],
+                c.time.len(),
             );
             let band = vpc_band_frame(VpcBandSlices::new(
                 &s.grid, [&s.obs_on_grid, &s.lo, &s.med, &s.hi], &s.n_used,
