@@ -5,10 +5,10 @@
 
 vpc_cif_quiet <- function(...) suppressWarnings(ferx_vpc_cif(...))
 
-# The bundled competing-risks data, one row per subject: its time and its
-# cause (0 censored, else the cmt of the cause that occurred).
-cif_subjects <- function(path) {
-  d <- utils::read.csv(path)
+# Competing-risks data (a path or a data frame), one row per subject: its time
+# and its cause (0 censored, else the cmt of the cause that occurred).
+cif_subjects <- function(data) {
+  d <- if (is.character(data)) utils::read.csv(data) else data
   d <- d[d$EVID == 0 & d$CMT %in% c(2L, 3L), ]
   ids <- unique(d$ID)
   data.frame(
@@ -19,6 +19,41 @@ cif_subjects <- function(path) {
       if (length(hit)) hit else 0L
     }, integer(1))
   )
+}
+
+# The bundled data with censorings part-way through follow-up. The bundled
+# file censors only at t = 14, after the last event, and on such data the
+# Aalen-Johansen estimate is the plain proportion cumsum(n_event_k) / n, so
+# an oracle on it cannot tell the two apart (#778 review, finding 2). Here the
+# events of every fifth subject before t = 10 become censorings, and an ARM
+# covariate gives two strata.
+cif_censored_data <- function() {
+  d <- utils::read.csv(ferx_example("tte_competing_risks")$data)
+  d$DV[d$ID %% 5 == 0 & d$DV == 1 & d$TIME < 10] <- 0
+  d$ARM <- d$ID %% 2
+  d
+}
+
+# One stratum's observed rows against survival::survfit's multi-state fit of
+# `s` (cif_subjects() rows): times exactly, risk sets and per-cause event
+# counts identically, the cumulative incidences and the survival to 1e-12.
+expect_cif_survfit <- function(o, s) {
+  status <- factor(s$cause, levels = c(0L, 2L, 3L))
+  sf <- survival::survfit(survival::Surv(s$time, status) ~ 1)
+  # survfit keeps a row per distinct time, event or censoring, as core does.
+  expect_equal(o$time, sf$time, tolerance = 0)
+  expect_identical(o$n_risk, as.integer(sf$n.risk[, 1L]))
+  for (k in c("2", "3")) {
+    expect_equal(o[[paste0("cif_", k)]], unname(sf$pstate[, match(k, sf$states)]),
+                 tolerance = 1e-12)
+    expect_identical(o[[paste0("n_event_", k)]],
+                     as.integer(sf$n.event[, match(k, sf$states)]))
+  }
+  expect_equal(o$surv, unname(sf$pstate[, match("(s0)", sf$states)]),
+               tolerance = 1e-12)
+  # And the all-cause survival is the plain Kaplan-Meier curve.
+  km <- survival::survfit(survival::Surv(s$time, s$cause > 0) ~ 1)
+  expect_equal(o$surv, km$surv, tolerance = 1e-12)
 }
 
 expect_vpc_cif_refusal <- function(expr, pattern) {
@@ -66,25 +101,38 @@ test_that("ferx_vpc_cif returns the observed curves and a band per cause", {
 test_that("the observed CIF equals survival::survfit's multi-state fit", {
   skip_if_not_installed("survival")
   ex <- ferx_example("tte_competing_risks")
+  # The bundled data as shipped.
   v <- vpc_cif_quiet(ex$model, ex$data, n_sim = 20L, seed = 1L)
-  s <- cif_subjects(ex$data)
-  status <- factor(s$cause, levels = c(0L, 2L, 3L))
-  sf <- survival::survfit(survival::Surv(s$time, status) ~ 1)
-  o <- v$observed
-  # survfit keeps a row per distinct time, event or censoring, as core does.
-  expect_equal(o$time, sf$time, tolerance = 0)
-  expect_identical(o$n_risk, as.integer(sf$n.risk[, 1L]))
-  for (k in c("2", "3")) {
-    expect_equal(o[[paste0("cif_", k)]], unname(sf$pstate[, match(k, sf$states)]),
-                 tolerance = 1e-12)
-    expect_identical(o[[paste0("n_event_", k)]],
-                     as.integer(sf$n.event[, match(k, sf$states)]))
+  expect_cif_survfit(v$observed, cif_subjects(ex$data))
+
+  # Censorings before the last event: censored subjects leave the risk set
+  # early, so the estimate is no longer the plain proportion.
+  d <- cif_censored_data()
+  s <- cif_subjects(d)
+  expect_gt(sum(s$cause == 0L & s$time < 10), 5L)
+  v <- vpc_cif_quiet(ex$model, d, n_sim = 20L, seed = 1L)
+  expect_cif_survfit(v$observed, s)
+  naive <- cumsum(v$observed$n_event_2) / nrow(s)
+  expect_gt(max(abs(naive - v$observed$cif_2)), 0.05)
+
+  # Per stratum: each stratum's curves are its own subjects' survfit fit.
+  vs <- vpc_cif_quiet(ex$model, d, n_sim = 20L, seed = 1L, strata = "ARM")
+  arm <- d$ARM[match(s$ID, d$ID)]
+  for (a in c(0, 1)) {
+    expect_cif_survfit(
+      vs$observed[vs$observed$STRATUM == paste0("ARM=", a), , drop = FALSE],
+      s[arm == a, , drop = FALSE]
+    )
   }
-  expect_equal(o$surv, unname(sf$pstate[, match("(s0)", sf$states)]),
-               tolerance = 1e-12)
-  # And the all-cause survival is the plain Kaplan-Meier curve.
-  km <- survival::survfit(survival::Surv(s$time, s$cause > 0) ~ 1)
-  expect_equal(o$surv, km$surv, tolerance = 1e-12)
+
+  # A horizon below the follow-up: the data are read on [0, H], a record after
+  # H being a censoring at H.
+  h <- 8
+  vh <- vpc_cif_quiet(ex$model, d, n_sim = 20L, seed = 1L, horizon = h)
+  sh <- s
+  sh$cause[sh$time > h] <- 0L
+  sh$time <- pmin(sh$time, h)
+  expect_cif_survfit(vh$observed, sh)
 })
 
 test_that("strata, horizon, censoring, probs and grid reach the engine", {
