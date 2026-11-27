@@ -18,10 +18,16 @@
 #   functions  global_var  local_var  global_function  global_env
 #   methods    .eval(  .eval_blind(   (evaluate in the global environment)
 #   eval_string / eval_string_with_params - allowed only when the first
-#              argument is a string literal that starts with a
-#              namespace-qualified name, as `eval_string("base::tempdir()")`.
-#              That still resolves `::` itself from the global environment;
-#              a user who redefines `::` is past what this guard defends.
+#              argument is a string literal that is exactly one
+#              namespace-qualified call with no arguments, as
+#              `eval_string("base::tempdir()")` (`:::` too; surrounding
+#              blanks allowed). An argument list or a second expression is
+#              refused: `"base::identity(data.frame(a = 1))"` and
+#              `"base::tempdir(); data.frame()"` both look the unqualified
+#              `data.frame` up globally (#782), and an argument list cannot
+#              be checked name by name without parsing R. That still
+#              resolves `::` itself from the global environment; a user who
+#              redefines `::` is past what this guard defends.
 #
 # A name is flagged as a macro call (`name!`, any delimiter, path-qualified
 # too), as a function or method call, or when a `use` statement names it in
@@ -108,7 +114,7 @@ scan() {
             ok = 0
             if (match(arg, /^"[0-9]+"/)) {
               lit = rust_lit[substr(arg, 2, RLENGTH - 2) + 0]
-              ok = (lit ~ /^[[:space:]]*[A-Za-z][A-Za-z0-9._]*:::?[A-Za-z.`]/)
+              ok = (lit ~ /^[[:space:]]*[A-Za-z][A-Za-z0-9._]*:::?[A-Za-z.][A-Za-z0-9._]*\(\)[[:space:]]*$/)
             }
             if (!ok) report("eval", name)
           }
@@ -132,7 +138,7 @@ msg() { # kind, name
     use) echo "$2 is imported or renamed here. It looks R names up from the global environment, where a user's own definition replaces base's (#780); a rename would hide every later use from this guard." ;;
     fn) echo "$2() reads the global environment, where a user's own definition replaces base's (#780). Reach the object through its namespace instead." ;;
     method) echo ".$2() evaluates in the global environment, where a user's own definitions replace base's (#780). Use eval_with_env() with base_env() or the namespace the code needs." ;;
-    eval) echo "$2() evaluates its text in the global environment (#780). Only a string literal that starts with a namespace-qualified name, as eval_string(\"base::tempdir()\"), is allowed here - write it on the call's line." ;;
+    eval) echo "$2() evaluates its text in the global environment (#780). Only a string literal that is exactly one namespace-qualified call with no arguments, as eval_string(\"base::tempdir()\"), is allowed here - write it on the call's line. An argument list or a second expression can name an unqualified function, which is looked up globally (#782); build the value in Rust or pass it with eval_with_env() and base_env() instead." ;;
     lost) echo "the scan reached the end of the file inside $2, so it lost track of what is code and checked nothing after that point. Fix the source, or teach tools/rust-code.awk the syntax it misread." ;;
   esac
 }

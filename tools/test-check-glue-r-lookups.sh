@@ -124,7 +124,16 @@ case_ eval_variable 1 "lib.rs:4: eval_string() evaluates its text" "$CLEAN$NL"'f
 case_ eval_with_params 1 "lib.rs:4: eval_string_with_params() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string_with_params("paste(1)", &[]); }'
 case_ eval_qualified_comment_only 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string(/* "base::x" */ "tempdir()"); }'
 case_ eval_literal_next_line 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string('"$NL"'    "base::tempdir()"); }'
-case_ eval_qualified 0 "glue R lookups OK" "$CLEAN$NL"'fn f() { let x = eval_string("base::tempdir()"); let y = eval_string( "utils:::head(1)" ); }'
+case_ eval_qualified 0 "glue R lookups OK" "$CLEAN$NL"'fn f() { let x = eval_string("base::tempdir()"); }'
+case_ eval_qualified_triple 0 "glue R lookups OK" "$CLEAN$NL"'fn f() { let y = eval_string( " utils:::foo() " ); }'
+# #782: only the leading name used to be checked, so an unqualified call
+# inside the arguments, or after a `;`, slipped through.
+case_ eval_unqualified_in_args 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("base::identity(data.frame(a = 1))"); }'
+case_ eval_unqualified_after_semicolon 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn g() { let x = eval_string("base::tempdir(); data.frame()"); }'
+case_ eval_qualified_with_args 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("utils:::head(1)"); }'
+case_ eval_qualified_then_expr 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("base::tempdir(); 1"); }'
+case_ eval_qualified_newline_then_expr 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("base::tempdir()\nx"); }'
+case_ eval_qualified_not_called 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("base::pi"); }'
 case_ use_rename_call 1 "lib.rs:4: call is imported or renamed here" "$CLEAN$NL"'use extendr_api::{call as c};'"$NL"'fn f() { let x = c!("list"); }'
 case_ use_multiline_R 1 "lib.rs:6: R is imported or renamed here" "$CLEAN$NL"'use extendr_api::{'"$NL"'    List,'"$NL"'    R,'"$NL"'};'
 case_ lookalikes 0 "glue R lookups OK" "$CLEAN$NL"'fn eval(&self) {}'"$NL"'fn f(l: Robj, e: &Environment) {'"$NL"'    let call = 1; let var = call + 1; let global = var;'"$NL"'    let a = l.eval_with_env(e); let b = factor(2); let c = R(3); let d = l.call(p);'"$NL"'    let s = "R!(1) call!(x) global_env()"; let my_global_env = 0;'"$NL"'    let m = l.global_env(); let n = l.eval_string(code); let o = Self::eval(l);'"$NL"'}'"$NL"'use std::io::Read;'
