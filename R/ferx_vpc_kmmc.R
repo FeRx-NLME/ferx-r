@@ -110,12 +110,11 @@ ferx_vpc_kmmc <- function(model, data = NULL, covariate, level = NULL,
   # ferx_vpc_tte() calls for such an endpoint, and several TTE endpoints with
   # no `cmt` at its `vpc_cif` (ferx-core #1887), which ferx_vpc_cif() calls.
   res <- .ferx_engine_spelling(
-    .ferx_engine_spelling(
-      .ferx_vpc_call(args, fit, ferx_rust_vpc_kmmc, ferx_rust_vpc_kmmc_from_fit,
-                     extra, "ferx_vpc_kmmc"),
-      "E_VPC_TTE_INPUT", "`vpc_rtte`", "`ferx_vpc_tte()`"
-    ),
-    "E_VPC_TTE_INPUT", "`vpc_cif`", "`ferx_vpc_cif()`"
+    .ferx_vpc_call(args, fit, ferx_rust_vpc_kmmc, ferx_rust_vpc_kmmc_from_fit,
+                   extra, "ferx_vpc_kmmc"),
+    "E_VPC_TTE_INPUT",
+    c("`vpc_rtte`", "`vpc_cif`"),
+    c("`ferx_vpc_tte()`", "`ferx_vpc_cif()`")
   )
   structure(
     list(
