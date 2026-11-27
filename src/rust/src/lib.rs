@@ -1342,6 +1342,12 @@ fn simulate_adaptive(
     etas: Option<AdaptiveEtas>,
     extras: AdaptiveRunExtras,
 ) -> std::result::Result<Robj, String> {
+    // A design the decomposition cannot separate is refused before anything
+    // runs, not after the whole simulation (#779 review, finding 5).
+    if extras.decompose {
+        let n_draws = fit.as_ref().and_then(|f| f.uncertainty.as_ref()).map(|(_, n)| *n);
+        check_decomposition_design(n_sim, extras.n_reps, n_draws)?;
+    }
     let mut parsed = match ferx_core::parse_full_model_file(Path::new(model_path)) {
         Ok(p) => p,
         Err(e) => return Err(format!("ferx_simulate_adaptive: error parsing model: {e}")),
@@ -1617,6 +1623,44 @@ impl AdaptiveRunExtras {
             .ok_or_else(|| mistyped("decompose", "a single logical"))?;
         Ok(Self { n_reps: n_reps.max(0) as usize, summary, decompose })
     }
+}
+
+/// Whether `decompose = TRUE` can separate every layer of this design, checked
+/// before the run in R's spelling. It mirrors, condition for condition and in
+/// the same order, the private `identifiability(d, s, r, uncertain)` of
+/// ferx-core `src/api/adaptive_decomposition.rs` (13e6c8bf: lines 233-251,
+/// called at 282), which `decompose_adaptive` applies after the run with
+/// `r` = the run's n_reps, `s` = its n_sim, `uncertain` = parameter draws were
+/// made and `d` = their count:
+///   1. `r < 2`: the within-subject layer is confounded with BSV;
+///   2. `s < 2`: BSV is confounded with the parameter layer;
+///   3. `uncertain && d < 2`: one draw cannot estimate the parameter layer.
+/// Core's own check stays behind this one; if core changes its conditions,
+/// change these with it. `n_draws` is `None` without `uncertainty`.
+fn check_decomposition_design(
+    n_sim: i32,
+    n_reps: usize,
+    n_draws: Option<usize>,
+) -> std::result::Result<(), String> {
+    if n_reps < 2 {
+        return Err(adaptive_options_refusal(format!(
+            "`decompose = TRUE` needs `n_reps` >= 2 to separate the within-subject layer \
+             from BSV; got {n_reps}"
+        )));
+    }
+    if n_sim < 2 {
+        return Err(adaptive_options_refusal(format!(
+            "`decompose = TRUE` needs `n_sim` >= 2 to separate BSV from the parameter layer; \
+             got {n_sim}"
+        )));
+    }
+    if let Some(d) = n_draws.filter(|d| *d < 2) {
+        return Err(adaptive_options_refusal(format!(
+            "`decompose = TRUE` with `uncertainty` needs `uncertainty$n_draws` >= 2 to \
+             estimate the parameter layer; got {d}"
+        )));
+    }
+    Ok(())
 }
 
 /// A refusal of the adaptive summary options this glue makes before the run,

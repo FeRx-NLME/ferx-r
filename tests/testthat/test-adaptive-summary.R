@@ -321,16 +321,42 @@ test_that("decompose = TRUE: the layers sum to the total, per subject and for th
                    c("parameter", "bsv", "within", "between_subject", "total"))
 })
 
-test_that("decompose = TRUE without replicates is the engine's refusal, in R's spelling", {
-  e <- tryCatch(.tdm_run(n_sim = 3L, decompose = TRUE), error = function(e) e)
+# A design decompose_adaptive() cannot separate is refused before the run
+# (#779 review, finding 5), so each call below is one that would take minutes
+# if it ran (a million runs or more): it must come back at once, coded, in R's
+# spelling and not core's after-the-run message (`decompose_adaptive: ...`).
+# Mutation that reddens this: dropping a condition from the glue's
+# check_decomposition_design(), which leaves the refusal to core after the run.
+.expect_refused_up_front <- function(expr, pattern) {
+  t0 <- proc.time()[["elapsed"]]
+  e <- tryCatch(expr, error = function(e) e)
+  elapsed <- proc.time()[["elapsed"]] - t0
   expect_s3_class(e, "ferx_engine_error")
   expect_identical(e$code, "E_ADAPTIVE_OPTIONS")
-  expect_match(conditionMessage(e), "`n_reps` >= 2", fixed = TRUE)
-  expect_false(grepl("AdaptiveSimulateOptions", conditionMessage(e), fixed = TRUE))
-  e <- tryCatch(.tdm_run(n_sim = 1L, n_reps = 2L, decompose = TRUE),
-                error = function(e) e)
-  expect_identical(e$code, "E_ADAPTIVE_OPTIONS")
-  expect_match(conditionMessage(e), "n_sim >= 2", fixed = TRUE)
+  expect_match(conditionMessage(e), pattern, fixed = TRUE)
+  expect_false(grepl("decompose_adaptive", conditionMessage(e), fixed = TRUE))
+  expect_lt(elapsed, 5)
+}
+
+test_that("decompose = TRUE refuses an unseparable design before the run, in R's spelling", {
+  .expect_refused_up_front(
+    .tdm_run(n_sim = 1000000L, decompose = TRUE),
+    "`decompose = TRUE` needs `n_reps` >= 2 to separate the within-subject layer from BSV; got 1"
+  )
+  .expect_refused_up_front(
+    .tdm_run(n_sim = 1L, n_reps = 1000000L, decompose = TRUE),
+    "`decompose = TRUE` needs `n_sim` >= 2 to separate BSV from the parameter layer; got 1"
+  )
+  # Core checks n_reps first; so does the glue.
+  .expect_refused_up_front(.tdm_run(n_sim = 1L, decompose = TRUE),
+                           "needs `n_reps` >= 2")
+})
+
+test_that("decompose = TRUE accepts the smallest separable design, n_sim = 2 and n_reps = 2", {
+  res <- .tdm_run(n_sim = 2L, n_reps = 2L, decompose = TRUE)
+  expect_identical(attr(res$variance_components, "n_sims"), 2L)
+  expect_identical(attr(res$variance_components, "n_reps"), 2L)
+  expect_gt(nrow(res$variance_components), 0L)
 })
 
 test_that("a supplied-eta subject's BSV is `supplied`", {

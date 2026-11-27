@@ -173,8 +173,9 @@
 #'   metric into its parameter-uncertainty, between-subject and within-subject
 #'   layers (\code{variance_components}, \code{variance_skipped}). The design
 #'   has to separate the layers: \code{n_reps >= 2}, \code{n_sim >= 2}, and
-#'   with \code{uncertainty} at least two draws; otherwise the call is refused,
-#'   coded \code{E_ADAPTIVE_OPTIONS}. Default \code{FALSE}.
+#'   with \code{uncertainty} at least two draws; otherwise the call is refused
+#'   before the simulation runs, coded \code{E_ADAPTIVE_OPTIONS}. Default
+#'   \code{FALSE}.
 #'
 #' @return A list of data frames (five run tables, three summary tables and
 #'   two decomposition tables):

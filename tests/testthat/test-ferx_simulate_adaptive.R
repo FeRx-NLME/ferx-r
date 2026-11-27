@@ -1576,9 +1576,16 @@ test_that("uncertainty: n_reps and decompose on the from-fit path estimate a par
   expect_identical(attr(vc, "n_reps"), 2L)
   par <- vc[vc$LAYER == "parameter" & vc$METRIC == "CUM_DOSE", ]
   expect_true(all(par$STATUS == "estimated"))
-  # One draw under uncertainty cannot estimate it: refused, in R's spelling.
-  e <- tryCatch(.run_unc(uncertainty = list(n_draws = 1L), n_reps = 2L,
+  # One draw under uncertainty cannot estimate it: refused before the run (a
+  # million replicates would take minutes), in R's spelling, not core's
+  # after-the-run message (#779 review, finding 5).
+  t0 <- proc.time()[["elapsed"]]
+  e <- tryCatch(.run_unc(uncertainty = list(n_draws = 1L), n_reps = 1000000L,
                          decompose = TRUE), error = function(e) e)
+  expect_lt(proc.time()[["elapsed"]] - t0, 5)
   expect_identical(e$code, "E_ADAPTIVE_OPTIONS")
-  expect_match(conditionMessage(e), "in `uncertainty`", fixed = TRUE)
+  expect_match(conditionMessage(e),
+               "`decompose = TRUE` with `uncertainty` needs `uncertainty$n_draws` >= 2 to estimate the parameter layer; got 1",
+               fixed = TRUE)
+  expect_false(grepl("decompose_adaptive", conditionMessage(e), fixed = TRUE))
 })
