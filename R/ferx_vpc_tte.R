@@ -77,7 +77,9 @@
 #' without a TTE endpoint; several TTE endpoints and no \code{cmt} (under
 #' competing risks one minus the Kaplan-Meier curve of one cause is not its
 #' cumulative incidence; with \code{cmt} set, the curve is that cause's
-#' survival with the other causes as censoring); a \code{cmt} that is not a TTE
+#' survival with the other causes as censoring, and
+#' \code{\link{ferx_vpc_cif}} draws the cumulative incidence of every cause,
+#' which the refusal names); a \code{cmt} that is not a TTE
 #' endpoint; left truncation (delayed entry); an
 #' interval-censored record; more than one record per subject on the endpoint;
 #' a subject id that appears in two separate runs of rows; no record on the
@@ -202,7 +204,8 @@
 #' }
 #'
 #' @seealso \code{\link{plot.ferx_vpc_tte}}, \code{\link{plot.ferx_vpc_rtte}},
-#'   \code{\link{ferx_vpc_kmmc}}, \code{\link{ferx_predict_survival}}
+#'   \code{\link{ferx_vpc_kmmc}}, \code{\link{ferx_vpc_cif}},
+#'   \code{\link{ferx_predict_survival}}
 #' @family simulation
 #' @export
 ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
@@ -216,8 +219,13 @@ ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
                          censoring, cmt, horizon, probs, grid)
   # 0 is the glue's "let the engine choose".
   extra <- list(max_order = if (is.null(max_order)) 0L else as.integer(max_order))
-  res <- .ferx_vpc_call(args, fit, ferx_rust_vpc_tte, ferx_rust_vpc_tte_from_fit,
-                        extra, "ferx_vpc_tte")
+  # The engine's refusal for several TTE endpoints and no `cmt` names its own
+  # `vpc_cif` (ferx-core #1887), which ferx_vpc_cif() calls.
+  res <- .ferx_engine_spelling(
+    .ferx_vpc_call(args, fit, ferx_rust_vpc_tte, ferx_rust_vpc_tte_from_fit,
+                   extra, "ferx_vpc_tte"),
+    "E_VPC_TTE_INPUT", "`vpc_cif`", "`ferx_vpc_cif()`"
+  )
   if (identical(res$kind, "rtte")) {
     .ferx_vpc_rtte_object(res)
   } else {

@@ -190,6 +190,10 @@ test_that("a competing-risks model needs cmt, and takes it", {
   cr <- ferx_example("tte_competing_risks")
   expect_vpc_tte_refusal(ferx_vpc_tte(cr$model, cr$data, n_sim = 20L),
                          "set `cmt`")
+  # Since ferx-core #1887 it points at the cumulative-incidence VPC, in its R
+  # spelling.
+  expect_vpc_tte_refusal(ferx_vpc_tte(cr$model, cr$data, n_sim = 20L),
+                         "`ferx_vpc_cif\\(\\)` draws the cumulative incidence")
   v <- vpc_tte_quiet(cr$model, cr$data, n_sim = 20L, cmt = 3L)
   expect_identical(v$cmt, 3L)
   expect_vpc_tte_refusal(ferx_vpc_tte(cr$model, cr$data, n_sim = 20L, cmt = 1L),

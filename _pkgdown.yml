@@ -26,6 +26,8 @@ reference:
       - ferx_predict_survival
       - ferx_vpc_tte
       - plot.ferx_vpc_tte
+      - ferx_vpc_cif
+      - plot.ferx_vpc_cif
 
   - title: "Model editing"
     desc: "Create, inspect, and programmatically edit .ferx model files."
