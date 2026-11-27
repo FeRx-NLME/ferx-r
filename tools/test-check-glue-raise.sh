@@ -224,6 +224,48 @@ fn ferx_rust_qualified(x: &str) -> Robj {
     })
 }')" 1 "throw_r_error() is reachable here"
 
+# The scan (tools/rust-code.awk) must not lose track on syntax that blinded
+# the old regex stripper (#781 review finding 1): every case puts the call it
+# must see after the tricky text, so a scan gone blind passes it.
+expect "a /* inside a line comment does not hide a later call" \
+  "$(fixture slashstar-comment '
+// reads tools/*.sh
+#[extendr]
+fn ferx_rust_after(x: &str) -> Robj {
+    entry(move || {
+        extendr_api::throw_r_error(format!("no: {x}"));
+    })
+}')" 1 "throw_r_error() is reachable here"
+
+expect "a URL in a message does not hide the rest of its line" \
+  "$(fixture url-in-string '
+#[extendr]
+fn ferx_rust_url(x: &str) -> Robj {
+    entry(move || {
+        let _see = "https://example.org"; extendr_api::throw_r_error(format!("no: {x}"));
+    })
+}')" 1 "throw_r_error() is reachable here"
+
+expect "naming Rf_error inside a message is free" \
+  "$(fixture rf-error-in-string '
+#[extendr]
+fn ferx_rust_note(x: &str) -> Robj {
+    entry(move || Err(format!("{x}: the glue never calls Rf_error /* directly */")))
+}')" 0 "glue raise shape OK"
+
+expect "a file the scan ends inside a block comment is refused" \
+  "$(fixture open-block '
+/* never closed
+#[extendr]
+fn ferx_rust_hidden(x: &str) -> Robj {
+    extendr_api::throw_r_error(format!("no: {x}"));
+}')" 1 "inside a block comment"
+
+nested="$(fixture nested '')"
+mkdir -p "$nested/inner"
+printf '%s\n' 'fn helper(x: &str) { extendr_api::throw_r_error(format!("no: {x}")); }' > "$nested/inner/mod.rs"
+expect "a nested module is glue too" "$nested" 1 "inner/mod.rs"
+
 expect "a second raise_verbatim() call site is refused" \
   "$(fixture second-raise '
 #[extendr]
