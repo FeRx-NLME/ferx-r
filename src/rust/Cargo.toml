@@ -43,6 +43,10 @@ extendr-api = "=0.9.0"
 extendr-macros = "=0.9.0"
 ferx-core = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main", default-features = false }
 ferx-tools = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main" }
+# Model search (`search`, `covsearch`, `iivsearch`, `amd`, ...) moved out of
+# ferx-tools into its own crate in ferx-core #3185. Same repository and revision
+# as the two above: the three are pinned, patched and checked together.
+ferx-search = { git = "https://github.com/FeRx-NLME/ferx-core", branch = "main" }
 nalgebra = "0.35"
 # Global allocator for the package's Rust code (see `GLOBAL` in src/lib.rs). `v2`
 # pins mimalloc's C line explicitly, as the ferx CLI does (ferx-core #2435).
