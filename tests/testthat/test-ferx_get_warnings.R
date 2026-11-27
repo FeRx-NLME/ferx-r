@@ -2172,3 +2172,37 @@ test_that("the gn rank and twin-analytical notes get their own guidance (ferx-co
   expect_match(g, "explicit ODE transit() / igd() model", fixed = TRUE)
   expect_match(g, "IPRED and the fit are unaffected", fixed = TRUE)
 })
+
+test_that("the #777 review's guidance refinements hold (S-singular arms, kmmc floor)", {
+  # covariance.rs s_singular_msg() at 13e6c8bf: the all-zero arm names nothing.
+  all_zero <- paste0(
+    "Covariance step failed: the score cross-product matrix S is singular ",
+    "(covariance_method = s). The per-subject score is zero for every free ",
+    "parameter, so no subject's likelihood depends on the estimated parameters ",
+    "as scored. SE estimates not available."
+  )
+  g <- ferx:::.ferx_warning_guidance("covariance_failed", message = all_zero)
+  expect_match(g, "no subject's likelihood depends on any estimated parameter", fixed = TRUE)
+  expect_false(grepl("the parameters the message names", g, fixed = TRUE))
+  expect_false(grepl("covariance_method = \"r\")", g, fixed = TRUE))
+  design <- paste0(
+    "Covariance step failed: the score cross-product matrix S is singular ",
+    "(covariance_method = s). With 6 subjects and 7 free parameters S has rank ",
+    "at most 6, so it is singular on this design at any estimate. Use ",
+    "covariance_method = r or rsr, which never invert S; both need R positive ",
+    "definite at the estimate, which after saem, imp, impmap or vi it may not ",
+    "be. SE estimates not available."
+  )
+  expect_match(ferx:::.ferx_warning_guidance("covariance_failed", message = design),
+               "after saem, imp, impmap or vi", fixed = TRUE)
+
+  # vpc_tte.rs empty_stratum_warning(): kmmc's third reason carries the floor.
+  floor <- paste0(
+    "W_VPC_EMPTY_STRATUM: stratum `all` has no band at any grid time. At most 0 ",
+    "of the 20 replicate curves are defined at any grid time, and a band point ",
+    "needs 19. A replicate curve counts at a time only while at least ",
+    "`min_at_risk = 10` subjects are at risk there."
+  )
+  expect_match(ferx:::.ferx_vpc_warning_guidance(floor),
+               "lower min_at_risk, raise n_sim", fixed = TRUE)
+})

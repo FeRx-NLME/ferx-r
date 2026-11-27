@@ -1037,6 +1037,21 @@ test_that(".ferx_engine_spelling() swaps message and suggestion, for its code on
   other <- spell(refusal("E_B", "pass `X::Y` instead"))
   expect_identical(conditionMessage(other), "or pass `X::Y` [E_A]")
   expect_identical(other$suggestion, "pass `X::Y` instead")
+
+  # Several pairs in one call, each swapped (replaces nested calls).
+  cond <- structure(
+    class = c("ferx_engine_error", "error", "condition"),
+    list(message = "use `A::B` or `C::D` [E_A]", call = NULL, code = "E_A",
+         suggestion = "`C::D` here")
+  )
+  both <- tryCatch(
+    ferx:::.ferx_engine_spelling(stop(cond), "E_A", c("`A::B`", "`C::D`"),
+                                 c("`b`", "`d`")),
+    error = function(e) e
+  )
+  expect_identical(conditionMessage(both), "use `b` or `d` [E_A]")
+  expect_identical(both$suggestion, "`d` here")
+  expect_error(ferx:::.ferx_engine_spelling(1, "E_A", c("a", "b"), "c"))
 })
 
 # Review r1 #6: an explicit `unmatched` with no `etas` cannot do anything.
