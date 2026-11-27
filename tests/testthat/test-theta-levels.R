@@ -1144,7 +1144,8 @@ test_that("T14b: the adaptive glue records the global contrast's code beside its
   raised <- tryCatch(
     ferx:::ferx_rust_simulate_adaptive(model, data, 1L, 1L, "false", 0L,
                                        FALSE, character(0), character(0),
-                                       numeric(0), "refuse"),
+                                       numeric(0), "refuse",
+                                       ferx:::.ferx_adaptive_run_options()),
     error = function(e) conditionMessage(e)
   )
   expect_match(raised, "^ferx_simulate_adaptive: ")
