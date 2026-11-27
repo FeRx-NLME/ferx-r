@@ -465,6 +465,10 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
       "lower min_at_risk, or stratify more coarsely"
     } else if (grepl("Every grid time is past", message, fixed = TRUE)) {
       "give grid times inside the simulated follow-up, or a longer sim horizon"
+    } else if (grepl("subjects are at risk there", message, fixed = TRUE)) {
+      # vpc_kmmc's third reason with its at-risk floor: replicate curves stop
+      # counting below min_at_risk, so more replicates alone may not help.
+      "lower min_at_risk, raise n_sim, or stratify more coarsely"
     } else {
       "raise n_sim, or stratify more coarsely"
     }
@@ -693,7 +697,19 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
           "subjects than free parameters, so the S-only covariance cannot be ",
           "formed on this design. Use an estimator that does not invert S: ",
           "ferx_covariance(fit, covariance_method = \"r\") or ",
-          "covariance_method = \"rsr\"."
+          "covariance_method = \"rsr\". Both need the R matrix positive ",
+          "definite at the estimate, which after saem, imp, impmap or vi it ",
+          "may not be."
+        ))
+      }
+      # The all-zero case names no parameter: nothing the fit scored depends
+      # on any of them.
+      if (grepl("zero for every free parameter", message, fixed = TRUE)) {
+        return(paste0(
+          "The score cross-product S is zero because no subject's likelihood ",
+          "depends on any estimated parameter as scored. Check that the model ",
+          "reads its parameters and that the data carry scored observations; ",
+          "no covariance_method can help until it does."
         ))
       }
       return(paste0(

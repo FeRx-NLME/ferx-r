@@ -325,3 +325,35 @@ test_that("plot() draws with base graphics and with vpc", {
   expect_equal(s0$qmax, b0$hi)
   expect_equal(utils::head(s0$bin_max, -1), utils::tail(s0$bin_min, -1))
 })
+
+test_that("the vpc engine notes a panel with no band, in that panel only (#777 review, 4)", {
+  skip_if_not_installed("vpc")
+  ex <- ferx_example("tte_exponential")
+  d <- utils::read.csv(ex$data)
+  d$ARM <- d$ID %% 2L
+  v <- vpc_tte_quiet(ex$model, d, n_sim = 20L, strata = "ARM")
+  # A real VPC whose ARM=1 panel has no band at any grid time, as core leaves
+  # it for W_VPC_EMPTY_STRATUM (every band entry NA).
+  empty <- v$band$STRATUM == "ARM=1"
+  v$band[empty, c("lo", "med", "hi")] <- NA_real_
+  built <- ggplot2::ggplot_build(plot(v, engine = "vpc"))
+  layout <- built$layout$layout
+  is_note <- vapply(built$data, function(l) {
+    "label" %in% names(l) && any(grepl("W_VPC_EMPTY_STRATUM", l$label, fixed = TRUE))
+  }, logical(1))
+  expect_identical(sum(is_note), 1L)
+  note <- built$data[[which(is_note)]]
+  expect_identical(nrow(note), 1L)
+  expect_identical(as.character(layout$STRATUM[layout$PANEL == note$PANEL]), "ARM=1")
+
+  # With no strata there is no facet column, and the note still lands.
+  w <- vpc_tte_quiet(ex$model, d, n_sim = 20L)
+  w$band[, c("lo", "med", "hi")] <- NA_real_
+  built1 <- ggplot2::ggplot_build(plot(w, engine = "vpc"))
+  labels1 <- unlist(lapply(built1$data, function(l) l$label))
+  expect_true(any(grepl("W_VPC_EMPTY_STRATUM", labels1, fixed = TRUE)))
+  # A panel with a band carries no note.
+  built2 <- ggplot2::ggplot_build(plot(vpc_tte_quiet(ex$model, d, n_sim = 20L), engine = "vpc"))
+  labels2 <- unlist(lapply(built2$data, function(l) l$label))
+  expect_false(any(grepl("W_VPC_EMPTY_STRATUM", labels2, fixed = TRUE)))
+})
