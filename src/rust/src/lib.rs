@@ -2286,6 +2286,7 @@ fn ferx_rust_vpc_tte(
 ) -> Robj {
     entry(move || {
         let opts = vpc_tte_options(
+            "ferx_vpc_tte",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
@@ -2355,6 +2356,7 @@ fn ferx_rust_vpc_tte_from_fit(
 ) -> Robj {
     entry(move || {
         let opts = vpc_tte_options(
+            "ferx_vpc_tte",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
@@ -2425,6 +2427,7 @@ fn ferx_rust_vpc_kmmc(
 ) -> Robj {
     entry(move || {
         let vpc = vpc_tte_options(
+            "ferx_vpc_kmmc",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
@@ -2496,6 +2499,7 @@ fn ferx_rust_vpc_kmmc_from_fit(
 ) -> Robj {
     entry(move || {
         let vpc = vpc_tte_options(
+            "ferx_vpc_kmmc",
             n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, cmt,
             horizon,
         )?;
@@ -2518,6 +2522,134 @@ fn ferx_rust_vpc_kmmc_from_fit(
             iov_occasion,
         )?;
         run.kmmc(vpc, covariate, level, min_at_risk)
+    })
+}
+
+/// Cumulative-incidence VPC for competing risks at the model file's initial
+/// values (ferx-core #1887, `vpc_cif`): every TTE endpoint of the model is a
+/// cause. The arguments are those of `ferx_rust_vpc_tte` without `cmt` and
+/// `max_order`: `vpc_cif` takes every TTE endpoint and never resolves one.
+///
+/// @param model_path Path to .ferx model file
+/// @param data_path Path to NONMEM-format CSV with the observed TTE records
+/// @param n_sim Number of replicates
+/// @param seed Random seed for the replicates and the censoring draws
+/// @param probs Three band probabilities, strictly increasing inside (0, 1)
+/// @param grid "auto", "all_steps" or "times"
+/// @param grid_times The grid when `grid` is "times"; ignored otherwise
+/// @param censoring "observed" or "horizon"
+/// @param stratify "none", "dose" or "covariate"
+/// @param strata_covariate The covariate when `stratify` is "covariate"
+/// @param horizon The simulation horizon; non-finite or `<= 0` means the
+///   latest time recorded on a cause
+/// @return A list: kind ("cif"), cmts, horizon, n_sim, probs, censoring and
+///   `strata`; see `vpc_cif_to_list`. The engine's warnings are its
+///   `simulation_warnings` attribute.
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_vpc_cif(
+    model_path: &str,
+    data_path: &str,
+    n_sim: i32,
+    seed: i32,
+    probs: Vec<f64>,
+    grid: &str,
+    grid_times: Vec<f64>,
+    censoring: &str,
+    stratify: &str,
+    strata_covariate: &str,
+    horizon: f64,
+) -> Robj {
+    entry(move || {
+        let vpc = vpc_tte_options(
+            "ferx_vpc_cif",
+            n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, 0,
+            horizon,
+        )?;
+        let run = VpcRun::at_model_file(model_path, data_path)?;
+        run.cif(vpc)
+    })
+}
+
+/// Cumulative-incidence VPC at a fit's parameters. The fit arguments are those
+/// of `ferx_rust_vpc_tte_from_fit`; the rest those of `ferx_rust_vpc_cif`.
+///
+/// @param model_path Path to .ferx model file
+/// @param data_path Path to NONMEM-format CSV with the observed TTE records
+/// @param theta Fitted theta vector
+/// @param omega_flat Row-major flattened omega matrix
+/// @param omega_dim Side length of the omega matrix
+/// @param sigma Fitted sigma vector
+/// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix
+/// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV
+/// @param residual_rho Fitted residual correlations
+/// @param residual_rho_pairs Their endpoint pairs
+/// @param mixture_overrides `fit$mixture_overrides`
+/// @param fit_bindings The fit's data bindings
+/// @param iov_occasion `fit$iov_occasion`
+/// @param n_sim Number of replicates
+/// @param seed Random seed
+/// @param probs Three band probabilities
+/// @param grid "auto", "all_steps" or "times"
+/// @param grid_times The grid when `grid` is "times"
+/// @param censoring "observed" or "horizon"
+/// @param stratify "none", "dose" or "covariate"
+/// @param strata_covariate The covariate when `stratify` is "covariate"
+/// @param horizon The simulation horizon; non-finite or `<= 0` for the default
+/// @return As `ferx_rust_vpc_cif`.
+/// @export
+#[extendr]
+#[allow(clippy::too_many_arguments)]
+fn ferx_rust_vpc_cif_from_fit(
+    model_path: &str,
+    data_path: &str,
+    theta: Vec<f64>,
+    omega_flat: Vec<f64>,
+    omega_dim: i32,
+    sigma: Vec<f64>,
+    omega_iov_flat: Vec<f64>,
+    omega_iov_dim: i32,
+    residual_rho: Vec<f64>,
+    residual_rho_pairs: Vec<i32>,
+    mixture_overrides: Vec<f64>,
+    fit_bindings: List,
+    iov_occasion: &str,
+    n_sim: i32,
+    seed: i32,
+    probs: Vec<f64>,
+    grid: &str,
+    grid_times: Vec<f64>,
+    censoring: &str,
+    stratify: &str,
+    strata_covariate: &str,
+    horizon: f64,
+) -> Robj {
+    entry(move || {
+        let vpc = vpc_tte_options(
+            "ferx_vpc_cif",
+            n_sim, seed, &probs, grid, grid_times, censoring, stratify, strata_covariate, 0,
+            horizon,
+        )?;
+        let run = VpcRun::at_fit(
+            "ferx_vpc_cif",
+            model_path,
+            data_path,
+            FitParams {
+                theta: &theta,
+                omega_flat: &omega_flat,
+                omega_dim,
+                sigma: &sigma,
+                omega_iov_flat: &omega_iov_flat,
+                omega_iov_dim,
+                residual_rho: &residual_rho,
+                residual_rho_pairs: &residual_rho_pairs,
+                mixture_overrides: &mixture_overrides,
+            },
+            &fit_bindings,
+            iov_occasion,
+        )?;
+        run.cif(vpc)
     })
 }
 
@@ -2653,6 +2785,23 @@ impl VpcRun {
             .map_err(|e| engine_refusal("Error simulating: ", e))?;
         Ok(attach_sim_warnings(vpc_kmmc_to_list(&vpc), self.notes, &vpc))
     }
+
+    /// Core's `vpc_cif` (#1887), with the Kaplan-Meier VPC options `vpc` minus
+    /// its `cmt` (every TTE endpoint is a cause). `VpcCifOptions` is built from
+    /// `default()` and assigned field by field, so a field core adds later keeps
+    /// its default here (the CI options-literal check).
+    fn cif(self, vpc: ferx_core::VpcTteOptions) -> std::result::Result<Robj, String> {
+        let mut opts = ferx_core::VpcCifOptions::default();
+        opts.n_sim = vpc.n_sim;
+        opts.probs = vpc.probs;
+        opts.grid = vpc.grid;
+        opts.censoring = vpc.censoring;
+        opts.stratify = vpc.stratify;
+        opts.sim = vpc.sim;
+        let vpc = ferx_core::vpc_cif(&self.parsed.model, &self.population, &self.params, &opts)
+            .map_err(|e| engine_refusal("Error simulating: ", e))?;
+        Ok(attach_sim_warnings(vpc_cif_to_list(&vpc), self.notes, &vpc))
+    }
 }
 
 /// The kind of the endpoint a TTE VPC checks, the endpoint `cmt` names or else
@@ -2698,9 +2847,11 @@ fn read_vpc_tte_population(
 }
 
 /// `VpcTteOptions` from the R arguments. The R wrapper has already checked
-/// the strings; an unknown one here is a glue bug, refused as a call error.
+/// the strings; an unknown one here is a glue bug, refused as a call error
+/// naming `who`, the R function the glue serves (#778 review, finding 4).
 #[allow(clippy::too_many_arguments)]
 fn vpc_tte_options(
+    who: &str,
     n_sim: i32,
     seed: i32,
     probs: &[f64],
@@ -2713,7 +2864,7 @@ fn vpc_tte_options(
     horizon: f64,
 ) -> std::result::Result<ferx_core::VpcTteOptions, String> {
     let bad = |what: &str, value: &str| {
-        argument_refusal(format!("internal: ferx_vpc_tte got {what} `{value}`"))
+        argument_refusal(format!("internal: {who} got {what} `{value}`"))
     };
     let probs: [f64; 3] = probs
         .try_into()
@@ -2754,31 +2905,25 @@ fn vpc_tte_options(
 /// re-derived here or in R. A band entry core leaves empty (too few
 /// replicates still under follow-up) is `NA`.
 fn vpc_tte_to_list(vpc: &ferx_core::TteVpc) -> Robj {
-    let na_opt = |v: &[Option<f64>]| -> Doubles {
-        v.iter().map(|x| x.map_or_else(Rfloat::na, Rfloat::from)).collect()
-    };
-    let ints = |v: &[usize]| -> Vec<i32> { v.iter().map(|&n| n as i32).collect() };
     let strata: Vec<Robj> = vpc
         .strata
         .iter()
         .map(|s| {
             let km = &s.observed;
-            let observed = data_frame!(
-                time = km.time.clone(),
-                n_risk = ints(&km.n_risk),
-                n_event = ints(&km.n_event),
-                n_censor = ints(&km.n_censor),
-                surv = km.surv.clone(),
-                cumhaz = km.cumhaz.clone()
+            let observed = vpc_frame(
+                vec![
+                    ("time", km.time.clone().into()),
+                    ("n_risk", vpc_ints(&km.n_risk).into()),
+                    ("n_event", vpc_ints(&km.n_event).into()),
+                    ("n_censor", vpc_ints(&km.n_censor).into()),
+                    ("surv", km.surv.clone().into()),
+                    ("cumhaz", km.cumhaz.clone().into()),
+                ],
+                km.time.len(),
             );
-            let band = data_frame!(
-                time = s.grid.clone(),
-                obs = na_opt(&s.obs_on_grid),
-                lo = na_opt(&s.lo),
-                med = na_opt(&s.med),
-                hi = na_opt(&s.hi),
-                n_used = ints(&s.n_used)
-            );
+            let band = vpc_band_frame(VpcBandSlices::new(
+                &s.grid, [&s.obs_on_grid, &s.lo, &s.med, &s.hi], &s.n_used,
+            ));
             list!(
                 label = s.label.clone(),
                 value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
@@ -2882,6 +3027,77 @@ fn vpc_ints(v: &[usize]) -> Vec<i32> {
     v.iter().map(|&n| n as i32).collect()
 }
 
+/// One VPC band as core holds it: the grid, the observed curve read there and
+/// the band's limits, all parallel to `time`.
+struct VpcBandSlices<'a> {
+    time: &'a [f64],
+    obs: &'a [Option<f64>],
+    lo: &'a [Option<f64>],
+    med: &'a [Option<f64>],
+    hi: &'a [Option<f64>],
+    n_used: &'a [usize],
+}
+
+impl<'a> VpcBandSlices<'a> {
+    /// The grid, the four NA-able series `[obs, lo, med, hi]`, then `n_used`.
+    fn new(time: &'a [f64], [obs, lo, med, hi]: [&'a [Option<f64>]; 4], n_used: &'a [usize]) -> Self {
+        VpcBandSlices { time, obs, lo, med, hi, n_used }
+    }
+}
+
+/// A data frame of `columns`, `nrow` rows each, laid out as R's `data.frame()`
+/// lays it out (compact automatic row names, `c(NA, -nrow)`), without calling
+/// R: `data_frame!` evaluates `data.frame` in the global environment, where a
+/// user's own `data.frame` shadows base's (#778 review, finding 5).
+fn vpc_frame(columns: Vec<(&str, Robj)>, nrow: usize) -> Robj {
+    let mut df = List::from_pairs(columns);
+    df.set_class(&["data.frame"]).unwrap();
+    // `i32::MIN` is R's NA_integer_; `data.frame()` gives 0 rows `integer(0)`.
+    let row_names: Vec<i32> = if nrow == 0 { Vec::new() } else { vec![i32::MIN, -(nrow as i32)] };
+    df.set_attrib("row.names", row_names).unwrap();
+    df.into()
+}
+
+/// The band columns every VPC returns after its own leading ones: `time`,
+/// `obs`, `lo`, `med`, `hi`, `n_used`, an empty entry being `NA`.
+fn vpc_band_columns(b: VpcBandSlices<'_>) -> [(&'static str, Robj); 6] {
+    [
+        ("time", b.time.to_vec().into()),
+        ("obs", vpc_na_opt(b.obs).into()),
+        ("lo", vpc_na_opt(b.lo).into()),
+        ("med", vpc_na_opt(b.med).into()),
+        ("hi", vpc_na_opt(b.hi).into()),
+        ("n_used", vpc_ints(b.n_used).into()),
+    ]
+}
+
+/// A band as the R data frame every VPC returns.
+fn vpc_band_frame(b: VpcBandSlices<'_>) -> Robj {
+    let n = b.time.len();
+    vpc_frame(vpc_band_columns(b).into(), n)
+}
+
+/// Several bands stacked long, each row led by its band's integer `key`
+/// column (`order` for RTTE event orders, `cmt` for competing-risks causes),
+/// then the columns of `vpc_band_frame`.
+fn vpc_long_band<'a>(key: &str, parts: impl IntoIterator<Item = (i32, VpcBandSlices<'a>)>) -> Robj {
+    let (mut keys, mut time, mut n_used) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut obs, mut lo, mut med, mut hi) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for (k, b) in parts {
+        keys.extend(std::iter::repeat_n(k, b.time.len()));
+        time.extend_from_slice(b.time);
+        obs.extend_from_slice(b.obs);
+        lo.extend_from_slice(b.lo);
+        med.extend_from_slice(b.med);
+        hi.extend_from_slice(b.hi);
+        n_used.extend_from_slice(b.n_used);
+    }
+    let n = time.len();
+    let mut columns = vec![(key, Robj::from(keys))];
+    columns.extend(vpc_band_columns(VpcBandSlices::new(&time, [&obs, &lo, &med, &hi], &n_used)));
+    vpc_frame(columns, n)
+}
+
 /// An `RtteVpc` (ferx-core #1886 PR2) as an R list, every number read off core's
 /// strata. Per stratum: the mean cumulative function (`mcf`, its observed curve,
 /// and `mcf_band`), then each family of curves by event order as long tables with
@@ -2891,77 +3107,70 @@ fn vpc_ints(v: &[usize]) -> Vec<i32> {
 fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
     let curves = |bands: &[ferx_core::RtteOrderBand]| -> (Robj, Robj) {
         let mut o = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        let mut b: (Vec<i32>, Vec<f64>, Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>, Vec<usize>) =
-            Default::default();
         for band in bands {
             let km = &band.observed;
-            let k = band.order as i32;
-            o.0.extend(std::iter::repeat_n(k, km.time.len()));
+            o.0.extend(std::iter::repeat_n(band.order as i32, km.time.len()));
             o.1.extend_from_slice(&km.time);
             o.2.extend_from_slice(&km.n_risk);
             o.3.extend_from_slice(&km.n_event);
             o.4.extend_from_slice(&km.n_censor);
             o.5.extend_from_slice(&km.surv);
-            b.0.extend(std::iter::repeat_n(k, band.grid.len()));
-            b.1.extend_from_slice(&band.grid);
-            b.2.extend_from_slice(&band.obs_on_grid);
-            b.3.extend_from_slice(&band.lo);
-            b.4.extend_from_slice(&band.med);
-            b.5.extend_from_slice(&band.hi);
-            b.6.extend_from_slice(&band.n_used);
         }
-        let observed = data_frame!(
-            order = o.0,
-            time = o.1,
-            n_risk = vpc_ints(&o.2),
-            n_event = vpc_ints(&o.3),
-            n_censor = vpc_ints(&o.4),
-            surv = o.5
+        let n = o.1.len();
+        let observed = vpc_frame(
+            vec![
+                ("order", o.0.into()),
+                ("time", o.1.into()),
+                ("n_risk", vpc_ints(&o.2).into()),
+                ("n_event", vpc_ints(&o.3).into()),
+                ("n_censor", vpc_ints(&o.4).into()),
+                ("surv", o.5.into()),
+            ],
+            n,
         );
-        let band = data_frame!(
-            order = b.0,
-            time = b.1,
-            obs = vpc_na_opt(&b.2),
-            lo = vpc_na_opt(&b.3),
-            med = vpc_na_opt(&b.4),
-            hi = vpc_na_opt(&b.5),
-            n_used = vpc_ints(&b.6)
+        let band = vpc_long_band(
+            "order",
+            bands.iter().map(|b| {
+                let slices = VpcBandSlices::new(&b.grid, [&b.obs_on_grid, &b.lo, &b.med, &b.hi], &b.n_used);
+                (b.order as i32, slices)
+            }),
         );
-        (observed.into(), band.into())
+        (observed, band)
     };
     let strata: Vec<Robj> = vpc
         .strata
         .iter()
         .map(|s| {
             let m = &s.mcf;
-            let mcf = data_frame!(
-                time = m.observed.time.clone(),
-                n_risk = vpc_ints(&m.observed.n_risk),
-                n_event = vpc_ints(&m.observed.n_event),
-                mcf = m.observed.mcf.clone()
+            let mcf = vpc_frame(
+                vec![
+                    ("time", m.observed.time.clone().into()),
+                    ("n_risk", vpc_ints(&m.observed.n_risk).into()),
+                    ("n_event", vpc_ints(&m.observed.n_event).into()),
+                    ("mcf", m.observed.mcf.clone().into()),
+                ],
+                m.observed.time.len(),
             );
-            let mcf_band = data_frame!(
-                time = m.grid.clone(),
-                obs = vpc_na_opt(&m.obs_on_grid),
-                lo = vpc_na_opt(&m.lo),
-                med = vpc_na_opt(&m.med),
-                hi = vpc_na_opt(&m.hi),
-                n_used = vpc_ints(&m.n_used)
-            );
+            let mcf_band = vpc_band_frame(VpcBandSlices::new(
+                &m.grid, [&m.obs_on_grid, &m.lo, &m.med, &m.hi], &m.n_used,
+            ));
             let (absolute, absolute_band) = curves(&s.absolute);
             let (gap, gap_band) = curves(&s.gap);
             let fam = |name: &str, n: usize| std::iter::repeat_n(name.to_string(), n);
-            let orders = data_frame!(
-                clock = fam("absolute", s.absolute.len())
-                    .chain(fam("gap", s.gap.len()))
-                    .collect::<Vec<String>>(),
-                order = s.absolute.iter().chain(&s.gap).map(|b| b.order as i32).collect::<Vec<i32>>(),
-                n_subjects = s
-                    .absolute
-                    .iter()
-                    .chain(&s.gap)
-                    .map(|b| b.n_subjects as i32)
-                    .collect::<Vec<i32>>()
+            let both = || s.absolute.iter().chain(&s.gap);
+            let orders = vpc_frame(
+                vec![
+                    (
+                        "clock",
+                        fam("absolute", s.absolute.len())
+                            .chain(fam("gap", s.gap.len()))
+                            .collect::<Vec<String>>()
+                            .into(),
+                    ),
+                    ("order", both().map(|b| b.order as i32).collect::<Vec<i32>>().into()),
+                    ("n_subjects", both().map(|b| b.n_subjects as i32).collect::<Vec<i32>>().into()),
+                ],
+                s.absolute.len() + s.gap.len(),
             );
             list!(
                 label = s.label.clone(),
@@ -3000,21 +3209,19 @@ fn vpc_kmmc_to_list(vpc: &ferx_core::KmmcVpc) -> Robj {
         .iter()
         .map(|s| {
             let c = &s.observed;
-            let observed = data_frame!(
-                time = c.time.clone(),
-                n_risk = vpc_ints(&c.n_risk),
-                n_event = vpc_ints(&c.n_event),
-                n_censor = vpc_ints(&c.n_censor),
-                mean = c.mean.clone()
+            let observed = vpc_frame(
+                vec![
+                    ("time", c.time.clone().into()),
+                    ("n_risk", vpc_ints(&c.n_risk).into()),
+                    ("n_event", vpc_ints(&c.n_event).into()),
+                    ("n_censor", vpc_ints(&c.n_censor).into()),
+                    ("mean", c.mean.clone().into()),
+                ],
+                c.time.len(),
             );
-            let band = data_frame!(
-                time = s.grid.clone(),
-                obs = vpc_na_opt(&s.obs_on_grid),
-                lo = vpc_na_opt(&s.lo),
-                med = vpc_na_opt(&s.med),
-                hi = vpc_na_opt(&s.hi),
-                n_used = vpc_ints(&s.n_used)
-            );
+            let band = vpc_band_frame(VpcBandSlices::new(
+                &s.grid, [&s.obs_on_grid, &s.lo, &s.med, &s.hi], &s.n_used,
+            ));
             list!(
                 label = s.label.clone(),
                 value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
@@ -3033,6 +3240,69 @@ fn vpc_kmmc_to_list(vpc: &ferx_core::KmmcVpc) -> Robj {
         n_sim = vpc.n_sim as i32,
         probs = vpc.probs.to_vec(),
         min_at_risk = vpc.min_at_risk as i32,
+        censoring = vpc_censoring_label(vpc.censoring),
+        strata = List::from_values(strata)
+    )
+    .into()
+}
+
+/// A `CifVpc` (ferx-core #1887) as an R list, every number read off core's
+/// strata. Per stratum: `observed`, one row per row of the observed all-cause
+/// Kaplan-Meier curve (`time`, `n_risk`, `n_event`, `n_censor`, `surv`, then
+/// `cif_<cmt>` and `n_event_<cmt>` per cause, in `cmts` order); `band`, the
+/// causes' bands stacked long with a `cmt` column; and `survival_band`, the
+/// all-cause survival band. Both bands are on the stratum's grid.
+fn vpc_cif_to_list(vpc: &ferx_core::CifVpc) -> Robj {
+    let strata: Vec<Robj> = vpc
+        .strata
+        .iter()
+        .map(|s| {
+            let c = &s.observed;
+            let km = &c.all_cause;
+            let mut cols: Vec<(String, Robj)> = vec![
+                ("time".into(), km.time.clone().into()),
+                ("n_risk".into(), vpc_ints(&km.n_risk).into()),
+                ("n_event".into(), vpc_ints(&km.n_event).into()),
+                ("n_censor".into(), vpc_ints(&km.n_censor).into()),
+                ("surv".into(), km.surv.clone().into()),
+            ];
+            for (k, cmt) in vpc.cmts.iter().enumerate() {
+                cols.push((format!("cif_{cmt}"), c.cif[k].clone().into()));
+            }
+            for (k, cmt) in vpc.cmts.iter().enumerate() {
+                cols.push((format!("n_event_{cmt}"), vpc_ints(&c.n_event[k]).into()));
+            }
+            // One column per cause, so the names are only known at run time.
+            let observed = finish_df(
+                cols.iter().map(|(n, v)| (n.as_str(), v.clone())).collect(),
+                km.time.len(),
+            );
+
+            fn slices<'a>(grid: &'a [f64], b: &'a ferx_core::CifVpcBand) -> VpcBandSlices<'a> {
+                VpcBandSlices::new(grid, [&b.obs_on_grid, &b.lo, &b.med, &b.hi], &b.n_used)
+            }
+            let band = vpc_long_band(
+                "cmt",
+                s.causes.iter().map(|c| (c.cmt as i32, slices(&s.grid, &c.band))),
+            );
+            let survival_band = vpc_band_frame(slices(&s.grid, &s.survival));
+            list!(
+                label = s.label.clone(),
+                value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
+                n_subjects = s.n_subjects as i32,
+                observed = observed,
+                band = band,
+                survival_band = survival_band
+            )
+            .into()
+        })
+        .collect();
+    list!(
+        kind = "cif",
+        cmts = vpc.cmts.iter().map(|&c| c as i32).collect::<Vec<i32>>(),
+        horizon = vpc.horizon,
+        n_sim = vpc.n_sim as i32,
+        probs = vpc.probs.to_vec(),
         censoring = vpc_censoring_label(vpc.censoring),
         strata = List::from_values(strata)
     )
@@ -6899,6 +7169,13 @@ impl CoreDiag for ferx_core::RtteVpc {
 
 /// `W_VPC_KMMC_TIME_VARYING_COVARIATE`, then the simulator's bundle (#1886 PR3).
 impl CoreDiag for ferx_core::KmmcVpc {
+    fn warnings(&self) -> &[String] {
+        &self.warnings
+    }
+}
+
+/// The simulator's bundle (ferx-core #1887).
+impl CoreDiag for ferx_core::CifVpc {
     fn warnings(&self) -> &[String] {
         &self.warnings
     }
@@ -16413,6 +16690,8 @@ extendr_module! {
     fn ferx_rust_vpc_tte_from_fit;
     fn ferx_rust_vpc_kmmc;
     fn ferx_rust_vpc_kmmc_from_fit;
+    fn ferx_rust_vpc_cif;
+    fn ferx_rust_vpc_cif_from_fit;
     fn ferx_rust_npde_from_fit;
     fn ferx_rust_sir;
     fn ferx_rust_covariance;

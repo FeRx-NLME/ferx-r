@@ -204,7 +204,9 @@ An input the curve or the band would be wrong on is an R error of class
 without a TTE endpoint; several TTE endpoints and no \code{cmt} (under
 competing risks one minus the Kaplan-Meier curve of one cause is not its
 cumulative incidence; with \code{cmt} set, the curve is that cause's
-survival with the other causes as censoring); a \code{cmt} that is not a TTE
+survival with the other causes as censoring, and
+\code{\link{ferx_vpc_cif}} draws the cumulative incidence of every cause,
+which the refusal names); a \code{cmt} that is not a TTE
 endpoint; left truncation (delayed entry); an
 interval-censored record; more than one record per subject on the endpoint;
 a subject id that appears in two separate runs of rows; no record on the
@@ -247,7 +249,8 @@ plot(rv)
 }
 \seealso{
 \code{\link{plot.ferx_vpc_tte}}, \code{\link{plot.ferx_vpc_rtte}},
-\code{\link{ferx_vpc_kmmc}}, \code{\link{ferx_predict_survival}}
+\code{\link{ferx_vpc_kmmc}}, \code{\link{ferx_vpc_cif}},
+\code{\link{ferx_predict_survival}}
 
 Other simulation:
 \code{\link[=ferx_calc_npde]{ferx_calc_npde()}},
@@ -258,6 +261,7 @@ Other simulation:
 \code{\link[=ferx_simulate]{ferx_simulate()}},
 \code{\link[=ferx_simulate_adaptive]{ferx_simulate_adaptive()}},
 \code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}},
+\code{\link[=ferx_vpc_cif]{ferx_vpc_cif()}},
 \code{\link[=ferx_vpc_kmmc]{ferx_vpc_kmmc()}}
 }
 \concept{simulation}

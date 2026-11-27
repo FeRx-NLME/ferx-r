@@ -436,7 +436,8 @@ ferx_get_warnings <- function(fit, as_df = FALSE) {
   paste(parts, collapse = " ")
 }
 
-# Guidance for the warnings a TTE VPC carries (ferx_vpc_tte(), ferx_vpc_kmmc()),
+# Guidance for the warnings a TTE VPC carries (ferx_vpc_tte(), ferx_vpc_kmmc(),
+# ferx_vpc_cif()),
 # keyed on the engine's code at the start of the message: they reach R on the
 # VPC object, not on a fit, so they never pass through .ferx_warning_guidance()'s
 # categories. The VPC print methods show it under the warning. NULL for any
