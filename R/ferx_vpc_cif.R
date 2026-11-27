@@ -226,7 +226,18 @@ plot.ferx_vpc_cif <- function(x, y = NULL, cmts = NULL, survival = FALSE,
   on.exit(graphics::par(old), add = TRUE)
   for (p in panels) {
     .ferx_vpc_step_panel(p$band, p$time, p$y, x$horizon, start = p$start,
-                         ylab = p$ylab, main = p$main, ...)
+                         ylab = p$ylab, main = p$main,
+                         note = .ferx_vpc_cif_no_band_label, ...)
   }
   invisible(x)
 }
+
+# The note a CIF panel with no band carries. Unlike its siblings, core's
+# `vpc_cif` raises no W_VPC_EMPTY_STRATUM (ferx-core at 13e6c8bf), so the
+# shared note's "see $warnings" would point at nothing (#778 review, finding
+# 1); this one says the reason itself. Back to the shared note once core
+# raises the warning for `vpc_cif` too.
+.ferx_vpc_cif_no_band_label <- paste(
+  "No simulated band here: too few replicates under follow-up at these grid",
+  "times (raise n_sim, or use grid times inside the horizon)"
+)

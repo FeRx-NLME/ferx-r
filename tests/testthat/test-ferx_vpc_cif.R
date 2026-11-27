@@ -200,7 +200,7 @@ test_that("the glue-side argument checks refuse before the engine", {
   expect_false("cmt" %in% names(formals(ferx_vpc_cif)))
 })
 
-test_that("print() lists the events per cause and the warnings' guidance", {
+test_that("print() lists the settings and the events per cause", {
   ex <- ferx_example("tte_competing_risks")
   v <- vpc_cif_quiet(ex$model, ex$data, n_sim = 20L, seed = 1L)
   s <- cif_subjects(ex$data)
@@ -210,12 +210,6 @@ test_that("print() lists the events per cause and the warnings' guidance", {
   expect_true(any(grepl(sprintf("all: %d subjects, events %d on cmt 2, %d on cmt 3",
                                 nrow(s), sum(s$cause == 2L), sum(s$cause == 3L)),
                         out, fixed = TRUE)))
-  # An empty-stratum warning gets the VPC guidance under it.
-  v$warnings <- "W_VPC_EMPTY_STRATUM: stratum `all` has no band at any grid time. At most 3 of the 20 replicate curves are defined"
-  out <- capture.output(print(v))
-  expect_true(any(grepl("W_VPC_EMPTY_STRATUM: This stratum's panel has no simulated band",
-                        out, fixed = TRUE)))
-  expect_true(any(grepl("raise n_sim", out, fixed = TRUE)))
 })
 
 test_that("plot() draws a panel per stratum and cause, survival optional", {
@@ -248,16 +242,25 @@ test_that("a panel with no band says so", {
                      grid = c(100, 200))
   expect_true(all(is.na(v$band$lo)))
   expect_true(all(is.na(v$survival_band$lo)))
-  notes <- 0L
+  # Core's vpc_cif raises no W_VPC_EMPTY_STRATUM at this pin (#778 review,
+  # finding 1), so print() has no reason to show. When this starts failing,
+  # core raises it: give CIF panels the shared note back and drop the CIF one.
+  expect_false(any(grepl("^W_VPC_EMPTY_STRATUM", v$warnings)))
+  # So the panel's note says the reason itself and cites no warning.
+  label <- ferx:::.ferx_vpc_cif_no_band_label
+  expect_false(grepl("W_VPC_EMPTY_STRATUM", label, fixed = TRUE))
+  expect_false(grepl("$warnings", label, fixed = TRUE))
+  expect_match(label, "too few replicates under follow-up", fixed = TRUE)
+  notes <- character()
   testthat::local_mocked_bindings(
-    .ferx_vpc_no_band_note = function() notes <<- notes + 1L,
+    .ferx_vpc_no_band_note = function(label = "shared") notes <<- c(notes, label),
     .package = "ferx"
   )
   pdf(NULL)
   on.exit(dev.off(), add = TRUE)
   plot(v, survival = TRUE)
-  # Two cause panels and the survival panel.
-  expect_identical(notes, 3L)
+  # Two cause panels and the survival panel, each with the CIF note.
+  expect_identical(notes, rep(label, 3L))
 })
 
 test_that("the vpc_tte / vpc_kmmc refusal for several causes names ferx_vpc_cif()", {

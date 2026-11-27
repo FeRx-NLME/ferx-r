@@ -137,9 +137,12 @@ plot.ferx_vpc_rtte <- function(x, y = NULL, which = c("mcf", "absolute", "gap"),
 # (0, `start`). `step = "s"` for a right-continuous curve (Kaplan-Meier, MCF),
 # whose band at `t[k]` holds over `[t[k], t[k+1])`; `"S"` for a left-continuous
 # one (KMMC), whose band at `t[k]` holds over `(t[k-1], t[k]]` (#754 review,
-# finding 2). The y range covers both.
+# finding 2). The y range covers both. `note` is the text a panel with no band
+# carries; NULL for the shared one, which cites W_VPC_EMPTY_STRATUM, so a VPC
+# whose engine does not raise that warning passes its own (#778 review,
+# finding 1).
 .ferx_vpc_step_panel <- function(band, obs_time, obs_y, horizon, start, ylab,
-                                 main, step = "s", ...) {
+                                 main, step = "s", note = NULL, ...) {
   b <- if (step == "S") {
     .ferx_vpc_kmmc_bins(band, horizon)
   } else {
@@ -165,7 +168,9 @@ plot.ferx_vpc_rtte <- function(x, y = NULL, which = c("mcf", "absolute", "gap"),
   if (length(obs_time)) {
     graphics::lines(c(0, obs_time), c(start, obs_y), type = step, lwd = 2)
   }
-  if (!nrow(b)) .ferx_vpc_no_band_note()
+  if (!nrow(b)) {
+    if (is.null(note)) .ferx_vpc_no_band_note() else .ferx_vpc_no_band_note(note)
+  }
   invisible()
 }
 
@@ -173,7 +178,6 @@ plot.ferx_vpc_rtte <- function(x, y = NULL, which = c("mcf", "absolute", "gap"),
 # were merely narrow (ferx-core #2947): the engine says why in its
 # W_VPC_EMPTY_STRATUM warning, which the result's print method shows.
 .ferx_vpc_no_band_label <- "No simulated band here (W_VPC_EMPTY_STRATUM; see $warnings)"
-.ferx_vpc_no_band_note <- function() {
-  graphics::mtext(.ferx_vpc_no_band_label, side = 3, line = -1.5, cex = 0.75,
-                  col = "firebrick")
+.ferx_vpc_no_band_note <- function(label = .ferx_vpc_no_band_label) {
+  graphics::mtext(label, side = 3, line = -1.5, cex = 0.75, col = "firebrick")
 }
