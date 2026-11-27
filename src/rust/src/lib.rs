@@ -3190,16 +3190,6 @@ fn vpc_kmmc_to_list(vpc: &ferx_core::KmmcVpc) -> Robj {
     .into()
 }
 
-/// A data frame from named columns of equal length `n_rows`, for a table whose
-/// column set is only known at run time (one column per competing-risks cause).
-fn vpc_wide_frame(pairs: Vec<(String, Robj)>, n_rows: usize) -> Robj {
-    let mut df = List::from_pairs(pairs.iter().map(|(n, v)| (n.as_str(), v.clone())));
-    df.set_class(&["data.frame"]).unwrap();
-    let row_names: Vec<i32> = (1..=n_rows as i32).collect();
-    df.set_attrib("row.names", row_names).unwrap();
-    df.into()
-}
-
 /// A `CifVpc` (ferx-core #1887) as an R list, every number read off core's
 /// strata. Per stratum: `observed`, one row per row of the observed all-cause
 /// Kaplan-Meier curve (`time`, `n_risk`, `n_event`, `n_censor`, `surv`, then
@@ -3236,7 +3226,11 @@ fn vpc_cif_to_list(vpc: &ferx_core::CifVpc) -> Robj {
             for (k, cmt) in vpc.cmts.iter().enumerate() {
                 cols.push((format!("n_event_{cmt}"), vpc_ints(&c.n_event[k]).into()));
             }
-            let observed = vpc_wide_frame(cols, km.time.len());
+            // One column per cause, so the names are only known at run time.
+            let observed = finish_df(
+                cols.iter().map(|(n, v)| (n.as_str(), v.clone())).collect(),
+                km.time.len(),
+            );
 
             let mut b: LongBand = Default::default();
             for cause in &s.causes {
