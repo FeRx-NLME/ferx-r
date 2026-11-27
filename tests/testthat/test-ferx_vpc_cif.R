@@ -80,6 +80,16 @@ test_that("ferx_vpc_cif returns the observed curves and a band per cause", {
                          "n_used"))
   expect_named(v$survival_band, c("STRATUM", "time", "obs", "lo", "med", "hi",
                                   "n_used"))
+  # Column types, as the other VPCs' bands have them (the glue builds both
+  # band shapes through shared helpers).
+  band_types <- c(time = "double", obs = "double", lo = "double", med = "double",
+                  hi = "double", n_used = "integer")
+  expect_identical(vapply(v$band[-1L], typeof, ""), c(cmt = "integer", band_types))
+  expect_identical(vapply(v$survival_band[-1L], typeof, ""), band_types)
+  expect_identical(vapply(v$observed[-1L], typeof, ""),
+                   c(time = "double", n_risk = "integer", n_event = "integer",
+                     n_censor = "integer", surv = "double", cif_2 = "double",
+                     cif_3 = "double", n_event_2 = "integer", n_event_3 = "integer"))
   expect_identical(levels(v$strata$STRATUM), "all")
   expect_identical(v$strata$n_subjects, length(unique(d$ID)))
   # Each cause's band is on the same grid as the survival band.

@@ -2905,10 +2905,6 @@ fn vpc_tte_options(
 /// re-derived here or in R. A band entry core leaves empty (too few
 /// replicates still under follow-up) is `NA`.
 fn vpc_tte_to_list(vpc: &ferx_core::TteVpc) -> Robj {
-    let na_opt = |v: &[Option<f64>]| -> Doubles {
-        v.iter().map(|x| x.map_or_else(Rfloat::na, Rfloat::from)).collect()
-    };
-    let ints = |v: &[usize]| -> Vec<i32> { v.iter().map(|&n| n as i32).collect() };
     let strata: Vec<Robj> = vpc
         .strata
         .iter()
@@ -2916,20 +2912,20 @@ fn vpc_tte_to_list(vpc: &ferx_core::TteVpc) -> Robj {
             let km = &s.observed;
             let observed = data_frame!(
                 time = km.time.clone(),
-                n_risk = ints(&km.n_risk),
-                n_event = ints(&km.n_event),
-                n_censor = ints(&km.n_censor),
+                n_risk = vpc_ints(&km.n_risk),
+                n_event = vpc_ints(&km.n_event),
+                n_censor = vpc_ints(&km.n_censor),
                 surv = km.surv.clone(),
                 cumhaz = km.cumhaz.clone()
             );
-            let band = data_frame!(
-                time = s.grid.clone(),
-                obs = na_opt(&s.obs_on_grid),
-                lo = na_opt(&s.lo),
-                med = na_opt(&s.med),
-                hi = na_opt(&s.hi),
-                n_used = ints(&s.n_used)
-            );
+            let band = vpc_band_frame(VpcBandSlices {
+                time: &s.grid,
+                obs: &s.obs_on_grid,
+                lo: &s.lo,
+                med: &s.med,
+                hi: &s.hi,
+                n_used: &s.n_used,
+            });
             list!(
                 label = s.label.clone(),
                 value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
@@ -3033,6 +3029,61 @@ fn vpc_ints(v: &[usize]) -> Vec<i32> {
     v.iter().map(|&n| n as i32).collect()
 }
 
+/// One VPC band as core holds it: the grid, the observed curve read there and
+/// the band's limits, all parallel to `time`.
+struct VpcBandSlices<'a> {
+    time: &'a [f64],
+    obs: &'a [Option<f64>],
+    lo: &'a [Option<f64>],
+    med: &'a [Option<f64>],
+    hi: &'a [Option<f64>],
+    n_used: &'a [usize],
+}
+
+/// A band as the R data frame every VPC returns: `time`, `obs`, `lo`, `med`,
+/// `hi`, `n_used`, an empty entry being `NA`.
+fn vpc_band_frame(b: VpcBandSlices<'_>) -> Robj {
+    data_frame!(
+        time = b.time.to_vec(),
+        obs = vpc_na_opt(b.obs),
+        lo = vpc_na_opt(b.lo),
+        med = vpc_na_opt(b.med),
+        hi = vpc_na_opt(b.hi),
+        n_used = vpc_ints(b.n_used)
+    )
+}
+
+/// Several bands stacked long, each row led by its band's integer `key`
+/// column (`order` for RTTE event orders, `cmt` for competing-risks causes),
+/// then the columns of `vpc_band_frame`. Built by R's `data.frame()`, as
+/// `data_frame!` builds the others, since the key's name is only known here.
+fn vpc_long_band<'a>(key: &str, parts: impl IntoIterator<Item = (i32, VpcBandSlices<'a>)>) -> Robj {
+    let (mut keys, mut time, mut n_used) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut obs, mut lo, mut med, mut hi) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for (k, b) in parts {
+        keys.extend(std::iter::repeat_n(k, b.time.len()));
+        time.extend_from_slice(b.time);
+        obs.extend_from_slice(b.obs);
+        lo.extend_from_slice(b.lo);
+        med.extend_from_slice(b.med);
+        hi.extend_from_slice(b.hi);
+        n_used.extend_from_slice(b.n_used);
+    }
+    extendr_api::functions::eval_string("data.frame")
+        .and_then(|f| {
+            f.call(Pairlist::from_pairs(&[
+                (key, Robj::from(keys)),
+                ("time", Robj::from(time)),
+                ("obs", Robj::from(vpc_na_opt(&obs))),
+                ("lo", Robj::from(vpc_na_opt(&lo))),
+                ("med", Robj::from(vpc_na_opt(&med))),
+                ("hi", Robj::from(vpc_na_opt(&hi))),
+                ("n_used", Robj::from(vpc_ints(&n_used))),
+            ]))
+        })
+        .unwrap()
+}
+
 /// An `RtteVpc` (ferx-core #1886 PR2) as an R list, every number read off core's
 /// strata. Per stratum: the mean cumulative function (`mcf`, its observed curve,
 /// and `mcf_band`), then each family of curves by event order as long tables with
@@ -3042,24 +3093,14 @@ fn vpc_ints(v: &[usize]) -> Vec<i32> {
 fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
     let curves = |bands: &[ferx_core::RtteOrderBand]| -> (Robj, Robj) {
         let mut o = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        let mut b: (Vec<i32>, Vec<f64>, Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>, Vec<Option<f64>>, Vec<usize>) =
-            Default::default();
         for band in bands {
             let km = &band.observed;
-            let k = band.order as i32;
-            o.0.extend(std::iter::repeat_n(k, km.time.len()));
+            o.0.extend(std::iter::repeat_n(band.order as i32, km.time.len()));
             o.1.extend_from_slice(&km.time);
             o.2.extend_from_slice(&km.n_risk);
             o.3.extend_from_slice(&km.n_event);
             o.4.extend_from_slice(&km.n_censor);
             o.5.extend_from_slice(&km.surv);
-            b.0.extend(std::iter::repeat_n(k, band.grid.len()));
-            b.1.extend_from_slice(&band.grid);
-            b.2.extend_from_slice(&band.obs_on_grid);
-            b.3.extend_from_slice(&band.lo);
-            b.4.extend_from_slice(&band.med);
-            b.5.extend_from_slice(&band.hi);
-            b.6.extend_from_slice(&band.n_used);
         }
         let observed = data_frame!(
             order = o.0,
@@ -3069,16 +3110,23 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
             n_censor = vpc_ints(&o.4),
             surv = o.5
         );
-        let band = data_frame!(
-            order = b.0,
-            time = b.1,
-            obs = vpc_na_opt(&b.2),
-            lo = vpc_na_opt(&b.3),
-            med = vpc_na_opt(&b.4),
-            hi = vpc_na_opt(&b.5),
-            n_used = vpc_ints(&b.6)
+        let band = vpc_long_band(
+            "order",
+            bands.iter().map(|band| {
+                (
+                    band.order as i32,
+                    VpcBandSlices {
+                        time: &band.grid,
+                        obs: &band.obs_on_grid,
+                        lo: &band.lo,
+                        med: &band.med,
+                        hi: &band.hi,
+                        n_used: &band.n_used,
+                    },
+                )
+            }),
         );
-        (observed.into(), band.into())
+        (observed.into(), band)
     };
     let strata: Vec<Robj> = vpc
         .strata
@@ -3091,14 +3139,14 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
                 n_event = vpc_ints(&m.observed.n_event),
                 mcf = m.observed.mcf.clone()
             );
-            let mcf_band = data_frame!(
-                time = m.grid.clone(),
-                obs = vpc_na_opt(&m.obs_on_grid),
-                lo = vpc_na_opt(&m.lo),
-                med = vpc_na_opt(&m.med),
-                hi = vpc_na_opt(&m.hi),
-                n_used = vpc_ints(&m.n_used)
-            );
+            let mcf_band = vpc_band_frame(VpcBandSlices {
+                time: &m.grid,
+                obs: &m.obs_on_grid,
+                lo: &m.lo,
+                med: &m.med,
+                hi: &m.hi,
+                n_used: &m.n_used,
+            });
             let (absolute, absolute_band) = curves(&s.absolute);
             let (gap, gap_band) = curves(&s.gap);
             let fam = |name: &str, n: usize| std::iter::repeat_n(name.to_string(), n);
@@ -3158,14 +3206,14 @@ fn vpc_kmmc_to_list(vpc: &ferx_core::KmmcVpc) -> Robj {
                 n_censor = vpc_ints(&c.n_censor),
                 mean = c.mean.clone()
             );
-            let band = data_frame!(
-                time = s.grid.clone(),
-                obs = vpc_na_opt(&s.obs_on_grid),
-                lo = vpc_na_opt(&s.lo),
-                med = vpc_na_opt(&s.med),
-                hi = vpc_na_opt(&s.hi),
-                n_used = vpc_ints(&s.n_used)
-            );
+            let band = vpc_band_frame(VpcBandSlices {
+                time: &s.grid,
+                obs: &s.obs_on_grid,
+                lo: &s.lo,
+                med: &s.med,
+                hi: &s.hi,
+                n_used: &s.n_used,
+            });
             list!(
                 label = s.label.clone(),
                 value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
@@ -3197,16 +3245,6 @@ fn vpc_kmmc_to_list(vpc: &ferx_core::KmmcVpc) -> Robj {
 /// causes' bands stacked long with a `cmt` column; and `survival_band`, the
 /// all-cause survival band. Both bands are on the stratum's grid.
 fn vpc_cif_to_list(vpc: &ferx_core::CifVpc) -> Robj {
-    #[allow(clippy::type_complexity)]
-    type LongBand = (
-        Vec<i32>,
-        Vec<f64>,
-        Vec<Option<f64>>,
-        Vec<Option<f64>>,
-        Vec<Option<f64>>,
-        Vec<Option<f64>>,
-        Vec<usize>,
-    );
     let strata: Vec<Robj> = vpc
         .strata
         .iter()
@@ -3232,35 +3270,21 @@ fn vpc_cif_to_list(vpc: &ferx_core::CifVpc) -> Robj {
                 km.time.len(),
             );
 
-            let mut b: LongBand = Default::default();
-            for cause in &s.causes {
-                let band = &cause.band;
-                b.0.extend(std::iter::repeat_n(cause.cmt as i32, s.grid.len()));
-                b.1.extend_from_slice(&s.grid);
-                b.2.extend_from_slice(&band.obs_on_grid);
-                b.3.extend_from_slice(&band.lo);
-                b.4.extend_from_slice(&band.med);
-                b.5.extend_from_slice(&band.hi);
-                b.6.extend_from_slice(&band.n_used);
+            fn slices<'a>(grid: &'a [f64], b: &'a ferx_core::CifVpcBand) -> VpcBandSlices<'a> {
+                VpcBandSlices {
+                    time: grid,
+                    obs: &b.obs_on_grid,
+                    lo: &b.lo,
+                    med: &b.med,
+                    hi: &b.hi,
+                    n_used: &b.n_used,
+                }
             }
-            let band = data_frame!(
-                cmt = b.0,
-                time = b.1,
-                obs = vpc_na_opt(&b.2),
-                lo = vpc_na_opt(&b.3),
-                med = vpc_na_opt(&b.4),
-                hi = vpc_na_opt(&b.5),
-                n_used = vpc_ints(&b.6)
+            let band = vpc_long_band(
+                "cmt",
+                s.causes.iter().map(|c| (c.cmt as i32, slices(&s.grid, &c.band))),
             );
-            let sv = &s.survival;
-            let survival_band = data_frame!(
-                time = s.grid.clone(),
-                obs = vpc_na_opt(&sv.obs_on_grid),
-                lo = vpc_na_opt(&sv.lo),
-                med = vpc_na_opt(&sv.med),
-                hi = vpc_na_opt(&sv.hi),
-                n_used = vpc_ints(&sv.n_used)
-            );
+            let survival_band = vpc_band_frame(slices(&s.grid, &s.survival));
             list!(
                 label = s.label.clone(),
                 value = s.value.map_or_else(|| Robj::from(Rfloat::na()), Robj::from),
