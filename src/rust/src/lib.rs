@@ -2025,19 +2025,22 @@ fn adaptive_result_to_list(
     let l = &result.ledger;
     let first_signal = |sigs: &[ferx_core::ObservedSignal]| sigs.first().map(|s| s.value).unwrap_or(f64::NAN);
     let first_latent = |sigs: &[ferx_core::ObservedSignal]| sigs.first().map(|s| s.latent).unwrap_or(f64::NAN);
-    let doses = data_frame!(
-        DRAW = l.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
-        SIM = l.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
-        REP = l.iter().map(|e| e.rep as i32).collect::<Vec<i32>>(),
-        ID = l.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
-        TIME = l.iter().map(|e| e.time).collect::<Vec<f64>>(),
-        AMT = l.iter().map(|e| e.amt).collect::<Vec<f64>>(),
-        CMT = l.iter().map(|e| e.cmt as i32).collect::<Vec<i32>>(),
-        RATE = l.iter().map(|e| e.rate).collect::<Vec<f64>>(),
-        DECISION = l.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>(),
-        SIGNAL = l.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>(),
-        LATENT = l.iter().map(|e| first_latent(&e.observed_signals)).collect::<Vec<f64>>(),
-        RULE = l.iter().map(|e| e.rule_fired.clone()).collect::<Vec<String>>()
+    let doses = r_data_frame(
+        vec![
+            ("DRAW", l.iter().map(|e| e.draw as i32).collect::<Vec<i32>>().into()),
+            ("SIM", l.iter().map(|e| e.sim as i32).collect::<Vec<i32>>().into()),
+            ("REP", l.iter().map(|e| e.rep as i32).collect::<Vec<i32>>().into()),
+            ("ID", l.iter().map(|e| e.subject.clone()).collect::<Vec<String>>().into()),
+            ("TIME", l.iter().map(|e| e.time).collect::<Vec<f64>>().into()),
+            ("AMT", l.iter().map(|e| e.amt).collect::<Vec<f64>>().into()),
+            ("CMT", l.iter().map(|e| e.cmt as i32).collect::<Vec<i32>>().into()),
+            ("RATE", l.iter().map(|e| e.rate).collect::<Vec<f64>>().into()),
+            ("DECISION", l.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>().into()),
+            ("SIGNAL", l.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>().into()),
+            ("LATENT", l.iter().map(|e| first_latent(&e.observed_signals)).collect::<Vec<f64>>().into()),
+            ("RULE", l.iter().map(|e| e.rule_fired.clone()).collect::<Vec<String>>().into()),
+        ],
+        l.len(),
     );
 
     // -- decisions: one row per decision time, including holds --
@@ -2046,63 +2049,57 @@ fn adaptive_result_to_list(
     // `#[non_exhaustive]`, and `label()` / `n_dosed()` are exhaustive matches
     // inside ferx-core, so a new variant cannot reach R without a label and a
     // dose count (ferx-core #2581).
-    let decisions = data_frame!(
-        DRAW = d.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
-        SIM = d.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
-        REP = d.iter().map(|e| e.rep as i32).collect::<Vec<i32>>(),
-        ID = d.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
-        DECISION = d.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>(),
-        TIME = d.iter().map(|e| e.time).collect::<Vec<f64>>(),
-        SIGNAL = d.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>(),
-        LATENT = d.iter().map(|e| first_latent(&e.observed_signals)).collect::<Vec<f64>>(),
-        OUTCOME = d.iter().map(|e| e.outcome.label().to_string()).collect::<Vec<String>>(),
-        N_DOSED = d.iter().map(|e| e.outcome.n_dosed() as i32).collect::<Vec<i32>>(),
-        // The dosing interval in force after the decision; NA while none is set.
-        INTERVAL = d.iter().map(|e| e.interval).collect::<Vec<Option<f64>>>()
+    let decisions = r_data_frame(
+        vec![
+            ("DRAW", d.iter().map(|e| e.draw as i32).collect::<Vec<i32>>().into()),
+            ("SIM", d.iter().map(|e| e.sim as i32).collect::<Vec<i32>>().into()),
+            ("REP", d.iter().map(|e| e.rep as i32).collect::<Vec<i32>>().into()),
+            ("ID", d.iter().map(|e| e.subject.clone()).collect::<Vec<String>>().into()),
+            ("DECISION", d.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>().into()),
+            ("TIME", d.iter().map(|e| e.time).collect::<Vec<f64>>().into()),
+            ("SIGNAL", d.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>().into()),
+            ("LATENT", d.iter().map(|e| first_latent(&e.observed_signals)).collect::<Vec<f64>>().into()),
+            ("OUTCOME", d.iter().map(|e| e.outcome.label().to_string()).collect::<Vec<String>>().into()),
+            ("N_DOSED", d.iter().map(|e| e.outcome.n_dosed() as i32).collect::<Vec<i32>>().into()),
+            // The dosing interval in force after the decision; NA while none is set.
+            ("INTERVAL", d.iter().map(|e| e.interval).collect::<Vec<Option<f64>>>().into()),
+        ],
+        d.len(),
     );
 
     // -- metrics: one row per realized run (subject, draw, sim) --
     // `Option<f64>` fields (no signal recorded, never discontinued, no
     // `target_window` declared) map to R `NA_real_`; `discontinued` is a logical.
     let m = &result.metrics;
-    let metrics = data_frame!(
-        DRAW = m.iter().map(|e| e.draw as i32).collect::<Vec<i32>>(),
-        SIM = m.iter().map(|e| e.sim as i32).collect::<Vec<i32>>(),
-        REP = m.iter().map(|e| e.rep as i32).collect::<Vec<i32>>(),
-        ID = m.iter().map(|e| e.subject.clone()).collect::<Vec<String>>(),
-        CUM_DOSE = m.iter().map(|e| e.cumulative_dose).collect::<Vec<f64>>(),
-        N_DOSES = m.iter().map(|e| e.n_doses as i32).collect::<Vec<i32>>(),
-        N_INCREASES = m.iter().map(|e| e.n_increases as i32).collect::<Vec<i32>>(),
-        N_DECREASES = m.iter().map(|e| e.n_decreases as i32).collect::<Vec<i32>>(),
-        N_HOLDS = m.iter().map(|e| e.n_holds as i32).collect::<Vec<i32>>(),
-        N_NOT_DUE = m.iter().map(|e| e.n_not_due as i32).collect::<Vec<i32>>(),
-        DISCONTINUED = m.iter().map(|e| e.discontinued).collect::<Vec<bool>>(),
-        TIME_TO_DISCONT = m
-            .iter()
-            .map(|e| e.time_to_discontinuation)
-            .collect::<Vec<Option<f64>>>(),
-        SIGNAL_MIN = m.iter().map(|e| e.signal_min).collect::<Vec<Option<f64>>>(),
-        SIGNAL_MAX = m.iter().map(|e| e.signal_max).collect::<Vec<Option<f64>>>(),
-        SIGNAL_MEAN = m.iter().map(|e| e.signal_mean).collect::<Vec<Option<f64>>>(),
-        // A fraction of decision *readings* (latent value) inside `target_window`,
-        // never a time: ferx-core #946 renamed the field. The old column name is
-        // kept as a deprecated duplicate for one release (see NEWS).
-        PCT_READINGS_IN_WINDOW = m
-            .iter()
-            .map(|e| e.pct_readings_in_window)
-            .collect::<Vec<Option<f64>>>(),
-        PCT_TIME_IN_WINDOW = m
-            .iter()
-            .map(|e| e.pct_readings_in_window)
-            .collect::<Vec<Option<f64>>>(),
-        AUC_TARGET_ATTAINMENT = m
-            .iter()
-            .map(|e| e.auc_target_attainment)
-            .collect::<Vec<Option<f64>>>(),
-        ETA_SUPPLIED = m.iter().map(|e| e.eta_supplied).collect::<Vec<bool>>(),
-        // ferx-core #944: a drawn subject dosed from its drawn individual
-        // parameters under `dose_knowledge = oracle`.
-        DOSE_ORACLE = m.iter().map(|e| e.dose_oracle).collect::<Vec<bool>>()
+    let metrics = r_data_frame(
+        vec![
+            ("DRAW", m.iter().map(|e| e.draw as i32).collect::<Vec<i32>>().into()),
+            ("SIM", m.iter().map(|e| e.sim as i32).collect::<Vec<i32>>().into()),
+            ("REP", m.iter().map(|e| e.rep as i32).collect::<Vec<i32>>().into()),
+            ("ID", m.iter().map(|e| e.subject.clone()).collect::<Vec<String>>().into()),
+            ("CUM_DOSE", m.iter().map(|e| e.cumulative_dose).collect::<Vec<f64>>().into()),
+            ("N_DOSES", m.iter().map(|e| e.n_doses as i32).collect::<Vec<i32>>().into()),
+            ("N_INCREASES", m.iter().map(|e| e.n_increases as i32).collect::<Vec<i32>>().into()),
+            ("N_DECREASES", m.iter().map(|e| e.n_decreases as i32).collect::<Vec<i32>>().into()),
+            ("N_HOLDS", m.iter().map(|e| e.n_holds as i32).collect::<Vec<i32>>().into()),
+            ("N_NOT_DUE", m.iter().map(|e| e.n_not_due as i32).collect::<Vec<i32>>().into()),
+            ("DISCONTINUED", m.iter().map(|e| e.discontinued).collect::<Vec<bool>>().into()),
+            ("TIME_TO_DISCONT", m.iter().map(|e| e.time_to_discontinuation).collect::<Vec<Option<f64>>>().into()),
+            ("SIGNAL_MIN", m.iter().map(|e| e.signal_min).collect::<Vec<Option<f64>>>().into()),
+            ("SIGNAL_MAX", m.iter().map(|e| e.signal_max).collect::<Vec<Option<f64>>>().into()),
+            ("SIGNAL_MEAN", m.iter().map(|e| e.signal_mean).collect::<Vec<Option<f64>>>().into()),
+            // A fraction of decision *readings* (latent value) inside `target_window`,
+            // never a time: ferx-core #946 renamed the field. The old column name is
+            // kept as a deprecated duplicate for one release (see NEWS).
+            ("PCT_READINGS_IN_WINDOW", m.iter().map(|e| e.pct_readings_in_window).collect::<Vec<Option<f64>>>().into()),
+            ("PCT_TIME_IN_WINDOW", m.iter().map(|e| e.pct_readings_in_window).collect::<Vec<Option<f64>>>().into()),
+            ("AUC_TARGET_ATTAINMENT", m.iter().map(|e| e.auc_target_attainment).collect::<Vec<Option<f64>>>().into()),
+            ("ETA_SUPPLIED", m.iter().map(|e| e.eta_supplied).collect::<Vec<bool>>().into()),
+            // ferx-core #944: a drawn subject dosed from its drawn individual
+            // parameters under `dose_knowledge = oracle`.
+            ("DOSE_ORACLE", m.iter().map(|e| e.dose_oracle).collect::<Vec<bool>>().into()),
+        ],
+        m.len(),
     );
 
     let (summary_rows, summary_bands, prediction_intervals) = adaptive_summary_to_r(summary, summary_probs)?;
@@ -2431,7 +2428,10 @@ fn ferx_rust_predict(
         // findings through core's one filter -- never `population.warnings` raw,
         // which still holds the ones a compartment-free model makes moot.
         Ok(attach_sim_warnings(
-            data_frame!(ID = id, TIME = time, PRED = pred).into(),
+            r_data_frame(
+                vec![("ID", id.into()), ("TIME", time.into()), ("PRED", pred.into())],
+                results.len(),
+            ),
             occasion_notes,
             &output,
         ))
@@ -2536,7 +2536,10 @@ fn ferx_rust_predict_from_fit(
 
         // Core's non-fit bundle; see `ferx_rust_predict` (ferx-r #426).
         Ok(attach_sim_warnings(
-            data_frame!(ID = id, TIME = time, PRED = pred).into(),
+            r_data_frame(
+                vec![("ID", id.into()), ("TIME", time.into()), ("PRED", pred.into())],
+                results.len(),
+            ),
             occasion_notes,
             &output,
         ))
@@ -2559,19 +2562,21 @@ fn survival_results_to_df(results: &[ferx_core::SurvivalPredictionResult]) -> Ro
     let survival_all: Vec<f64> = results.iter().map(|r| r.survival_all).collect();
     let median_survival: Vec<f64> = results.iter().map(|r| r.median_survival).collect();
     let mean_survival: Vec<f64> = results.iter().map(|r| r.mean_survival).collect();
-    data_frame!(
-        ID = id,
-        CMT = cmt,
-        TIME = time,
-        survival = survival,
-        cum_hazard = cum_hazard,
-        hazard = hazard,
-        cif = cif,
-        survival_all = survival_all,
-        median_survival = median_survival,
-        mean_survival = mean_survival
+    r_data_frame(
+        vec![
+            ("ID", id.into()),
+            ("CMT", cmt.into()),
+            ("TIME", time.into()),
+            ("survival", survival.into()),
+            ("cum_hazard", cum_hazard.into()),
+            ("hazard", hazard.into()),
+            ("cif", cif.into()),
+            ("survival_all", survival_all.into()),
+            ("median_survival", median_survival.into()),
+            ("mean_survival", mean_survival.into()),
+        ],
+        results.len(),
     )
-    .into()
 }
 
 /// Survival-function predictions for TTE endpoints from a NLME model.
@@ -3436,7 +3441,7 @@ fn vpc_tte_to_list(vpc: &ferx_core::TteVpc) -> Robj {
         .iter()
         .map(|s| {
             let km = &s.observed;
-            let observed = vpc_frame(
+            let observed = r_data_frame(
                 vec![
                     ("time", km.time.clone().into()),
                     ("n_risk", vpc_ints(&km.n_risk).into()),
@@ -3523,7 +3528,12 @@ fn tte_npde_table(
                     )
                 })
             }));
-            (data_frame!(ID = id, TIME = time, CMT = cmt, NPDE = npde).into(), notes)
+            let n = id.len();
+            let table = r_data_frame(
+                vec![("ID", id.into()), ("TIME", time.into()), ("CMT", cmt.into()), ("NPDE", npde.into())],
+                n,
+            );
+            (table, notes)
         }
         Err(why) => {
             notes.push(format!(
@@ -3571,19 +3581,6 @@ impl<'a> VpcBandSlices<'a> {
     }
 }
 
-/// A data frame of `columns`, `nrow` rows each, laid out as R's `data.frame()`
-/// lays it out (compact automatic row names, `c(NA, -nrow)`), without calling
-/// R: `data_frame!` evaluates `data.frame` in the global environment, where a
-/// user's own `data.frame` shadows base's (#778 review, finding 5).
-fn vpc_frame(columns: Vec<(&str, Robj)>, nrow: usize) -> Robj {
-    let mut df = List::from_pairs(columns);
-    df.set_class(&["data.frame"]).unwrap();
-    // `i32::MIN` is R's NA_integer_; `data.frame()` gives 0 rows `integer(0)`.
-    let row_names: Vec<i32> = if nrow == 0 { Vec::new() } else { vec![i32::MIN, -(nrow as i32)] };
-    df.set_attrib("row.names", row_names).unwrap();
-    df.into()
-}
-
 /// The band columns every VPC returns after its own leading ones: `time`,
 /// `obs`, `lo`, `med`, `hi`, `n_used`, an empty entry being `NA`.
 fn vpc_band_columns(b: VpcBandSlices<'_>) -> [(&'static str, Robj); 6] {
@@ -3600,7 +3597,7 @@ fn vpc_band_columns(b: VpcBandSlices<'_>) -> [(&'static str, Robj); 6] {
 /// A band as the R data frame every VPC returns.
 fn vpc_band_frame(b: VpcBandSlices<'_>) -> Robj {
     let n = b.time.len();
-    vpc_frame(vpc_band_columns(b).into(), n)
+    r_data_frame(vpc_band_columns(b).into(), n)
 }
 
 /// Several bands stacked long, each row led by its band's integer `key`
@@ -3621,7 +3618,7 @@ fn vpc_long_band<'a>(key: &str, parts: impl IntoIterator<Item = (i32, VpcBandSli
     let n = time.len();
     let mut columns = vec![(key, Robj::from(keys))];
     columns.extend(vpc_band_columns(VpcBandSlices::new(&time, [&obs, &lo, &med, &hi], &n_used)));
-    vpc_frame(columns, n)
+    r_data_frame(columns, n)
 }
 
 /// An `RtteVpc` (ferx-core #1886 PR2) as an R list, every number read off core's
@@ -3643,7 +3640,7 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
             o.5.extend_from_slice(&km.surv);
         }
         let n = o.1.len();
-        let observed = vpc_frame(
+        let observed = r_data_frame(
             vec![
                 ("order", o.0.into()),
                 ("time", o.1.into()),
@@ -3668,7 +3665,7 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
         .iter()
         .map(|s| {
             let m = &s.mcf;
-            let mcf = vpc_frame(
+            let mcf = r_data_frame(
                 vec![
                     ("time", m.observed.time.clone().into()),
                     ("n_risk", vpc_ints(&m.observed.n_risk).into()),
@@ -3684,7 +3681,7 @@ fn vpc_rtte_to_list(vpc: &ferx_core::RtteVpc) -> Robj {
             let (gap, gap_band) = curves(&s.gap);
             let fam = |name: &str, n: usize| std::iter::repeat_n(name.to_string(), n);
             let both = || s.absolute.iter().chain(&s.gap);
-            let orders = vpc_frame(
+            let orders = r_data_frame(
                 vec![
                     (
                         "clock",
@@ -3735,7 +3732,7 @@ fn vpc_kmmc_to_list(vpc: &ferx_core::KmmcVpc) -> Robj {
         .iter()
         .map(|s| {
             let c = &s.observed;
-            let observed = vpc_frame(
+            let observed = r_data_frame(
                 vec![
                     ("time", c.time.clone().into()),
                     ("n_risk", vpc_ints(&c.n_risk).into()),
@@ -4029,16 +4026,19 @@ fn ferx_rust_npde_from_fit(
         }
 
         let ewres = pwres.clone();
-        let mut df: Robj = data_frame!(
-            ID = id,
-            TIME = time,
-            NPDE = npde,
-            NPD = npd,
-            EPRED = epred,
-            EWRES = ewres,
-            PWRES = pwres
-        )
-        .into();
+        let n = id.len();
+        let mut df: Robj = r_data_frame(
+            vec![
+                ("ID", id.into()),
+                ("TIME", time.into()),
+                ("NPDE", npde.into()),
+                ("NPD", npd.into()),
+                ("EPRED", epred.into()),
+                ("EWRES", ewres.into()),
+                ("PWRES", pwres.into()),
+            ],
+            n,
+        );
         // The single-event time-to-event records' npde (ferx-core #1889), as a fit
         // with `npde_nsim > 0` computes it: same call, same seed, so the scores
         // reproduce the fit's.
@@ -9527,8 +9527,30 @@ fn resolve_eta_names(result: &FitResult, n_eta: usize) -> Vec<String> {
     }
 }
 
+/// A data frame of `columns`, `nrow` rows each, laid out as R's `data.frame()`
+/// lays it out (compact automatic row names, `c(NA, -nrow)`), without calling
+/// R. extendr's `data_frame!` evaluates `data.frame` from the global
+/// environment, where a user's own `data.frame` shadows base's and the glue
+/// then panics (#778 review finding 5, #780); `tools/check-glue-data-frame.sh`
+/// keeps the macro out of `src/rust/src/`.
+fn r_data_frame(columns: Vec<(&str, Robj)>, nrow: usize) -> Robj {
+    let mut df = List::from_pairs(columns);
+    df.set_class(&["data.frame"]).unwrap();
+    // `i32::MIN` is R's NA_integer_; `data.frame()` gives 0 rows `integer(0)`.
+    let row_names: Vec<i32> = if nrow == 0 { Vec::new() } else { vec![i32::MIN, -(nrow as i32)] };
+    df.set_attrib("row.names", row_names).unwrap();
+    df.into()
+}
+
 // -- Helper: assemble a data.frame Robj from named columns, setting the
 // class and row.names attributes every builder below needs.
+//
+// Unlike `r_data_frame`, the row names are set as `1:nrow`, which R stores as
+// `c(NA, +nrow)`: row names that are not automatic. `identical()` cannot tell
+// the two apart, but `as.matrix()` keeps these as rownames "1".."n" and drops
+// automatic ones, and `serialize()` differs - so every caller keeps this
+// spelling rather than moving to `r_data_frame` (#780). This builder never
+// calls R either, so it needs no change for a shadowed `data.frame`.
 fn finish_df(pairs: Vec<(&str, Robj)>, nrow: usize) -> Robj {
     let mut df = List::from_pairs(pairs);
     df.set_class(&["data.frame"]).unwrap();
