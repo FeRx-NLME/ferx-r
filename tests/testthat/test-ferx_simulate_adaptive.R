@@ -1186,6 +1186,34 @@ test_that("double IDs in etas match a data.frame data's double IDs", {
 
 .adaptive_tables <- c("trajectories", "doses", "decisions", "metrics")
 
+# The contrast (`reference = "fixed"`, ferx-core #946 PR4) on the from-fit path
+# with parameter uncertainty: both arms are simulated under the same parameter
+# draws, and the adaptive arm is the run without a reference (#785 review,
+# finding 3). Mutation that reddens this: the reference arm built without
+# `with_uncertainty` (its DRAW is 1 throughout, and core refuses the pair).
+test_that("uncertainty: reference = \"fixed\" runs both arms under the same draws", {
+  one <- .run_unc(uncertainty = list(n_draws = 3L))
+  con <- .run_unc(uncertainty = list(n_draws = 3L), reference = "fixed")
+  arm <- function(df, a) {
+    out <- df[df$ARM == a, setdiff(names(df), "ARM"), drop = FALSE]
+    rownames(out) <- NULL
+    out
+  }
+  for (tbl in c(.adaptive_tables, "parameters", "summary_rows")) {
+    expect_equal(arm(con[[tbl]], "adaptive"), one[[tbl]], ignore_attr = TRUE,
+                 label = tbl)
+  }
+  expect_identical(arm(con$parameters, "reference"), arm(con$parameters, "adaptive"))
+  for (tbl in .adaptive_tables) {
+    expect_identical(sort(unique(arm(con[[tbl]], "reference")$DRAW)), 1:3,
+                     label = tbl)
+  }
+  diff_rows <- arm(con$summary_rows, "difference")
+  expect_identical(sort(unique(diff_rows$DRAW)), 1:3)
+  bands <- arm(con$summary_bands, "difference")
+  expect_true(all(bands$STATUS == "quantiles"))
+})
+
 # Mutations that redden this: the glue dropping `with_uncertainty` (every row
 # DRAW 1, no parameters), or handing the engine another n_draws than R's.
 test_that("uncertainty: n_draws = 3 tags every table DRAW 1..3, one parameters row per draw", {

@@ -18,7 +18,9 @@ ferx_simulate_adaptive(
   n_reps = 1L,
   summary_probs = c(0.05, 0.5, 0.95),
   summary_thresholds = NULL,
-  decompose = FALSE
+  decompose = FALSE,
+  reference = NULL,
+  arm_labels = NULL
 )
 }
 \arguments{
@@ -170,10 +172,30 @@ has to separate the layers: \code{n_reps >= 2}, \code{n_sim >= 2}, and
 with \code{uncertainty} at least two draws; otherwise the call is refused
 before the simulation runs, coded \code{E_ADAPTIVE_OPTIONS}. Default
 \code{FALSE}.}
+
+\item{reference}{\code{NULL} (default) for one run under the controller,
+or \code{"fixed"} for the controller's effect as a contrast (ferx-core
+#946): the same model, data, seed and options are run twice, once under
+the \code{[adaptive_dosing]} rules (the adaptive arm) and once under the
+fixed reference regimen, the block with its rules cleared, which gives
+each subject the block's start dose at every due point (its own value of
+a \code{start_dose} expression, on the \code{round_to} grid, within
+\code{dose_bounds}, on \code{start_interval}). The two arms share every
+random number - parameter draws, etas, mixture classes, IOV kappas and
+assay noise - so their difference is the controller's effect, not noise.
+It is not a fair reference for a controller with a loading dose: say so
+in \code{arm_labels}.}
+
+\item{arm_labels}{With \code{reference}: what each arm is, as
+\code{c(adaptive = ..., reference = ...)}. Defaults to
+\code{c(adaptive = "[adaptive_dosing] rules",
+reference = "start dose every due point")}. An empty label is refused,
+coded \code{E_ADAPTIVE_OPTIONS}: the reference is never implicit.}
 }
 \value{
 A list of data frames (five run tables, three summary tables and
-two decomposition tables):
+two decomposition tables; with \code{reference}, also \code{arm_labels},
+a named character vector):
 \describe{
 \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 OBSERVED - the per-observation predictions, as in
@@ -243,7 +265,14 @@ name and the decision index, as in \code{decisions$DECISION}, for
 \code{"median"} or \code{"fraction_at_least"}), THRESHOLD (the
 \code{summary_thresholds} value of a \code{"fraction_at_least"} row,
 \code{NA} otherwise), VALUE (over the draw's runs that carry the
-metric; \code{NA} when none does), N_RUNS (runs in the draw, every
+metric; \code{NA} when none does), MC_SE (the Monte Carlo standard
+error of VALUE, ferx-core #3215: the delete-one jackknife over the
+draw's sims that carry the metric, a sim being the independent
+replicate since its runs share each subject's eta; read it with a t
+on S - 1 degrees of freedom for S such sims. \code{NA} on a
+\code{"median"} row, where the jackknife is inconsistent, and with
+fewer than two such sims; \code{NaN} when VALUE is), N_RUNS (runs in
+the draw, every
 subject, SIM and REP counted equally) and N_MISSING (runs carrying no
 value, which are skipped, never imputed). \code{DISCONTINUED} is
 summarised as 1/0, so its mean is the fraction discontinued;
@@ -288,6 +317,27 @@ N_MISSING.}
 \code{DRAW} on every table is the parameter draw a row was simulated
 under: \code{1} throughout without \code{uncertainty}, \code{1} to
 \code{n_draws} with it.
+
+With \code{reference}, every table gains a first column ARM:
+\code{"adaptive"} and \code{"reference"} rows on all of them (each
+arm's rows are exactly what that arm alone gives), and on the summary
+and decomposition tables also \code{"difference"} rows, adaptive minus
+reference. The difference is paired: \code{summary_rows} holds the
+summary of the per-run differences, so its \code{"mean"} row is the mean
+effect with a paired MC_SE (one sim left out of both arms at once), its
+band the parameter uncertainty of that effect and its prediction
+interval the spread of one patient's effect; a \code{"fraction_at_least"}
+difference row is P(A - R >= threshold), while the change in attainment
+is the adaptive row minus the reference row. On
+\code{variance_components} a negative \code{"bsv"} difference at
+population scope is between-patient variance the controller removed. A
+run (or subject) whose metric is missing in either arm is missing in the
+difference, so where the arms' N_MISSING differ (a rule that stops some
+runs, say) the difference row is over the runs present in both and is
+not the adaptive row minus the reference row. The labels are the list's
+\code{arm_labels} element. In \code{simulation_warnings} a warning both
+arms raised is reported once as is; one that only one arm raised ends in
+\code{" [adaptive arm only]"} or \code{" [reference arm only]"}.
 }
 \description{
 Runs a forward simulation in which the dosing regimen is decided at run time
@@ -366,6 +416,12 @@ res <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 20L, seed = 1L,
                               summary_thresholds = list(PCT_READINGS_IN_WINDOW = 0.8))
 subset(res$summary_rows, METRIC == "PCT_READINGS_IN_WINDOW")
 subset(res$variance_components, SCOPE == "population" & METRIC == "CUM_DOSE")
+
+# The controller's effect: the same patients under the fixed start dose.
+con <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 50L, seed = 1L,
+                              reference = "fixed")
+subset(con$summary_rows, METRIC == "PCT_READINGS_IN_WINDOW" &
+                         STATISTIC == "mean")
 
 # With a fit to observed data, each fitted subject at its own EBEs:
 # ferx_simulate_adaptive(model, data, fit = fit, etas = fit$ebe_etas)

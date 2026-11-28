@@ -13,7 +13,7 @@ licenses/.
 ferx-core, ferx-tools and ferx-search are built from the ferx-core repository
 at the commit src/rust/Cargo.lock pins, which is their complete source:
 
-  https://github.com/FeRx-NLME/ferx-core/tree/00b5c3132387055cc3554f1a5b19cba47b9ccfc5
+  https://github.com/FeRx-NLME/ferx-core/tree/586c4d26362c6181b67a55b9bda10f24f90903c5
 
 Crates linked into the compiled package (name, version, declared license):
 
@@ -60,9 +60,9 @@ Crates linked into the compiled package (name, version, declared license):
   extendr-api 0.9.0  MIT
   extendr-ffi 0.9.0  MIT
   fastrand 2.5.0  Apache-2.0 OR MIT
-  ferx-core 0.4.0  MIT
-  ferx-search 0.4.0  LGPL-3.0-or-later
-  ferx-tools 0.4.0  MIT
+  ferx-core 0.5.0  MIT
+  ferx-search 0.5.0  LGPL-3.0-or-later
+  ferx-tools 0.5.0  MIT
   flate2 1.1.11  MIT OR Apache-2.0
   fnv 1.0.7  Apache-2.0 / MIT
   foldhash 0.2.0  Zlib
@@ -320,13 +320,13 @@ Per-crate notes and license texts
 * fastrand 2.5.0 (Apache-2.0 OR MIT)
   https://github.com/smol-rs/fastrand
   texts: [a60eea817514], [23f18e03dc49]
-* ferx-core 0.4.0 (MIT)
+* ferx-core 0.5.0 (MIT)
   https://github.com/FeRx-NLME/ferx-core
   texts: [c5f314b52ea6]
-* ferx-search 0.4.0 (LGPL-3.0-or-later)
+* ferx-search 0.5.0 (LGPL-3.0-or-later)
   https://github.com/FeRx-NLME/ferx-core
   texts: [3972dc9744f6], [e3a994d82e64], [f6b12c310b2f], [775776c1df10]
-* ferx-tools 0.4.0 (MIT)
+* ferx-tools 0.5.0 (MIT)
   https://github.com/FeRx-NLME/ferx-core
   texts: [f6b12c310b2f]
 * flate2 1.1.11 (MIT OR Apache-2.0)
@@ -2840,7 +2840,7 @@ DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 [c5f314b52ea6]
-ferx-core 0.4.0: LICENSE
+ferx-core 0.5.0: LICENSE
 ==============================================================================
 MIT License
 
@@ -2915,7 +2915,7 @@ not because of their licence.
 
 ==============================================================================
 [3972dc9744f6]
-ferx-search 0.4.0: COPYING
+ferx-search 0.5.0: COPYING
 ==============================================================================
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
@@ -3594,7 +3594,7 @@ Public License instead of this License.  But first, please read
 
 ==============================================================================
 [e3a994d82e64]
-ferx-search 0.4.0: COPYING.LESSER
+ferx-search 0.5.0: COPYING.LESSER
 ==============================================================================
                    GNU LESSER GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
@@ -3764,8 +3764,8 @@ Library.
 
 ==============================================================================
 [f6b12c310b2f]
-ferx-search 0.4.0: LICENSE-MIT
-ferx-tools 0.4.0: LICENSE
+ferx-search 0.5.0: LICENSE-MIT
+ferx-tools 0.5.0: LICENSE
 ==============================================================================
 MIT License
 
@@ -3791,7 +3791,7 @@ SOFTWARE.
 
 ==============================================================================
 [775776c1df10]
-ferx-search 0.4.0: NOTICE
+ferx-search 0.5.0: NOTICE
 ==============================================================================
 ferx-search
 Copyright (c) 2026 the FeRx core developer team (the ferx contributors)
