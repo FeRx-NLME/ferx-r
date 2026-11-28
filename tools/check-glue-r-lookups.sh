@@ -17,9 +17,8 @@
 #              lang!   (a call whose function `.eval()` resolves there)
 #   functions  global_var  local_var  global_function  global_env
 #   methods    .eval(  .eval_blind(   (evaluate in the global environment)
-#   eval_string / eval_string_with_params - allowed only when the first
-#              argument is a string literal that is exactly one
-#              namespace-qualified call with no arguments, as
+#   eval_string - allowed only when its argument is a string literal that
+#              is exactly one namespace-qualified call with no arguments, as
 #              `eval_string("base::tempdir()")` (`:::` too; surrounding
 #              blanks allowed). An argument list or a second expression is
 #              refused: `"base::identity(data.frame(a = 1))"` and
@@ -28,6 +27,9 @@
 #              be checked name by name without parsing R. That still
 #              resolves `::` itself from the global environment; a user who
 #              redefines `::` is past what this guard defends.
+#   eval_string_with_params - the same rule applies, so its params can
+#              never be used and in practice it is refused: build the call
+#              in Rust instead.
 #
 # A name is flagged as a macro call (`name!`, any delimiter, path-qualified
 # too), as a function or method call, or when a `use` statement names it in
