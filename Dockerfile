@@ -20,7 +20,7 @@
 # Final image based on rocker/tidyverse.
 # ===========================================================================
 # Pinned to a specific R release tag for reproducible builds (avoid :latest drift).
-FROM rocker/tidyverse:4.6.0
+FROM rocker/tidyverse:4.6.2
 
 # ferx's own code is MIT; the package and the CLI link ferx-search
 # (LGPL-3.0-or-later) and NLopt (LGPL-2.1-or-later). Their texts and notices
