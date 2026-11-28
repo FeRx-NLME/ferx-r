@@ -36,7 +36,9 @@ Or from a local clone:
 R CMD INSTALL .
 ```
 
-First install takes ~1-2 hours (Rust compilation from scratch). Subsequent installs are fast.
+The first install compiles the Rust engine once: about 4 minutes on a 4-core
+Linux CI runner, a few minutes on a typical workstation, longer on slower
+machines. Later installs reuse the build and are fast.
 
 All estimation methods (FOCE/FOCEI/SAEM/IMP) work with the standard build.
 
