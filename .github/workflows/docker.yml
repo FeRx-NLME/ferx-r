@@ -132,6 +132,16 @@ jobs:
             fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
             print(fit)
             stopifnot(is.finite(fit$ofv))'
+          # The license notices (#773): the package's own and the CLI's.
+          docker run --rm ferx-r:smoke sh -euc '
+            d=/usr/local/share/doc/ferx
+            for f in LICENSE COPYRIGHTS THIRD-PARTY-NOTICES.txt ferx-cli-LICENSES.txt \
+                     licenses/LGPL-3.0.txt licenses/GPL-3.0.txt licenses/LGPL-2.1.txt; do
+              test -s "$d/$f" || { echo "missing $d/$f" >&2; exit 1; }
+            done
+            grep -q "^  ferx-search .*LGPL-3.0-or-later" "$d/THIRD-PARTY-NOTICES.txt"
+            grep -q "src/algs/luksan" "$d/THIRD-PARTY-NOTICES.txt"
+            Rscript -e "stopifnot(nzchar(system.file(\"COPYRIGHTS\", package = \"ferx\")))"'
           docker image ls ferx-r:smoke
 
       # Before anything is pushed: no token, key, credential file, license
@@ -409,6 +419,16 @@ jobs:
             fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)
             stopifnot(is.finite(fit$ofv))
             cat("OFV", fit$ofv, "\n")'
+          # The license notices (#773): the package's own and the CLI's.
+          docker run --rm ferx-r:rstudio sh -euc '
+            d=/usr/local/share/doc/ferx
+            for f in LICENSE COPYRIGHTS THIRD-PARTY-NOTICES.txt ferx-cli-LICENSES.txt \
+                     licenses/LGPL-3.0.txt licenses/GPL-3.0.txt licenses/LGPL-2.1.txt; do
+              test -s "$d/$f" || { echo "missing $d/$f" >&2; exit 1; }
+            done
+            grep -q "^  ferx-search .*LGPL-3.0-or-later" "$d/THIRD-PARTY-NOTICES.txt"
+            grep -q "src/algs/luksan" "$d/THIRD-PARTY-NOTICES.txt"
+            Rscript -e "stopifnot(nzchar(system.file(\"COPYRIGHTS\", package = \"ferx\")))"'
           # The CLI must carry the survival feature, like the R package.
           docker run --rm ferx-r:rstudio \
             ferx check /usr/local/lib/R/site-library/ferx/examples/models/tte_exponential.ferx

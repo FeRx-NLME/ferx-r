@@ -22,6 +22,11 @@
 # Pinned to a specific R release tag for reproducible builds (avoid :latest drift).
 FROM rocker/tidyverse:4.6.0
 
+# ferx's own code is MIT; the package and the CLI link ferx-search
+# (LGPL-3.0-or-later) and NLopt (LGPL-2.1-or-later). Their texts and notices
+# are installed under /usr/local/share/doc/ferx (#773).
+LABEL org.opencontainers.image.licenses="MIT AND LGPL-3.0-or-later AND LGPL-2.1-or-later"
+
 # ---------------------------------------------------------------------------
 # 1. System build + runtime deps.
 # ---------------------------------------------------------------------------
@@ -69,6 +74,9 @@ RUN set -eux; \
     cargo +stable build --release --locked -p ferx-cli \
         --features ferx-core/ci,ferx-core/nn,ferx-core/survival; \
     install -m 0755 target/release/ferx /usr/local/bin/ferx; \
+    mkdir -p /usr/local/share/doc/ferx; \
+    /usr/local/bin/ferx --licenses > /usr/local/share/doc/ferx/ferx-cli-LICENSES.txt; \
+    grep -q 'GNU LESSER GENERAL PUBLIC LICENSE' /usr/local/share/doc/ferx/ferx-cli-LICENSES.txt; \
     cd /; \
     rm -rf /tmp/ferx-core /tmp/ferx-Cargo.lock \
            /opt/cargo/registry/cache /opt/cargo/registry/src /opt/cargo/git
@@ -76,14 +84,22 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 # 4. Copy the R package source and install it. With no sibling checkout, the
 #    Rust staticlib builds from the ferx-core commit src/rust/Cargo.lock pins
-#    (on stable: src/Makevars writes the toolchain file). Then clean all
-#    build/caching state.
+#    (on stable: src/Makevars writes the toolchain file). Copy its license
+#    notices (#773) beside the CLI's in /usr/local/share/doc/ferx, failing the
+#    build if one is missing. Then clean all build/caching state.
 # ---------------------------------------------------------------------------
 COPY . /opt/ferx
 RUN set -eux; \
     R -e "if (!requireNamespace('remotes', quietly=TRUE)) install.packages('remotes')"; \
     R -e "remotes::install_deps('/opt/ferx', dependencies=TRUE, upgrade='never')"; \
     R CMD INSTALL --no-multiarch /opt/ferx; \
+    pkg="$(Rscript -e 'cat(system.file(package = "ferx"))')"; \
+    for f in LICENSE COPYRIGHTS THIRD-PARTY-NOTICES.txt licenses/LGPL-3.0.txt \
+             licenses/GPL-3.0.txt licenses/LGPL-2.1.txt; do \
+        test -s "$pkg/$f"; \
+        mkdir -p "$(dirname /usr/local/share/doc/ferx/$f)"; \
+        cp "$pkg/$f" "/usr/local/share/doc/ferx/$f"; \
+    done; \
     rm -rf /opt/ferx/src/rust/target \
            /opt/cargo/registry/cache /opt/cargo/registry/src /opt/cargo/git \
            /tmp/Rtmp* /tmp/downloaded_packages

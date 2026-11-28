@@ -217,6 +217,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # inst/THIRD-PARTY-NOTICES.txt lists every crate the compiled package
+      # links, with its license files and the pinned ferx-core commit (#773).
+      # A pin bump or a new dependency changes that list, so a stale copy would
+      # ship wrong notices. Regenerate with tools/third-party-notices.py
+      # (tools/update-ferx-core-lock.sh does it for pin bumps).
+      - name: Verify the third-party notices match Cargo.lock
+        run: python3 tools/third-party-notices.py --check
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           extra-packages: any::rcmdcheck
@@ -272,6 +280,11 @@ jobs:
           bash tools/vendor-rust.sh
           R CMD build --no-build-vignettes --no-manual .
           tar -tzf ferx_*.tar.gz | grep -qx 'ferx/src/rust/vendor.tar.xz'
+          # The license notices ship in the source tarball (#773).
+          for f in LICENSE inst/COPYRIGHTS inst/THIRD-PARTY-NOTICES.txt \
+                   inst/licenses/LGPL-3.0.txt inst/licenses/GPL-3.0.txt inst/licenses/LGPL-2.1.txt; do
+            tar -tzf ferx_*.tar.gz | grep -qx "ferx/$f" || { echo "missing ferx/$f" >&2; exit 1; }
+          done
 
       # `unshare --net` needs root to create the namespace, but root writes
       # straight through mode 0555, so the install itself drops back to this

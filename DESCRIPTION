@@ -12,6 +12,11 @@ Description: Fast NLME estimation using FOCE/FOCEI with analytic gradients.
     gradients. Supports analytical PK models (1/2-compartment), ODE-based
     models, and compartment-free response equations.
 License: MIT + file LICENSE
+Copyright: The package's own code is MIT. Its compiled library statically
+    links third-party code under other licenses, notably ferx-search
+    (LGPL-3.0-or-later) and NLopt (LGPL-2.1-or-later); see file
+    inst/COPYRIGHTS for the copyright holders and licenses, and
+    inst/THIRD-PARTY-NOTICES.txt for every linked crate.
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 SystemRequirements: GNU make, Cargo (Rust's package manager), rustc (>= 1.70)

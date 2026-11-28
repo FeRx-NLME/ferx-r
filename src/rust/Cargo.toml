@@ -2,6 +2,12 @@
 name = "ferx"
 version = "0.2.0"
 edition = "2021"
+# The glue's own source is MIT. The staticlib it builds links ferx-search
+# (LGPL-3.0-or-later) and NLopt's Luksan routines (LGPL-2.1-or-later), so the
+# compiled package ships their notices: inst/COPYRIGHTS, inst/licenses/ and
+# inst/THIRD-PARTY-NOTICES.txt (tools/third-party-notices.py), ferx-r #773.
+# This crate is never published; the field describes its source, as ferx-cli's
+# does in ferx-core.
 license = "MIT"
 authors = ["Ron Keizer", "Teun Post"]
 

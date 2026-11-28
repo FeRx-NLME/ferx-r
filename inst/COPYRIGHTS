@@ -1,0 +1,115 @@
+ferx: copyrights and licenses
+=============================
+
+The ferx R package is built from two kinds of code with different licenses.
+Installed, this file is system.file("COPYRIGHTS", package = "ferx"); the files
+it names sit beside it.
+
+
+1. The package's own code: MIT
+------------------------------
+
+The R code (R/), the Rust glue (src/rust/src/), the build scripts, the
+documentation and the bundled examples of the ferx R package are
+
+  Copyright (c) 2026 the FeRx core developer team
+
+and licensed under the MIT License: see LICENSE (the R template, with
+DESCRIPTION's YEAR and COPYRIGHT HOLDER fields) or LICENSE.md in the source
+repository, https://github.com/FeRx-NLME/ferx-r.
+
+
+2. Code linked into the compiled package
+----------------------------------------
+
+The package's compiled library (libs/ferx.so, ferx.dll on Windows) statically
+links Rust crates fetched at build time, or unpacked from
+src/rust/vendor.tar.xz when the source tarball carries one. Among them:
+
+  ferx-core, ferx-tools    MIT License.
+                           Copyright (c) 2026 the FeRx core developer team.
+                           https://github.com/FeRx-NLME/ferx-core
+
+  ferx-search              GNU Lesser General Public License, version 3 or
+                           (at your option) any later version
+                           (LGPL-3.0-or-later). Model search:
+                           ferx_modelsearch(), ferx_covsearch(),
+                           ferx_iivsearch(), ferx_amd() and the other search
+                           tools call into it.
+                           Copyright (c) 2026 the FeRx core developer team (the
+                           ferx contributors).
+                           Parts of this crate follow the behaviour of Pharmpy
+                           (https://github.com/pharmpy/pharmpy,
+                           LGPL-3.0-or-later, (c) the Pharmpy authors) and were
+                           written with its source as a reference.
+                           The model-search code was released under the MIT
+                           License as part of ferx-tools, up to and including
+                           ferx-tools 0.4.0; those releases remain MIT.
+                           The LGPL version 3 is a set of additional
+                           permissions on top of the GNU General Public License,
+                           version 3, so both texts are included:
+                           licenses/LGPL-3.0.txt and licenses/GPL-3.0.txt.
+
+  NLopt (C library, via    The `nlopt` crate declares the MIT License, but the
+  the `nlopt` crate)       NLopt library it compiles in includes the Luksan
+                           routines (src/algs/luksan, L-BFGS among them), which
+                           are licensed LGPL-2.1-or-later, so by NLopt's own
+                           COPYING the compiled library is governed by the LGPL.
+                           Copyright (c) 2007-2024 Massachusetts Institute of
+                           Technology, and the authors named in the COPYING and
+                           COPYRIGHT files of NLopt's subdirectories; the Luksan
+                           routines are copyright Ladislav Luksan and Jan Vlcek,
+                           2007. Those files are reproduced in
+                           THIRD-PARTY-NOTICES.txt; licenses/LGPL-2.1.txt has
+                           the LGPL-2.1 text.
+
+  every other crate        THIRD-PARTY-NOTICES.txt lists each linked crate with
+                           its version and declared license, and reproduces its
+                           license, copyright and notice files verbatim (the
+                           three crates above included).
+
+THIRD-PARTY-NOTICES.txt also names the ferx-core commit the package was built
+from (the one src/rust/Cargo.lock pins). That commit of
+https://github.com/FeRx-NLME/ferx-core is the complete source of ferx-core,
+ferx-tools and ferx-search as linked here.
+
+The ferx package's own MIT license does not change the terms of the code in
+this section: anyone distributing the compiled package distributes that code
+too, and must follow its licenses.
+
+
+3. Using a modified ferx-search
+-------------------------------
+
+ferx-search is linked statically. The LGPL entitles you to rebuild the package
+against a modified ferx-search, and the package's build supports that directly:
+
+  1. Get the source of this ferx version: the source package (ferx_<version>.tar.gz)
+     or the matching tag of https://github.com/FeRx-NLME/ferx-r. Unpack it so
+     the package directory is, say, work/ferx.
+
+  2. Clone ferx-core next to it, as work/ferx-core, at the commit named in
+     THIRD-PARTY-NOTICES.txt (also in work/ferx/src/rust/Cargo.lock):
+
+       git clone https://github.com/FeRx-NLME/ferx-core work/ferx-core
+       git -C work/ferx-core checkout <commit>
+
+  3. Edit work/ferx-core/crates/ferx-search.
+
+  4. Install: R CMD INSTALL work/ferx
+
+src/Makevars finds the sibling ../ferx-core checkout and builds ferx-core,
+ferx-tools and ferx-search from it instead of the pinned revision; its last
+line reads "ferx: the sibling supplied ALL of ...". The build needs a stable
+Rust toolchain and cargo, as any source install of ferx does.
+
+
+4. License texts in this package
+--------------------------------
+
+  LICENSE                   MIT License template (DESCRIPTION fields)
+  COPYRIGHTS                this file
+  THIRD-PARTY-NOTICES.txt   every linked crate and its license files
+  licenses/LGPL-3.0.txt     GNU LGPL, version 3     (ferx-search)
+  licenses/GPL-3.0.txt      GNU GPL, version 3      (ferx-search)
+  licenses/LGPL-2.1.txt     GNU LGPL, version 2.1   (NLopt / Luksan)
