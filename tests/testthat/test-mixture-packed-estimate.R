@@ -78,6 +78,42 @@ test_that("ferx_simulate_with_uncertainty() reads the overrides from the packed 
   expect_setequal(unique(full$MIXNUM), 1:2)
 })
 
+# The four TTE readers, on the fixture with two competing TTE endpoints
+# (cause A's hazard carries ETA_CL). The VPCs simulate their replicates, so
+# they rebuild the classes and refused such a fit; ferx_predict_survival()
+# reads no class matrix and must not change a row (#803 review).
+mp_tte_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      fit <<- muffle_mixl_lint(ferx_fit(
+        test_path("fixtures", "mixture_tte.ferx"), test_path("fixtures", "mixture_tte.csv"),
+        method = "focei", verbose = FALSE
+      ))
+    }
+    fit
+  }
+})
+
+test_that("the TTE VPCs and ferx_predict_survival() read the overrides from the packed estimate (#675)", {
+  mod <- test_path("fixtures", "mixture_tte.ferx")
+  dat <- test_path("fixtures", "mixture_tte.csv")
+  fit <- mp_tte_fit()
+  expect_true(fit$converged)
+  expect_same_without_override_values(fit, function(f) {
+    ferx_vpc_tte(mod, dat, n_sim = 20L, seed = 1L, fit = f, cmt = 2L)
+  })
+  expect_same_without_override_values(fit, function(f) {
+    ferx_vpc_kmmc(mod, dat, covariate = "WT", n_sim = 20L, seed = 1L, fit = f, cmt = 2L)
+  })
+  expect_same_without_override_values(fit, function(f) {
+    ferx_vpc_cif(mod, dat, n_sim = 20L, seed = 1L, fit = f)
+  })
+  expect_same_without_override_values(fit, function(f) {
+    ferx_predict_survival(mod, dat, times = c(0, 6, 12), fit = f)
+  })
+})
+
 test_that("ferx_predict(fit = ) predicts as the full fit (#675)", {
   # PRED reads no class Omega/Sigma, so this path never refused such a fit; the
   # packed estimate now reaches it too and must not change a row.
