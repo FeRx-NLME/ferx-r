@@ -161,26 +161,59 @@ test_that("a retired section is labelled retired, not unknown", {
   expect_true(any(grepl("initial_values +\\[retired section\\]", out)))
   expect_false(any(grepl("unknown section", out, fixed = TRUE)))
 })
-test_that("a feature-gated section is labelled disabled, not unknown", {
-  # The engine recognises its feature-gated block names in every build but
-  # accepts each only with its cargo feature: `markov_model` needs `markov`,
-  # the others `survival`. A gated-off block is absent from
-  # `ferx_rust_known_blocks()` while the parser still reports it precisely.
-  # The default build (src/Makevars: ci,nn,survival,markov) enables all of
-  # them since #788, so this runs only in a build that drops one, such as
-  # CARGO_FEATURES="--no-default-features --features ci,nn,survival".
-  gated <- c("markov_model", "event_model", "binary_model", "count_model")
-  off <- setdiff(gated, ferx:::ferx_rust_known_blocks())
-  skip_if(length(off) == 0L, "this build enables every feature-gated block")
-  block <- off[[1L]]
-  lines <- c(VALID_WARFARIN_SECTIONS, "", paste0("[", block, "]"), "  cmt = 3")
-  path  <- write_ferx(lines)
-  on.exit(unlink(path))
+# The engine recognises its feature-gated block names in every build but
+# accepts each only with its cargo feature. A gated-off block is absent from
+# `ferx_rust_known_blocks()` while the parser still reports it precisely, with
+# `E_BLOCK_FEATURE_DISABLED`. `markov_model` is the only block a build can lack
+# without lacking `survival` too (ferx-core's `markov` implies `survival`, which
+# gates `event_model`, `binary_model` and `count_model`), so it is the example.
+# The default build enables every gated block since #788, so the label is
+# tested twice: against a mocked engine in every build, and against the real
+# engine in a build that drops markov, such as
+# CARGO_FEATURES="--no-default-features --features ci,nn,survival".
+expect_gated_label <- function(path) {
   out <- capture.output(res <- ferx_model_validate(path))
   expect_false(isTRUE(res$ok))
   expect_true("E_BLOCK_FEATURE_DISABLED" %in% res$diagnostics$code)
-  expect_true(any(grepl(paste0(block, " +\\[feature not enabled\\]"), out)))
+  expect_true(any(grepl("markov_model +\\[feature not enabled\\]", out)))
   expect_false(any(grepl("unknown section", out, fixed = TRUE)))
+}
+gated_model <- function() {
+  write_ferx(c(VALID_WARFARIN_SECTIONS, "", "[markov_model]", "  cmt = 3"))
+}
+test_that("a feature-gated section is labelled disabled, not unknown (mocked engine)", {
+  # The engine as a no-markov build answers: `markov_model` missing from the
+  # known list, and the parse refused with E_BLOCK_FEATURE_DISABLED on it.
+  real_known <- ferx:::ferx_rust_known_blocks
+  real_validate <- ferx:::ferx_rust_validate_model
+  local_mocked_bindings(
+    ferx_rust_known_blocks = function() setdiff(real_known(), "markov_model"),
+    ferx_rust_validate_model = function(path, data) {
+      r <- real_validate(path, data)
+      r$ok <- FALSE
+      r$severity <- c(r$severity, "error")
+      r$code <- c(r$code, "E_BLOCK_FEATURE_DISABLED")
+      r$message <- c(r$message, "[markov_model] needs the `markov` feature")
+      r$block <- c(r$block, "markov_model")
+      r$line <- c(r$line, 0L)
+      r$suggestion <- c(r$suggestion, "")
+      r
+    },
+    .package = "ferx"
+  )
+  path <- gated_model()
+  # `add = TRUE`: a bare on.exit() here would replace the handler that
+  # local_mocked_bindings() registered, leaving the engine mocked for every
+  # later test in the file.
+  on.exit(unlink(path), add = TRUE)
+  expect_gated_label(path)
+})
+test_that("a feature-gated section is labelled disabled, not unknown (real engine)", {
+  skip_if("markov_model" %in% ferx:::ferx_rust_known_blocks(),
+          "this build enables the markov feature")
+  path <- gated_model()
+  on.exit(unlink(path))
+  expect_gated_label(path)
 })
 test_that("syntax error in model body returns FALSE and prints errors", {
   lines <- c(
