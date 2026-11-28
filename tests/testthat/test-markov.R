@@ -38,10 +38,12 @@ test_that("a 2-state CTMM fit matches NONMEM METHOD=0 (#788)", {
 test_that("a 2-state DTMM at NONMEM's estimates reproduces its OFV (#788)", {
   # maxiter = 0: one evaluation at NONMEM's final estimates. NONMEM's LAPLACE
   # OFV is 1049.4031789; the exact Laplace objective is 1049.4079889, which
-  # ferx's sits 2e-4 from (Linux and macOS alike).
+  # ferx's sits 2.6e-8 from (macOS arm64, pin 00b5c313: 1049.4079889261). The
+  # 1e-5 bound leaves room for the ~5e-6 Linux/macOS spread ferx-core recorded
+  # on this fixture, and is still 500x tighter than the NONMEM gap below.
   fit <- ferx_fit(markov_fixture("dtmm_2state_at_nonmem.ferx"),
                   markov_fixture("dtmm_2state.csv"), verbose = FALSE)
-  expect_lt(abs(fit$ofv - 1049.4079889), 1e-3)
+  expect_lt(abs(fit$ofv - 1049.4079889), 1e-5)
   expect_lt(abs(fit$ofv - 1049.4031789), 0.01)
   expect_named(fit$theta, c("A_AS", "B_DOSE", "A_SA"))
   expect_identical(rownames(fit$omega), c("ETA_AS", "ETA_SA"))
@@ -60,6 +62,32 @@ test_that("a 2-state DTMM at NONMEM's estimates reproduces its OFV (#788)", {
   # then assert them here.
   expect_identical(nrow(fit$sdtab), 0L)
   expect_true(all(fit$subject_summary$n_obs_discrete == 0L))
+})
+
+test_that("simulate and predict refuse a Markov model with a coded error (#788)", {
+  # The engine has no Markov simulation or prediction yet (ferx-core #820 for
+  # the CTMM). A refusal is the right answer until it does; this reddens if a
+  # pin bump turns it into empty output or starts simulating, which is when
+  # the R side needs checking.
+  cases <- list(
+    ctmm = c("ctmm_2state.ferx", "ctmm_2state.csv"),
+    dtmm = c("dtmm_2state_at_nonmem.ferx", "dtmm_2state.csv")
+  )
+  for (k in names(cases)) {
+    model <- markov_fixture(cases[[k]][[1L]])
+    data <- markov_fixture(cases[[k]][[2L]])
+    fit <- ferx_fit(model, data, verbose = FALSE)
+    calls <- list(
+      simulate = function() ferx_simulate(model, data, n_sim = 1L),
+      simulate_fit = function() ferx_simulate(model, data, n_sim = 1L, fit = fit),
+      predict = function() ferx_predict(model, data)
+    )
+    for (call in names(calls)) {
+      err <- expect_error(calls[[call]](), class = "ferx_engine_error",
+                          info = paste(k, call))
+      expect_identical(err$code, "E_CTMM_UNSUPPORTED", info = paste(k, call))
+    }
+  }
 })
 
 test_that("a Markov fit survives ferx_save_fit()/ferx_load_fit() (#788)", {
