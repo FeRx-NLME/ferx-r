@@ -205,7 +205,8 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run, skipped draws included (ferx-r #426).
-  .ferx_surface_sim_warnings(res, "ferx_simulate_with_uncertainty")
+  .ferx_surface_sim_warnings(res, "ferx_simulate_with_uncertainty",
+                             selection = selection)
 }
 
 # Internal: pull the uncertainty payload out of a ferx_fit result, validate it

@@ -147,7 +147,10 @@
 #'       \code{[data_selection]} and any \code{ferx_fit(ignore =, accept =,
 #'       ignore_ids =)}), applied to every record it removed, doses included,
 #'       and the fit's skip of a record with an empty \code{DV}. On the fit's
-#'       own model and data the rows are the ones the fit was scored on: the
+#'       own model and data (its files, or files whose bytes still hash to
+#'       \code{fit$model_hash} / \code{fit$data_hash}, such as the originals
+#'       of a fit reloaded with \code{\link{ferx_load_fit}}) the rows are the
+#'       ones the fit was scored on: the
 #'       continuous (Gaussian) observation rows of a simulation or prediction
 #'       are \code{fit$sdtab}'s, in order, and a survival prediction or a VPC
 #'       covers the fit's subjects. They are checked against
@@ -323,7 +326,7 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
   # Surface per-subject simulation diagnostics from ferx-core (#762/#763): a
   # degenerate or pathological hazard that would otherwise censor a subject with
   # no signal is attached by the Rust glue as a `simulation_warnings` attribute.
-  .ferx_surface_sim_warnings(res)
+  .ferx_surface_sim_warnings(res, selection = selection)
 }
 
 # Emit the diagnostics attached by the Rust glue as a `simulation_warnings`
@@ -331,13 +334,29 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
 # (#762/#763) plus every data-reader diagnostic the engine raised for the dataset
 # (#283) - as a single R warning, so they are not silently lost; return `res`
 # unchanged (the attribute is left in place for programmatic access).
-.ferx_surface_sim_warnings <- function(res, fn = "ferx_simulate") {
+#
+# `selection` is the caller's, for a step whose "all" read keeps an empty-DV
+# record as a design point (simulate / predict): under "fit" the fit's skip
+# drops it, and core's `W_MISSING_DV` advice is a fit's, so the warning says
+# how to simulate those records instead (#797 review 1).
+.ferx_surface_sim_warnings <- function(res, fn = "ferx_simulate",
+                                       selection = "all") {
   w <- attr(res, "simulation_warnings", exact = TRUE)
   if (length(w) > 0L) {
+    hint <- if (identical(selection, "fit") &&
+                any(startsWith(w, "W_MISSING_DV"))) {
+      paste0(
+        "\n  Under selection = \"fit\" the records with an empty DV are ",
+        "skipped, as the fit skipped them; pass selection = \"all\" to ",
+        "simulate or predict at them."
+      )
+    } else {
+      ""
+    }
     warning(
       fn, " produced ", length(w), " diagnostic",
       if (length(w) > 1L) "s" else "", ":\n  ",
-      paste(w, collapse = "\n  "),
+      paste(w, collapse = "\n  "), hint,
       call. = FALSE
     )
   }

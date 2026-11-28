@@ -597,15 +597,72 @@ test_that("T17: selection = \"fit\" skips an empty-DV design record, as the fit 
   grid <- withr::local_tempfile(fileext = ".csv")
   utils::write.csv(rows, grid, row.names = FALSE, quote = FALSE, na = ".")
   expect_identical(nrow(sel_sim(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit)), 110L)
-  expect_warning(
-    sim <- ferx_simulate(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit,
-                         selection = "fit"),
-    "W_MISSING_DV: 110 observation row(s)", fixed = TRUE
+  w <- tryCatch(
+    ferx_simulate(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit, selection = "fit"),
+    warning = function(w) conditionMessage(w)
   )
-  expect_identical(nrow(sim), 0L)
+  expect_match(w, "W_MISSING_DV: 110 observation row(s)", fixed = TRUE)
+  # Core's advice is a fit's; the warning also says how to simulate them.
+  expect_match(w, "pass selection = \"all\" to simulate or predict at them", fixed = TRUE)
   expect_identical(nrow(suppressWarnings(
-    ferx_predict(ex$model, grid, fit = fit, selection = "fit")
+    ferx_simulate(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit, selection = "fit")
   )), 0L)
+  expect_warning(
+    pred <- ferx_predict(ex$model, grid, fit = fit, selection = "fit"),
+    "pass selection = \"all\"", fixed = TRUE
+  )
+  expect_identical(nrow(pred), 0L)
+  # Under "all" the records are simulated, and there is nothing to point to.
+  expect_no_match(
+    tryCatch(ferx_simulate(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit),
+             warning = function(w) conditionMessage(w)),
+    "pass selection", fixed = TRUE
+  )
+})
+
+test_that("T18: a loaded fit's original model and data are still the fit's own (#797 review 1)", {
+  # ferx_load_fit() stages the model to a new file; the original still hashes
+  # to the fit's model_hash, so "fit" replays the whole record on it. A byte
+  # copy of the data at another path hashes to its data_hash, so the
+  # fingerprint is checked.
+  ex <- ferx_example("warfarin_data_selection")
+  fit <- warfarin_sel_fit()
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  suppressWarnings(ferx_save_fit(fit, path))
+  loaded <- suppressWarnings(ferx_load_fit(path))
+  expect_false(identical(normalizePath(loaded$model_path), normalizePath(ex$model)))
+  expect_null(loaded$data_source)
+  data_copy <- withr::local_tempfile(fileext = ".csv")
+  file.copy(ex$data, data_copy)
+  reading <- function(model, data) {
+    seen <- NULL
+    local_mocked_bindings(
+      ferx_rust_simulate_from_fit = function(...) {
+        seen <<- list(...)$fit_reading
+        stop("captured")
+      },
+      .package = "ferx"
+    )
+    expect_error(ferx_simulate(model, data, n_sim = 1L, fit = loaded,
+                               selection = "fit"), "captured")
+    seen
+  }
+  own <- reading(ex$model, data_copy)
+  expect_true(own$model_is_fits)
+  expect_true(nzchar(own$population_fingerprint))
+  expect_sdtab_rows(sel_sim(ex$model, data_copy, n_sim = 1L, seed = 1L, fit = loaded,
+                            selection = "fit"), loaded)
+  # A model file with other bytes is an override: the selection alone, and no
+  # fingerprint check.
+  other <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(c(readLines(ex$model), "# edited"), other)
+  over <- reading(other, data_copy)
+  expect_false(over$model_is_fits)
+  expect_identical(over$population_fingerprint, "")
+  # Data with other bytes is not the fit's: no fingerprint check either.
+  rows <- utils::read.csv(ex$data, na.strings = ".")
+  other_data <- rs_csv_without(ex$data, seq_len(nrow(rows)) == nrow(rows))
+  expect_identical(reading(ex$model, other_data)$population_fingerprint, "")
 })
 
 test_that("T9: ferx_simulate_with_uncertainty(selection = \"fit\") simulates the fit's rows (#793)", {

@@ -95,5 +95,5 @@ ferx_predict <- function(model, data = NULL, fit = NULL,
   # engine's non-fit warning bundle for this pass (ferx-r #283, #426). Unlike
   # simulate it has no capped steady-state equilibration notes: core's
   # `predict_diag` does not report them.
-  .ferx_surface_sim_warnings(res, "ferx_predict")
+  .ferx_surface_sim_warnings(res, "ferx_predict", selection = selection)
 }
