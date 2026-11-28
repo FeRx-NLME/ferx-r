@@ -349,7 +349,8 @@ Every table gains a leading `ARM` column. Run tables (`doses`, `metrics`, ...)
 hold an `"adaptive"` and a `"reference"` arm. The summary tables add
 `"difference"` rows, adaptive minus reference, computed from the paired
 per-run differences. So the difference's `MC_SE` (the jackknife Monte Carlo
-standard error that every `"mean"` and `"fraction_at_least"` row carries) is
+standard error of each `"mean"` and `"fraction_at_least"` row, `NA` with
+fewer than two sims) is
 the paired one: it leaves the same sim out of both arms at once, so it
 accounts for the arms' correlation, which combining their own SEs as
 `sqrt(se_A^2 + se_R^2)` ignores. Add

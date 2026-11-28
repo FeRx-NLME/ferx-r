@@ -195,7 +195,8 @@
 #'   coded \code{E_ADAPTIVE_OPTIONS}: the reference is never implicit.
 #'
 #' @return A list of data frames (five run tables, three summary tables and
-#'   two decomposition tables):
+#'   two decomposition tables; with \code{reference}, also \code{arm_labels},
+#'   a named character vector):
 #'   \describe{
 #'     \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 #'       OBSERVED - the per-observation predictions, as in
@@ -271,7 +272,8 @@
 #'       replicate since its runs share each subject's eta; read it with a t
 #'       on S - 1 degrees of freedom for S such sims. \code{NA} on a
 #'       \code{"median"} row, where the jackknife is inconsistent, and with
-#'       fewer than two such sims), N_RUNS (runs in the draw, every
+#'       fewer than two such sims; \code{NaN} when VALUE is), N_RUNS (runs in
+#'       the draw, every
 #'       subject, SIM and REP counted equally) and N_MISSING (runs carrying no
 #'       value, which are skipped, never imputed). \code{DISCONTINUED} is
 #'       summarised as 1/0, so its mean is the fraction discontinued;
@@ -331,7 +333,12 @@
 #'   \code{variance_components} a negative \code{"bsv"} difference at
 #'   population scope is between-patient variance the controller removed. A
 #'   run (or subject) whose metric is missing in either arm is missing in the
-#'   difference. The labels are the list's \code{arm_labels} element.
+#'   difference, so where the arms' N_MISSING differ (a rule that stops some
+#'   runs, say) the difference row is over the runs present in both and is
+#'   not the adaptive row minus the reference row. The labels are the list's
+#'   \code{arm_labels} element. In \code{simulation_warnings} a warning both
+#'   arms raised is reported once as is; one that only one arm raised ends in
+#'   \code{" [adaptive arm only]"} or \code{" [reference arm only]"}.
 #'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #'
@@ -636,12 +643,13 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
   })
   out$arm_labels <- arm_labels
   # A warning both arms raised applies to both and is reported once; one that
-  # only one arm raised names it (#785 review, finding 4).
+  # only one arm raised names it (#785 review, finding 4), after the text, so
+  # a leading `W_...` code stays where a filter on it looks.
   w_a <- as.character(attr(res$adaptive, "simulation_warnings", exact = TRUE))
   w_r <- as.character(attr(res$reference, "simulation_warnings", exact = TRUE))
   tag <- function(w, other, arm) {
     lone <- !w %in% other
-    w[lone] <- paste0(arm, " arm: ", w[lone])
+    w[lone] <- paste0(w[lone], " [", arm, " arm only]")
     w
   }
   attr(out, "simulation_warnings") <-

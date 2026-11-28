@@ -60,8 +60,8 @@ test_that("summary_rows carries MC_SE: NA on median rows, set on mean rows", {
   mean_cd <- rows[rows$STATISTIC == "mean" & rows$METRIC == "CUM_DOSE", ]
   expect_false(anyNA(mean_cd$MC_SE))
   expect_true(all(mean_cd$MC_SE >= 0))
-  # It is the jackknife over sims: n_sim = 5 sims of one subject, so the SE of
-  # the mean is sd(per-sim value) / sqrt(5).
+  # It is the jackknife over sims: every one of the 5 sims holds the same
+  # subjects, so the SE of the mean is sd(per-sim mean) / sqrt(5).
   m <- res$metrics
   per_sim <- tapply(m$CUM_DOSE, m$SIM, mean)
   expect_equal(mean_cd$MC_SE, stats::sd(per_sim) / sqrt(length(per_sim)),
@@ -175,8 +175,14 @@ test_that("the arms' warnings are merged, a one-arm warning tagged with its arm"
   out <- ferx:::.ferx_adaptive_stack_arms(
     res, c(adaptive = "A", reference = "R"))
   expect_identical(attr(out, "simulation_warnings"),
-                   c("shared", "adaptive arm: adaptive only",
-                     "reference arm: reference only"))
+                   c("shared", "adaptive only [adaptive arm only]",
+                     "reference only [reference arm only]"))
+  # The tag follows the text, so a warning still starts with its code.
+  coded <- ferx:::.ferx_adaptive_stack_arms(
+    list(adaptive = arm("W_X: rule"), reference = arm(character(0)),
+         difference = list()),
+    c(adaptive = "A", reference = "R"))
+  expect_true(startsWith(attr(coded, "simulation_warnings"), "W_X"))
   none <- ferx:::.ferx_adaptive_stack_arms(
     list(adaptive = arm(character(0)), reference = arm(character(0)),
          difference = list()),
@@ -209,7 +215,7 @@ test_that("the data's occasion note is shared by both arms, untagged", {
                                                  seed = 1L, reference = "fixed"))
   w <- attr(con, "simulation_warnings")
   expect_identical(sum(w == msg), 1L)
-  expect_false(any(grepl("arm: iov_occasion", w, fixed = TRUE)))
+  expect_false(any(grepl("arm only]", w, fixed = TRUE)))
 })
 
 test_that("a regimen contrasted with itself has zero difference, exactly", {

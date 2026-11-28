@@ -194,7 +194,8 @@ coded \code{E_ADAPTIVE_OPTIONS}: the reference is never implicit.}
 }
 \value{
 A list of data frames (five run tables, three summary tables and
-two decomposition tables):
+two decomposition tables; with \code{reference}, also \code{arm_labels},
+a named character vector):
 \describe{
 \item{\code{trajectories}}{DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,
 OBSERVED - the per-observation predictions, as in
@@ -270,7 +271,8 @@ draw's sims that carry the metric, a sim being the independent
 replicate since its runs share each subject's eta; read it with a t
 on S - 1 degrees of freedom for S such sims. \code{NA} on a
 \code{"median"} row, where the jackknife is inconsistent, and with
-fewer than two such sims), N_RUNS (runs in the draw, every
+fewer than two such sims; \code{NaN} when VALUE is), N_RUNS (runs in
+the draw, every
 subject, SIM and REP counted equally) and N_MISSING (runs carrying no
 value, which are skipped, never imputed). \code{DISCONTINUED} is
 summarised as 1/0, so its mean is the fraction discontinued;
@@ -330,7 +332,12 @@ is the adaptive row minus the reference row. On
 \code{variance_components} a negative \code{"bsv"} difference at
 population scope is between-patient variance the controller removed. A
 run (or subject) whose metric is missing in either arm is missing in the
-difference. The labels are the list's \code{arm_labels} element.
+difference, so where the arms' N_MISSING differ (a rule that stops some
+runs, say) the difference row is over the runs present in both and is
+not the adaptive row minus the reference row. The labels are the list's
+\code{arm_labels} element. In \code{simulation_warnings} a warning both
+arms raised is reported once as is; one that only one arm raised ends in
+\code{" [adaptive arm only]"} or \code{" [reference arm only]"}.
 }
 \description{
 Runs a forward simulation in which the dosing regimen is decided at run time
