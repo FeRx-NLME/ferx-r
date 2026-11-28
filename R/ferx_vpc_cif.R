@@ -111,13 +111,16 @@
 #'
 #' @seealso \code{\link{plot.ferx_vpc_cif}}, \code{\link{ferx_vpc_tte}},
 #'   \code{\link{ferx_predict_survival}}
+#' @inheritParams ferx_simulate
 #' @family simulation
 #' @export
 ferx_vpc_cif <- function(model, data = NULL, n_sim = 200L, seed = 42L,
                          fit = NULL, strata = NULL, by_dose = FALSE,
                          censoring = c("observed", "horizon"), horizon = NULL,
-                         probs = c(0.05, 0.5, 0.95), grid = "auto") {
+                         probs = c(0.05, 0.5, 0.95), grid = "auto",
+                         selection = c("all", "fit")) {
   censoring <- match.arg(censoring)
+  selection <- .ferx_selection_arg(selection, fit, "ferx_vpc_cif")
   args <- .ferx_vpc_args(model, data, fit, n_sim, seed, strata, by_dose,
                          censoring, NULL, horizon, probs, grid)
   # Every TTE endpoint is a cause: the glue takes no `cmt`.
@@ -126,7 +129,7 @@ ferx_vpc_cif <- function(model, data = NULL, n_sim = 200L, seed = 42L,
   # ferx_vpc_tte() calls for such an endpoint.
   res <- .ferx_engine_spelling(
     .ferx_vpc_call(args, fit, ferx_rust_vpc_cif, ferx_rust_vpc_cif_from_fit,
-                   list(), "ferx_vpc_cif"),
+                   list(), "ferx_vpc_cif", selection),
     "E_VPC_TTE_INPUT", "`vpc_rtte`", "`ferx_vpc_tte()`"
   )
   structure(

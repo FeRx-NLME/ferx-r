@@ -9,7 +9,8 @@ ferx_predict_survival(
   data = NULL,
   times,
   fit = NULL,
-  type = c("population", "individual")
+  type = c("population", "individual"),
+  selection = c("all", "fit")
 )
 }
 \arguments{
@@ -42,6 +43,36 @@ model is refused (\code{E_SUPPLIED_ETAS}). On a fit whose
 single-event record without delayed entry, \code{cum_hazard} at the
 record's time is the \eqn{H(T_i)} the fit's likelihood evaluated
 (ferx-core #1885).}
+
+\item{selection}{Which records of \code{data} are read, when \code{fit} is
+given:
+\describe{
+\item{\code{"all"}}{(default) every record in \code{data}, whatever
+data selection the fit was made with - what this function has always
+done.}
+\item{\code{"fit"}}{the data as \code{fit} read them: the fit's own
+data selection (\code{fit$reader_settings}: the model file's
+\code{[data_selection]} and any \code{ferx_fit(ignore =, accept =,
+    ignore_ids =)}), applied to every record it removed, doses included,
+and the fit's skip of a record with an empty \code{DV}. On the fit's
+own model and data (its files; for the model also a file whose bytes
+still hash to \code{fit$model_hash}, such as the original of a fit
+reloaded with \code{\link{ferx_load_fit}}) the rows are the ones the
+fit was scored on: the
+continuous (Gaussian) observation rows of a simulation or prediction
+are \code{fit$sdtab}'s, in order, and a survival prediction or a VPC
+covers the fit's subjects. They are checked against
+\code{fit$population_fingerprint}, so a data file edited since the
+fit is refused with code \code{E_POPULATION_MISMATCH}. On another
+model file only the fit's selection is replayed, and on another data
+file nothing is checked. Needs \code{fit}.}
+}
+A fit made before the selection was recorded is refused under
+\code{"fit"} when its \code{fit$exclusions} show a clause its model file
+does not state. For a simulation the two are different runs, not one
+and a filter of it: with the same \code{seed}, removing records moves
+the random stream, so \code{"fit"} is not \code{"all"} with some rows
+dropped.}
 }
 \value{
 A data.frame with columns: ID, CMT, TIME, survival, cum_hazard,

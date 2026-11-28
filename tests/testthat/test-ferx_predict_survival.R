@@ -521,3 +521,39 @@ test_that("type = \"individual\" on a fit without random effects is the populati
     surv(model, data, times = c(0, 6), fit = fit)
   )
 })
+
+# --- #793: selection = "fit" ---------------------------------------------------
+# Every fit here runs on FD.
+
+test_that("T13: ferx_predict_survival(selection = \"fit\") covers the fit's subjects (#793)", {
+  ex <- ferx_example("tte_exponential")
+  fit <- rs_tte_subjects_fit()
+  rows <- utils::read.csv(ex$data)
+  ids <- unique(rows$ID)
+  expect_length(ids, 30L)
+  kept <- as.character(setdiff(ids, rs_first_ids(rows)))
+  run <- function(...) suppressWarnings(
+    ferx_predict_survival(ex$model, times = c(1, 5), fit = fit, ...)
+  )
+  expect_identical(unique(run(selection = "fit")$ID), kept)
+  # T16: the default is "all", every subject in the data.
+  default <- run()
+  expect_identical(default, run(selection = "all"))
+  expect_identical(unique(default$ID), as.character(ids))
+})
+
+test_that("T6: ferx_predict_survival(selection = \"fit\") refuses an unstated legacy selection (#793)", {
+  ex <- ferx_example("tte_exponential")
+  fit <- rs_legacy(rs_tte_subjects_fit())
+  e <- tryCatch(
+    suppressWarnings(ferx_predict_survival(ex$model, times = 1, fit = fit,
+                                           selection = "fit")),
+    error = function(e) e
+  )
+  expect_s3_class(e, "error")
+  expect_match(conditionMessage(e), "ferx_predict_survival: this fit predates", fixed = TRUE)
+  expect_match(conditionMessage(e), "(from `ignore_ids` / `ignore_subjects`)", fixed = TRUE)
+  expect_match(conditionMessage(e), "selection = \"all\"", fixed = TRUE)
+  expect_error(ferx_predict_survival(ex$model, ex$data, times = 1, selection = "fit"),
+               "ferx_predict_survival: selection = \"fit\" needs `fit`", fixed = TRUE)
+})

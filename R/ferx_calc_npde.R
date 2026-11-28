@@ -135,23 +135,10 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     stop("`fit$sdtab` is empty; cannot attach NPDE/NPD. Refit so the fit carries an sdtab.")
   }
 
-  # A `model =` override keeps its own reader settings and has no recorded
-  # hash; only the fit's selection is replayed on it (#526 review 3, 4).
-  model_is_fits <- is.null(model) ||
-    identical(normalizePath(model, mustWork = FALSE),
-              normalizePath(fit$model_path %||% "", mustWork = FALSE))
-  data <- .ferx_data_arg(data)
-  data_override <- data
-  # `data =` naming the fit's own file is still the fit's data; so is a frame
-  # whose CSV text is the fit's `data_source`, whatever path it was written to
-  # (a later session, a loaded fit, #419).
-  data_is_fits <- is.null(data) ||
-    identical(normalizePath(data, mustWork = FALSE),
-              normalizePath(fit$data_path %||% "", mustWork = FALSE)) ||
-    (!is.null(fit$data_source) && file.exists(data) &&
-       identical(.ferx_read_data_text(data), fit$data_source))
+  model_override <- model
+  data_override <- .ferx_data_arg(data)
   model <- model %||% fit$model_path
-  data  <- data  %||% .ferx_fit_data_path(fit)
+  data  <- data_override %||% .ferx_fit_data_path(fit)
   if (is.null(model) || is.na(model) || !file.exists(model)) {
     stop("No usable model file: pass `model=` or refit so `fit$model_path` is set.")
   }
@@ -159,29 +146,18 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
     stop("No usable data file: pass `data=` or refit so `fit$data_path` is set.")
   }
 
-  # On the fit's own model and data the engine checks the re-read population
-  # against the fit's fingerprint (ferx-core #1814): a data file edited since
-  # the fit is refused with E_POPULATION_MISMATCH. That includes `model =` /
-  # `data =` naming the fit's own files. Another model or data file is not
-  # the fit's population by construction, so it is not checked.
-  reader_args <- .ferx_fit_reader_args(fit)
-  fingerprint <- if (model_is_fits && data_is_fits) {
-    reader_args$population_fingerprint
-  } else {
-    ""
-  }
-
-  .ferx_refuse_unrecorded_selection(
-    fit, "ferx_calc_npde",
+  # The NPDE are scored on the rows the fit was scored on, always: the fit's
+  # reading (#793), its selection replayed on whichever file is read (#416)
+  # and, on the fit's own model and data, the re-read population checked
+  # against its fingerprint (ferx-core #1814).
+  fit_reading <- .ferx_fit_reading(
+    fit, "fit", "ferx_calc_npde",
     paste0(
       "Refit with `ferx_fit(..., settings = list(npde_nsim = ", nsim, "))`, ",
       "or refit and call ferx_calc_npde() on the new fit."
     ),
-    model_path = model,
-    model_hash = if (model_is_fits) fit$model_hash else "",
-    data = data_override,
-    data_path = data,
-    fingerprint = fingerprint
+    model_path = model, data_path = data,
+    model = model_override, data = data_override
   )
 
   # A refusal (bad params, unreadable data, ...) is an R error, classed like a
@@ -200,10 +176,7 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
       residual_rho_pairs = fit_pieces$residual_rho_pairs,
       mixture_overrides = fit_pieces$mixture_overrides,
       fit_bindings = fit_pieces$fit_bindings,
-      # The fit's own selection, replayed on whichever file is read (#416).
-      reader_settings = reader_args$reader_settings,
-      model_is_fits = model_is_fits,
-      population_fingerprint = fingerprint,
+      fit_reading = fit_reading,
       # The fit's IOV occasion rule: a `dose` / `time(...)` rule derives the
       # occasion labels the kappa reference draw needs (ferx-core #1980).
       iov_occasion = as.character(fit$iov_occasion %||% ""),

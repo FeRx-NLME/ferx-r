@@ -225,6 +225,85 @@ validate_fit_for_params <- function(fit) {
   )
 }
 
+# The `selection` argument of a from-fit reader (#793), checked: "all" (the
+# default, every record in `data`) or "fit" (the data as the fit read it),
+# which needs a fit to read them as.
+.ferx_selection_arg <- function(selection, fit, caller) {
+  selection <- match.arg(selection, c("all", "fit"))
+  if (identical(selection, "fit") && is.null(fit)) {
+    stop(caller, ": selection = \"fit\" needs `fit`: it reads the data as ",
+         "that fit read them.", call. = FALSE)
+  }
+  selection
+}
+
+# How a from-fit step reads its data (#793), the `fit_reading` list every
+# from-fit glue entry point takes. Under `selection = "all"` the step reads
+# every record in `data`, as it always has, and nothing else is read from the
+# fit. Under "fit" it reads them as the fit read them: `fit$reader_settings`
+# replayed (whole on the fit's own model file, the selection alone on another;
+# `model_is_fits`), with the fit's missing-DV skip, and, when the model and
+# data are the fit's own, checked against `fit$population_fingerprint`
+# (ferx-core #1814): a data file edited since the fit is refused with
+# E_POPULATION_MISMATCH. A fit that records no reader settings is refused when
+# it was read with settings its model file does not state
+# (`.ferx_refuse_unrecorded_selection()`); `remedy` is the caller's way out.
+#
+# `model_path` / `data_path` are the files the step reads; `model` / `data`
+# the caller's overrides, NULL when the step reads the fit's own. An override
+# naming the fit's file is still the fit's own; so is a model file whose bytes
+# hash to the fit's `model_hash` (the engine's SHA-256), such as the original
+# of a fit `ferx_load_fit()` staged elsewhere (#797 review 1), and a frame
+# whose CSV text is the fit's `data_source` (#419). Another data file is
+# another file even with the fit's bytes (#530): `ferx_load_fit()` keeps the
+# fit's data path when the file is still there.
+.ferx_fit_reading <- function(fit, selection, caller, remedy,
+                              model_path, data_path,
+                              model = NULL, data = NULL) {
+  if (identical(selection, "all")) {
+    return(list(fit_rows = FALSE, reader_settings = "", model_is_fits = FALSE,
+                population_fingerprint = ""))
+  }
+  # A `model =` override keeps its own reader settings and has no recorded
+  # hash; only the fit's selection is replayed on it (#526 review 3, 4).
+  model_is_fits <- is.null(model) ||
+    identical(normalizePath(model, mustWork = FALSE),
+              normalizePath(fit$model_path %||% "", mustWork = FALSE)) ||
+    .ferx_file_has_hash(model, fit$model_hash)
+  data_is_fits <- is.null(data) ||
+    identical(normalizePath(data, mustWork = FALSE),
+              normalizePath(fit$data_path %||% "", mustWork = FALSE)) ||
+    (!is.null(fit$data_source) && file.exists(data) &&
+       identical(.ferx_read_data_text(data), fit$data_source))
+  # Another model or data file is not the fit's population by construction,
+  # so only the fit's own are checked against its fingerprint.
+  reader_args <- .ferx_fit_reader_args(fit)
+  fingerprint <- if (model_is_fits && data_is_fits) {
+    reader_args$population_fingerprint
+  } else {
+    ""
+  }
+  .ferx_refuse_unrecorded_selection(
+    fit, caller, remedy,
+    model_path = model_path,
+    model_hash = if (model_is_fits) fit$model_hash else "",
+    data = data,
+    data_path = data_path,
+    fingerprint = fingerprint
+  )
+  list(fit_rows = TRUE, reader_settings = reader_args$reader_settings,
+       model_is_fits = model_is_fits, population_fingerprint = fingerprint)
+}
+
+# TRUE when the file at `path` hashes to `hash` (a fit's `model_hash`, the
+# engine's SHA-256 of the bytes it read); FALSE for a fit that records no
+# hash or a file that is not there.
+.ferx_file_has_hash <- function(path, hash) {
+  hash <- .ferx_hash_arg(hash)
+  if (length(hash) != 1L || !nzchar(hash) || !file.exists(path)) return(FALSE)
+  identical(ferx_rust_sha256_raw(.fitrx_read_bytes(path)), tolower(hash))
+}
+
 # How the fit was scored (#511, #472): `fit$scoring_settings` and
 # `fit$sir_settings` (the record lists, NULL when the fit carries none),
 # `fit$packed_estimate` and a [mixture] fit's `fit$mixture_overrides`

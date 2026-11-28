@@ -217,3 +217,50 @@ test_that("ode_template form matches analytical and hand-ODE (PRED)", {
   expect_equal(tmpl_pred$PRED, an_pred$PRED,  tolerance = 1e-3)
   expect_equal(tmpl_pred$PRED, ode_pred$PRED, tolerance = 1e-3)
 })
+
+# --- #793: selection = "fit" ---------------------------------------------------
+# Every fit here runs on FD.
+
+sel_pred <- function(...) suppressWarnings(ferx_predict(...))
+
+test_that("T11: ferx_predict(selection = \"fit\") predicts the fit's rows (#793)", {
+  ex <- ferx_example("warfarin_data_selection")
+  fit <- warfarin_sel_fit()
+  pred <- sel_pred(ex$model, fit = fit, selection = "fit")
+  expect_identical(nrow(pred), 108L)
+  expect_identical(pred$ID, as.character(fit$sdtab$ID))
+  expect_identical(pred$TIME, as.numeric(fit$sdtab$TIME))
+})
+
+test_that("T12: ferx_predict(selection = \"fit\") is the fit's PRED with a dose dropped (#793)", {
+  ex <- ferx_example("warfarin_iov")
+  fit <- rs_mid_dose_fit()
+  pred <- sel_pred(ex$model, fit = fit, selection = "fit")
+  # The fit's own PRED, which it computed without the TIME 120 doses.
+  expect_equal(pred$PRED, fit$sdtab$PRED, tolerance = 1e-10)
+  # Every record, the dose included: other predictions after it.
+  all_rows <- sel_pred(ex$model, fit = fit)
+  after <- pred$TIME > 120
+  expect_identical(all_rows$TIME, pred$TIME)
+  expect_gt(max(abs(all_rows$PRED[after] - pred$PRED[after])), 1)
+})
+
+test_that("T16: ferx_predict()'s default selection is \"all\" (#793)", {
+  ex <- ferx_example("warfarin_data_selection")
+  fit <- warfarin_sel_fit()
+  default <- sel_pred(ex$model, fit = fit)
+  expect_identical(default, sel_pred(ex$model, fit = fit, selection = "all"))
+  expect_identical(nrow(default), 110L)
+})
+
+test_that("T6: ferx_predict(selection = \"fit\") refuses an unstated legacy selection (#793)", {
+  ex <- ferx_example("warfarin")
+  fit <- rs_legacy(rs_fit(ignore = rs_ignore))
+  e <- tryCatch(sel_pred(ex$model, fit = fit, selection = "fit"), error = function(e) e)
+  expect_s3_class(e, "error")
+  expect_match(conditionMessage(e), "ferx_predict: this fit predates", fixed = TRUE)
+  expect_match(conditionMessage(e), "`ignore: EVID == 0 && DV < 1.0`", fixed = TRUE)
+  expect_match(conditionMessage(e), "selection = \"all\"", fixed = TRUE)
+  expect_error(ferx_predict(ex$model, ex$data, selection = "fit"),
+               "ferx_predict: selection = \"fit\" needs `fit`", fixed = TRUE)
+})

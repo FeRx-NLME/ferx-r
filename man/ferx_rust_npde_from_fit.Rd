@@ -17,9 +17,7 @@ ferx_rust_npde_from_fit(
   residual_rho_pairs,
   mixture_overrides,
   fit_bindings,
-  reader_settings,
-  model_is_fits,
-  population_fingerprint,
+  fit_reading,
   iov_occasion,
   nsim,
   seed

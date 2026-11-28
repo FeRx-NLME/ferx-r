@@ -12,7 +12,8 @@ ferx_simulate_with_uncertainty(
   n_sim_per_draw = 1L,
   method = c("asymptotic", "sir"),
   seed = 42L,
-  horizon = NULL
+  horizon = NULL,
+  selection = c("all", "fit")
 )
 }
 \arguments{
@@ -51,6 +52,36 @@ simulate a repeated-event (\code{type = rtte}) or drug-driven (joint
 PK-TTE) model; without one such a model is refused
 (\code{E_SIMULATE_HORIZON}). Purely-Gaussian models ignore it. \code{NULL}
 (default) leaves it unset.}
+
+\item{selection}{Which records of \code{data} are read, when \code{fit} is
+given:
+\describe{
+\item{\code{"all"}}{(default) every record in \code{data}, whatever
+data selection the fit was made with - what this function has always
+done.}
+\item{\code{"fit"}}{the data as \code{fit} read them: the fit's own
+data selection (\code{fit$reader_settings}: the model file's
+\code{[data_selection]} and any \code{ferx_fit(ignore =, accept =,
+    ignore_ids =)}), applied to every record it removed, doses included,
+and the fit's skip of a record with an empty \code{DV}. On the fit's
+own model and data (its files; for the model also a file whose bytes
+still hash to \code{fit$model_hash}, such as the original of a fit
+reloaded with \code{\link{ferx_load_fit}}) the rows are the ones the
+fit was scored on: the
+continuous (Gaussian) observation rows of a simulation or prediction
+are \code{fit$sdtab}'s, in order, and a survival prediction or a VPC
+covers the fit's subjects. They are checked against
+\code{fit$population_fingerprint}, so a data file edited since the
+fit is refused with code \code{E_POPULATION_MISMATCH}. On another
+model file only the fit's selection is replayed, and on another data
+file nothing is checked. Needs \code{fit}.}
+}
+A fit made before the selection was recorded is refused under
+\code{"fit"} when its \code{fit$exclusions} show a clause its model file
+does not state. For a simulation the two are different runs, not one
+and a filter of it: with the same \code{seed}, removing records moves
+the random stream, so \code{"fit"} is not \code{"all"} with some rows
+dropped.}
 }
 \value{
 A data.frame with columns: DRAW, SIM, ID, TIME, CMT, IPRED, DV_SIM,

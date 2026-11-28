@@ -206,14 +206,17 @@
 #' @seealso \code{\link{plot.ferx_vpc_tte}}, \code{\link{plot.ferx_vpc_rtte}},
 #'   \code{\link{ferx_vpc_kmmc}}, \code{\link{ferx_vpc_cif}},
 #'   \code{\link{ferx_predict_survival}}
+#' @inheritParams ferx_simulate
 #' @family simulation
 #' @export
 ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
                          fit = NULL, strata = NULL, by_dose = FALSE,
                          censoring = c("observed", "horizon"), cmt = NULL,
                          horizon = NULL, probs = c(0.05, 0.5, 0.95),
-                         grid = "auto", max_order = NULL) {
+                         grid = "auto", max_order = NULL,
+                         selection = c("all", "fit")) {
   censoring <- match.arg(censoring)
+  selection <- .ferx_selection_arg(selection, fit, "ferx_vpc_tte")
   if (!is.null(max_order)) .ferx_vpc_tte_count(max_order, "max_order", min = 1)
   args <- .ferx_vpc_args(model, data, fit, n_sim, seed, strata, by_dose,
                          censoring, cmt, horizon, probs, grid)
@@ -223,7 +226,7 @@ ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
   # `vpc_cif` (ferx-core #1887), which ferx_vpc_cif() calls.
   res <- .ferx_engine_spelling(
     .ferx_vpc_call(args, fit, ferx_rust_vpc_tte, ferx_rust_vpc_tte_from_fit,
-                   extra, "ferx_vpc_tte"),
+                   extra, "ferx_vpc_tte", selection),
     "E_VPC_TTE_INPUT", "`vpc_cif`", "`ferx_vpc_cif()`"
   )
   if (identical(res$kind, "rtte")) {
@@ -238,6 +241,9 @@ ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
 # owns (the probabilities, the grid times) and refuses with E_VPC_TTE_INPUT.
 .ferx_vpc_args <- function(model, data, fit, n_sim, seed, strata, by_dose,
                            censoring, cmt, horizon, probs, grid) {
+  # `data` as the caller passed it (NULL: the fit's own), for the fit's reading.
+  data <- .ferx_data_arg(data)
+  data_override <- data
   if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
@@ -295,6 +301,7 @@ ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
   list(
     model = model,
     data = data,
+    data_override = data_override,
     paths = list(model_path = normalizePath(model),
                  data_path = normalizePath(data)),
     shared = list(
@@ -314,21 +321,29 @@ ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
 }
 
 # One VPC glue call, at the model file's values (`at_file`) or at `fit`'s
-# parameters (`at_fit`), with `extra` arguments after the shared ones. A
+# parameters (`at_fit`), with `extra` arguments after the shared ones. At a
+# fit, the observed curve and the replicates are drawn on the records
+# `selection` names (#793): every one in `data`, or the fit's own. A
 # refusal is an R error, classed like a refused `ferx_fit()` (#385); the
 # engine's warnings are raised as an R warning and kept on the result.
-.ferx_vpc_call <- function(args, fit, at_file, at_fit, extra, fn) {
+.ferx_vpc_call <- function(args, fit, at_file, at_fit, extra, fn, selection) {
   res <- if (is.null(fit)) {
     .ferx_engine_call(do.call(at_file, c(args$paths, args$shared, extra)),
                       args$model, args$data)
   } else {
     fit_pieces <- validate_fit_for_params(fit)
+    fit_reading <- .ferx_fit_reading(
+      fit, selection, fn, "Refit, or use selection = \"all\".",
+      model_path = args$model, data_path = args$data,
+      model = args$model, data = args$data_override
+    )
     .ferx_engine_call(
       do.call(at_fit, c(args$paths, fit_pieces[c(
         "theta", "omega_flat", "omega_dim", "sigma", "omega_iov_flat",
         "omega_iov_dim", "residual_rho", "residual_rho_pairs",
-        "mixture_overrides", "fit_bindings", "iov_occasion"
-      )], args$shared, extra)),
+        "mixture_overrides", "fit_bindings"
+      )], list(fit_reading = fit_reading), fit_pieces["iov_occasion"],
+      args$shared, extra)),
       args$model, args$data
     )
   }

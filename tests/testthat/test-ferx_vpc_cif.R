@@ -362,3 +362,25 @@ test_that("a data.frame() of the user's own does not reach the VPC glue (#778 re
   on.exit(rm("data.frame", envir = globalenv()), add = TRUE)
   expect_identical(runs(), ref)
 })
+
+# --- #793: selection = "fit" ---------------------------------------------------
+
+test_that("T15: ferx_vpc_cif(selection = \"fit\") draws on the fit's subjects (#793)", {
+  # FD fit of tte_competing_risks without its first five subjects.
+  ex <- ferx_example("tte_competing_risks")
+  fit <- rs_tte_subjects_fit("tte_competing_risks")
+  rows <- utils::read.csv(ex$data)
+  without <- rs_csv_without(ex$data, rows$ID %in% rs_first_ids(rows))
+  run <- function(...) vpc_cif_quiet(ex$model, n_sim = 20L, seed = 4L, fit = fit, ...)
+  v <- run(selection = "fit")
+  w <- run(data = without, selection = "all")
+  expect_identical(v$observed, w$observed)
+  expect_identical(v$band, w$band)
+  # T16: the default is "all", every subject in the data.
+  default <- run()
+  expect_identical(default, run(selection = "all"))
+  expect_identical(v$strata$n_subjects, default$strata$n_subjects - 5L)
+  # Without a fit there is no reading to replay (#793 review 1, finding 5).
+  expect_error(ferx_vpc_cif(ex$model, ex$data, n_sim = 5L, selection = "fit"),
+               "ferx_vpc_cif: selection = \"fit\" needs `fit`", fixed = TRUE)
+})

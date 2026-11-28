@@ -464,3 +464,220 @@ test_that("ferx_predict(fit = ) on a [mixture] fit without override values still
   expect_true(is.data.frame(full))
   expect_identical(muffle_mixl_lint(ferx_predict(mod, dat, fit = legacy)), full)
 })
+
+# --- #793: selection = "fit", the data as the fit read them -------------------
+#
+# The oracle is the fit's own sdtab (its rows, in order) and a simulation of a
+# hand-filtered CSV (the records the fit read). Every fit here runs on FD.
+
+sel_sim <- function(...) suppressWarnings(ferx_simulate(...))
+
+test_that("T1: selection = \"fit\" simulates the rows of a model-file selection (#793)", {
+  ex <- ferx_example("warfarin_data_selection")
+  fit <- warfarin_sel_fit()
+  # Premise: the model file's `ignore = DV < 1.0` drops two observations.
+  expect_identical(nrow(fit$sdtab), 108L)
+  sim <- sel_sim(ex$model, n_sim = 2L, seed = 1L, fit = fit, selection = "fit")
+  expect_identical(as.vector(table(sim$SIM)), c(108L, 108L))
+  expect_sdtab_rows(sim, fit)
+})
+
+test_that("T2: selection = \"fit\" simulates the rows of a call-only selection (#793)", {
+  # warfarin's model file states no selection: only the fit's record has it.
+  ex <- ferx_example("warfarin")
+  fit <- rs_fit(ignore = rs_ignore)
+  expect_identical(nrow(fit$sdtab), 108L)
+  sim <- sel_sim(ex$model, n_sim = 2L, seed = 1L, fit = fit, selection = "fit")
+  expect_identical(as.vector(table(sim$SIM)), c(108L, 108L))
+  expect_sdtab_rows(sim, fit)
+})
+
+test_that("T3: selection = \"fit\" leaves out a dose the fit dropped (#793)", {
+  # The fit dropped the TIME 120 doses and no observation: "all" and "fit"
+  # read as many rows, so only the simulated values can tell them apart.
+  ex <- ferx_example("warfarin_iov")
+  fit <- rs_mid_dose_fit()
+  rows <- utils::read.csv(ex$data, na.strings = ".")
+  expect_identical(sum(rows$EVID == 1 & rows$TIME > 0), 10L)
+  no_dose <- rs_csv_without(ex$data, rows$EVID == 1 & rows$TIME > 0)
+  fit_rows <- sel_sim(ex$model, n_sim = 3L, seed = 1L, fit = fit, selection = "fit")
+  # The fit's reading is the data without those doses, value for value.
+  expect_identical(
+    fit_rows,
+    sel_sim(ex$model, no_dose, n_sim = 3L, seed = 1L, fit = fit, selection = "all")
+  )
+  # Every record, the dose included: as many rows, other concentrations after it.
+  all_rows <- sel_sim(ex$model, n_sim = 3L, seed = 1L, fit = fit)
+  expect_identical(nrow(all_rows), nrow(fit_rows))
+  after <- fit_rows$TIME > 120
+  expect_gt(max(abs(all_rows$IPRED[after] - fit_rows$IPRED[after])), 1)
+})
+
+test_that("T4: the default selection is \"all\", unchanged (#793)", {
+  ex <- ferx_example("warfarin_data_selection")
+  fit <- warfarin_sel_fit()
+  default <- sel_sim(ex$model, n_sim = 2L, seed = 1L, fit = fit)
+  expect_identical(default,
+                   sel_sim(ex$model, n_sim = 2L, seed = 1L, fit = fit, selection = "all"))
+  # Every record, the two the fit ignored included.
+  expect_identical(as.vector(table(default$SIM)), c(110L, 110L))
+})
+
+test_that("T5: on a fit with no selection \"fit\" is \"all\" (#793)", {
+  ex <- ferx_example("warfarin")
+  fit <- warfarin_fit()
+  expect_identical(
+    sel_sim(ex$model, n_sim = 2L, seed = 1L, fit = fit, selection = "fit"),
+    sel_sim(ex$model, n_sim = 2L, seed = 1L, fit = fit, selection = "all")
+  )
+})
+
+test_that("T6: selection = \"fit\" refuses a legacy fit whose selection is not stated (#793)", {
+  ex <- ferx_example("warfarin")
+  fit <- rs_legacy(rs_fit(ignore = rs_ignore))
+  e <- tryCatch(sel_sim(ex$model, n_sim = 1L, seed = 1L, fit = fit, selection = "fit"),
+                error = function(e) e)
+  expect_s3_class(e, "error")
+  msg <- conditionMessage(e)
+  expect_match(msg, "ferx_simulate: this fit predates", fixed = TRUE)
+  expect_match(msg, "`ignore: EVID == 0 && DV < 1.0`", fixed = TRUE)
+  expect_match(msg, "selection = \"all\"", fixed = TRUE)
+  expect_no_match(msg, "model file states", fixed = TRUE)
+  # "all" reads every record and needs no record: it runs.
+  expect_identical(nrow(sel_sim(ex$model, n_sim = 1L, seed = 1L, fit = fit)), 110L)
+
+  # A legacy fit whose selection the model file states runs under "fit".
+  sel <- ferx_example("warfarin_data_selection")
+  legacy_file <- rs_legacy(warfarin_sel_fit())
+  sim <- sel_sim(sel$model, n_sim = 1L, seed = 1L, fit = legacy_file, selection = "fit")
+  expect_sdtab_rows(sim, legacy_file)
+})
+
+test_that("T7: selection = \"fit\" refuses the fit's data edited since the fit (#793)", {
+  ex <- ferx_example("warfarin")
+  data <- withr::local_tempfile(fileext = ".csv")
+  file.copy(ex$data, data)
+  fit <- suppressWarnings(ferx_fit(ex$model, data, method = "gn",
+                                   covariance = FALSE, verbose = FALSE))
+  expect_false(is.null(fit$population_fingerprint))
+  # Premise: on the fit's own data it runs.
+  expect_sdtab_rows(sel_sim(ex$model, n_sim = 1L, seed = 1L, fit = fit,
+                            selection = "fit"), fit)
+  rows <- utils::read.csv(data, na.strings = ".")
+  obs <- which(rows$EVID == 0)[1L]
+  rows$DV[obs] <- rows$DV[obs] * 2
+  utils::write.csv(rows, data, row.names = FALSE, quote = FALSE, na = ".")
+  e <- tryCatch(sel_sim(ex$model, n_sim = 1L, seed = 1L, fit = fit, selection = "fit"),
+                error = function(e) e)
+  expect_s3_class(e, "ferx_engine_error")
+  expect_identical(e$code, "E_POPULATION_MISMATCH")
+  expect_match(conditionMessage(e), "ferx_simulate: ", fixed = TRUE)
+  # "all" does not check: the simulation never reads DV.
+  expect_true(is.data.frame(sel_sim(ex$model, n_sim = 1L, seed = 1L, fit = fit)))
+})
+
+test_that("T8: selection = \"fit\" needs a fit (#793)", {
+  ex <- ferx_example("warfarin")
+  expect_error(
+    ferx_simulate(ex$model, ex$data, n_sim = 1L, selection = "fit"),
+    "ferx_simulate: selection = \"fit\" needs `fit`", fixed = TRUE
+  )
+  expect_error(ferx_simulate(ex$model, ex$data, n_sim = 1L, selection = "every"),
+               "should be one of")
+})
+
+test_that("T17: selection = \"fit\" skips an empty-DV design record, as the fit did (#793 review 1)", {
+  # A design grid (`DV = .` at every sampling time): "all" simulates every
+  # record, "fit" reads the data as the fit read them, and the fit skips a
+  # record whose DV is empty, so it simulates none of them and says why.
+  ex <- ferx_example("warfarin_data_selection")
+  fit <- warfarin_sel_fit()
+  rows <- utils::read.csv(ex$data, na.strings = ".")
+  rows$DV[rows$EVID == 0] <- NA
+  grid <- withr::local_tempfile(fileext = ".csv")
+  utils::write.csv(rows, grid, row.names = FALSE, quote = FALSE, na = ".")
+  expect_identical(nrow(sel_sim(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit)), 110L)
+  w <- tryCatch(
+    ferx_simulate(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit, selection = "fit"),
+    warning = function(w) conditionMessage(w)
+  )
+  expect_match(w, "W_MISSING_DV: 110 observation row(s)", fixed = TRUE)
+  # Core's advice is a fit's; the warning also says how to simulate them.
+  expect_match(w, "pass selection = \"all\" to simulate or predict at them", fixed = TRUE)
+  expect_identical(nrow(suppressWarnings(
+    ferx_simulate(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit, selection = "fit")
+  )), 0L)
+  expect_warning(
+    pred <- ferx_predict(ex$model, grid, fit = fit, selection = "fit"),
+    "pass selection = \"all\"", fixed = TRUE
+  )
+  expect_identical(nrow(pred), 0L)
+  # Under "all" the records are simulated, and there is nothing to point to.
+  expect_no_match(
+    tryCatch(ferx_simulate(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit),
+             warning = function(w) conditionMessage(w)),
+    "pass selection", fixed = TRUE
+  )
+})
+
+test_that("T18: a loaded fit's original model and data are still the fit's own (#797 review 1)", {
+  # ferx_load_fit() stages the model to a new file; the original still hashes
+  # to the fit's model_hash, so "fit" replays the whole record on it. The data
+  # path is kept (the file is still there), so the fingerprint is checked.
+  ex <- ferx_example("warfarin_data_selection")
+  fit <- warfarin_sel_fit()
+  path <- withr::local_tempfile(fileext = ".fitrx")
+  suppressWarnings(ferx_save_fit(fit, path))
+  loaded <- suppressWarnings(ferx_load_fit(path))
+  expect_false(identical(normalizePath(loaded$model_path), normalizePath(ex$model)))
+  expect_identical(normalizePath(loaded$data_path), normalizePath(ex$data))
+  expect_null(loaded$data_source)
+  reading <- function(model, data) {
+    seen <- NULL
+    local_mocked_bindings(
+      ferx_rust_simulate_from_fit = function(...) {
+        seen <<- list(...)$fit_reading
+        stop("captured")
+      },
+      .package = "ferx"
+    )
+    expect_error(ferx_simulate(model, data, n_sim = 1L, fit = loaded,
+                               selection = "fit"), "captured")
+    seen
+  }
+  own <- reading(ex$model, ex$data)
+  expect_true(own$model_is_fits)
+  expect_true(nzchar(own$population_fingerprint))
+  expect_sdtab_rows(sel_sim(ex$model, ex$data, n_sim = 1L, seed = 1L, fit = loaded,
+                            selection = "fit"), loaded)
+  # A model file with other bytes is an override: the selection alone, and no
+  # fingerprint check.
+  other <- withr::local_tempfile(fileext = ".ferx")
+  writeLines(c(readLines(ex$model), "# edited"), other)
+  over <- reading(other, ex$data)
+  expect_false(over$model_is_fits)
+  expect_identical(over$population_fingerprint, "")
+  # A byte copy of the data at another path is another file (#530): no
+  # fingerprint check, as for ferx_calc_npde(data =).
+  data_copy <- withr::local_tempfile(fileext = ".csv")
+  file.copy(ex$data, data_copy)
+  copy <- reading(ex$model, data_copy)
+  expect_true(copy$model_is_fits)
+  expect_identical(copy$population_fingerprint, "")
+})
+
+test_that("T9: ferx_simulate_with_uncertainty(selection = \"fit\") simulates the fit's rows (#793)", {
+  ex <- ferx_example("warfarin_data_selection")
+  fit <- warfarin_sel_fit()
+  run <- function(...) suppressWarnings(ferx_simulate_with_uncertainty(
+    ex$model, ex$data, fit, n_uncertainty_draws = 2L, n_sim_per_draw = 1L,
+    seed = 3L, ...
+  ))
+  sim <- run(selection = "fit")
+  expect_identical(as.vector(table(sim$DRAW, sim$SIM)), c(108L, 108L))
+  expect_sdtab_rows(sim, fit)
+  # T16: the default is "all", every record.
+  default <- run()
+  expect_identical(default, run(selection = "all"))
+  expect_identical(nrow(default), 220L)
+})

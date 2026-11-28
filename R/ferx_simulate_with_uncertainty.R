@@ -95,6 +95,7 @@
 #' onto the internal guard and listed in \code{fit$held_at_bound}, is held there.
 #' \code{MIXNUM} reports the class drawn.
 #'
+#' @inheritParams ferx_simulate
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks
 #'
@@ -133,7 +134,10 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
                                            n_sim_per_draw = 1L,
                                            method = c("asymptotic", "sir"),
                                            seed = 42L,
-                                           horizon = NULL) {
+                                           horizon = NULL,
+                                           selection = c("all", "fit")) {
+  selection <- .ferx_selection_arg(selection, fit,
+                                   "ferx_simulate_with_uncertainty")
   data <- .ferx_data_arg(data)
   stopifnot(file.exists(model), file.exists(data))
   method <- match.arg(method)
@@ -156,6 +160,11 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
 
   fit_pieces <- validate_fit_for_params(fit)
   unc_pieces <- validate_fit_for_uncertainty(fit, method)
+  fit_reading <- .ferx_fit_reading(
+    fit, selection, "ferx_simulate_with_uncertainty",
+    "Refit, or use selection = \"all\".",
+    model_path = model, data_path = data, model = model, data = data
+  )
 
   # A refusal is an R error, classed like a refused `ferx_fit()` (#385). A
   # horizon refusal names the engine's option, backticked when it is missing
@@ -183,6 +192,7 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
       # under its drawn class's Omega and Sigma (ferx-core #2163).
       mixture_overrides    = fit_pieces$mixture_overrides,
       fit_bindings         = fit_pieces$fit_bindings,
+      fit_reading          = fit_reading,
       iov_occasion         = fit_pieces$iov_occasion,
       n_uncertainty_draws  = as.integer(n_uncertainty_draws),
       n_sim_per_draw       = as.integer(n_sim_per_draw),
@@ -195,7 +205,8 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
   # the engine's warning bundle for the run, skipped draws included (ferx-r #426).
-  .ferx_surface_sim_warnings(res, "ferx_simulate_with_uncertainty")
+  .ferx_surface_sim_warnings(res, "ferx_simulate_with_uncertainty",
+                             selection = selection)
 }
 
 # Internal: pull the uncertainty payload out of a ferx_fit result, validate it

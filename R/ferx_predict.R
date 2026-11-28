@@ -27,6 +27,7 @@
 #'   \code{ferx_fit()} leaves them out. They are also re-emitted as a single
 #'   R warning.
 #'
+#' @inheritParams ferx_simulate
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks
 #'
@@ -38,7 +39,12 @@
 #'
 #' @family simulation
 #' @export
-ferx_predict <- function(model, data = NULL, fit = NULL) {
+ferx_predict <- function(model, data = NULL, fit = NULL,
+                         selection = c("all", "fit")) {
+  selection <- .ferx_selection_arg(selection, fit, "ferx_predict")
+  # `data` as the caller passed it (NULL: the fit's own), for the fit's reading.
+  data <- .ferx_data_arg(data)
+  data_override <- data
   if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
@@ -60,6 +66,10 @@ ferx_predict <- function(model, data = NULL, fit = NULL) {
     )
   } else {
     fit_pieces <- validate_fit_for_params(fit)
+    fit_reading <- .ferx_fit_reading(
+      fit, selection, "ferx_predict", "Refit, or use selection = \"all\".",
+      model_path = model, data_path = data, model = model, data = data_override
+    )
     .ferx_engine_call(
       ferx_rust_predict_from_fit(
         model_path = normalizePath(model),
@@ -74,6 +84,7 @@ ferx_predict <- function(model, data = NULL, fit = NULL) {
         residual_rho_pairs = fit_pieces$residual_rho_pairs,
         mixture_overrides = fit_pieces$mixture_overrides,
         fit_bindings = fit_pieces$fit_bindings,
+        fit_reading = fit_reading,
         iov_occasion = fit_pieces$iov_occasion
       ),
       model, data
@@ -84,5 +95,5 @@ ferx_predict <- function(model, data = NULL, fit = NULL) {
   # engine's non-fit warning bundle for this pass (ferx-r #283, #426). Unlike
   # simulate it has no capped steady-state equilibration notes: core's
   # `predict_diag` does not report them.
-  .ferx_surface_sim_warnings(res, "ferx_predict")
+  .ferx_surface_sim_warnings(res, "ferx_predict", selection = selection)
 }

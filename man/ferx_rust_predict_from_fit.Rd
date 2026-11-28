@@ -17,6 +17,7 @@ ferx_rust_predict_from_fit(
   residual_rho_pairs,
   mixture_overrides,
   fit_bindings,
+  fit_reading,
   iov_occasion
 )
 }
