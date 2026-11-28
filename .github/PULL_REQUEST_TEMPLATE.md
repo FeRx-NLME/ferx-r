@@ -103,7 +103,7 @@
 - [ ] New bundled example → `ferx_example("name")` call added/updated in the relevant chapter
 
 ### Example execution (run locally before marking ready for review)
-- [ ] Rebuilt ferx-r against local ferx-core: `FERX_NO_AUTODIFF=1 R CMD INSTALL .` (triggers Rust compile without autodiff)
+- [ ] Rebuilt ferx-r: `R CMD INSTALL .` (its last `ferx:` line says whether the sibling ferx-core or the pinned revision was built)
 - [ ] All affected `inst/examples/*.R` scripts run without error on the local build
 - [ ] All affected ferx-site example `.qmd` pages render cleanly: `quarto render examples/<page>.qmd`
 - [ ] All affected ferx-book chapters render cleanly: `quarto render chapters/<chapter>.qmd`
