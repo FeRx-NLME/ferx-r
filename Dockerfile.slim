@@ -70,7 +70,7 @@ RUN set -eux; \
     git fetch -q --depth 1 https://github.com/FeRx-NLME/ferx-core "$rev"; \
     git checkout -q FETCH_HEAD; \
     cargo +stable build --release --locked -p ferx-cli \
-        --features ferx-core/ci,ferx-core/nn,ferx-core/survival; \
+        --features ferx-core/ci,ferx-core/nn,ferx-core/survival,ferx-core/markov; \
     install -m 0755 target/release/ferx /usr/local/bin/ferx; \
     mkdir -p /usr/local/share/doc/ferx; \
     /usr/local/bin/ferx --licenses > /usr/local/share/doc/ferx/ferx-cli-LICENSES.txt; \

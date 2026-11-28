@@ -162,19 +162,24 @@ test_that("a retired section is labelled retired, not unknown", {
   expect_false(any(grepl("unknown section", out, fixed = TRUE)))
 })
 test_that("a feature-gated section is labelled disabled, not unknown", {
-  # `markov_model` is a name the engine recognises in every build but only
-  # accepts with `--features markov`, which this package does not enable
-  # (src/Makevars builds ferx-core with ci,nn,survival by default). It is absent
-  # from `ferx_rust_known_blocks()` while the parser still reports it precisely.
-  skip_if("markov_model" %in% ferx:::ferx_rust_known_blocks(),
-          "this build enables the markov feature")
-  lines <- c(VALID_WARFARIN_SECTIONS, "", "[markov_model]", "  states A, B")
+  # The engine recognises its feature-gated block names in every build but
+  # accepts each only with its cargo feature: `markov_model` needs `markov`,
+  # the others `survival`. A gated-off block is absent from
+  # `ferx_rust_known_blocks()` while the parser still reports it precisely.
+  # The default build (src/Makevars: ci,nn,survival,markov) enables all of
+  # them since #788, so this runs only in a build that drops one, such as
+  # CARGO_FEATURES="--no-default-features --features ci,nn,survival".
+  gated <- c("markov_model", "event_model", "binary_model", "count_model")
+  off <- setdiff(gated, ferx:::ferx_rust_known_blocks())
+  skip_if(length(off) == 0L, "this build enables every feature-gated block")
+  block <- off[[1L]]
+  lines <- c(VALID_WARFARIN_SECTIONS, "", paste0("[", block, "]"), "  cmt = 3")
   path  <- write_ferx(lines)
   on.exit(unlink(path))
   out <- capture.output(res <- ferx_model_validate(path))
   expect_false(isTRUE(res$ok))
   expect_true("E_BLOCK_FEATURE_DISABLED" %in% res$diagnostics$code)
-  expect_true(any(grepl("markov_model +\\[feature not enabled\\]", out)))
+  expect_true(any(grepl(paste0(block, " +\\[feature not enabled\\]"), out)))
   expect_false(any(grepl("unknown section", out, fixed = TRUE)))
 })
 test_that("syntax error in model body returns FALSE and prints errors", {

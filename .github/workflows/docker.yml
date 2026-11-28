@@ -142,6 +142,16 @@ jobs:
             grep -q "^  ferx-search .*LGPL-3.0-or-later" "$d/THIRD-PARTY-NOTICES.txt"
             grep -q "src/algs/luksan" "$d/THIRD-PARTY-NOTICES.txt"
             Rscript -e "stopifnot(nzchar(system.file(\"COPYRIGHTS\", package = \"ferx\")))"'
+          # Both the CLI and the package carry the markov feature (#788): a
+          # [markov_model] block would otherwise be E_BLOCK_FEATURE_DISABLED.
+          docker run --rm ferx-r:smoke sh -euc '
+            printf "%s\n" "[parameters]" "  theta LQ01(-0.7, -6.0, 3.0)" \
+              "  theta LQ10(-1.2, -6.0, 3.0)" "" "[markov_model]" "  type = ctmm" \
+              "  cmt = 5" "  states = [awake=0, asleep=1]" \
+              "  transition awake -> asleep = exp(LQ01)" \
+              "  transition asleep -> awake = exp(LQ10)" > /tmp/ctmm.ferx
+            ferx check /tmp/ctmm.ferx
+            Rscript -e "stopifnot(isTRUE(ferx::ferx_model_validate(\"/tmp/ctmm.ferx\")\$ok))"'
           docker image ls ferx-r:smoke
 
       # Before anything is pushed: no token, key, credential file, license
@@ -432,6 +442,16 @@ jobs:
           # The CLI must carry the survival feature, like the R package.
           docker run --rm ferx-r:rstudio \
             ferx check /usr/local/lib/R/site-library/ferx/examples/models/tte_exponential.ferx
+          # Both the CLI and the package carry the markov feature (#788): a
+          # [markov_model] block would otherwise be E_BLOCK_FEATURE_DISABLED.
+          docker run --rm ferx-r:rstudio sh -euc '
+            printf "%s\n" "[parameters]" "  theta LQ01(-0.7, -6.0, 3.0)" \
+              "  theta LQ10(-1.2, -6.0, 3.0)" "" "[markov_model]" "  type = ctmm" \
+              "  cmt = 5" "  states = [awake=0, asleep=1]" \
+              "  transition awake -> asleep = exp(LQ01)" \
+              "  transition asleep -> awake = exp(LQ10)" > /tmp/ctmm.ferx
+            ferx check /tmp/ctmm.ferx
+            Rscript -e "stopifnot(isTRUE(ferx::ferx_model_validate(\"/tmp/ctmm.ferx\")\$ok))"'
           # RStudio Server comes up.
           docker run -d --name rs -p 127.0.0.1:8787:8787 -e PASSWORD=ci-only-throwaway ferx-r:rstudio
           for i in $(seq 1 30); do

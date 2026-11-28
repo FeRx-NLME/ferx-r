@@ -1,0 +1,20 @@
+# Continuous-time Markov model (CTMM), 2 states, fixed effects only.
+# From ferx-core examples/ctmm_2state.ferx at the pinned revision. Data:
+# ctmm_2state.csv (ferx-core data/ctmm_2state.csv). NONMEM 7.5.1 METHOD=0 on the
+# same likelihood: LQ01 = -0.540113, LQ10 = -1.215660, OFV = 606.98181
+# (ferx-core tests/markov_nonmem.rs).
+
+[parameters]
+  theta LQ01(-0.7, -6.0, 3.0)   # log intensity awake -> asleep
+  theta LQ10(-1.2, -6.0, 3.0)   # log intensity asleep -> awake
+
+[markov_model]
+  type   = ctmm
+  cmt    = 5
+  states = [awake=0, asleep=1]
+  transition awake  -> asleep = exp(LQ01)
+  transition asleep -> awake  = exp(LQ10)
+
+[fit_options]
+  method  = focei
+  maxiter = 300
