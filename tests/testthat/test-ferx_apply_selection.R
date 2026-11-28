@@ -167,6 +167,24 @@ test_that("ferx_fit(ignore=) produces same exclusion count as [data_selection] m
     fit_mod$exclusions$n_obs_excluded
   )
 })
+test_that("an unknown column never matches in the engine as in the preview (#776)", {
+  skip_on_cran()
+  # Pins what ?ferx_apply_selection says the engine does, so the docs fail a
+  # test rather than drift: an ignore warns W_FILTER_COLUMN_ABSENT and excludes
+  # nothing, an accept excludes every record.
+  ex  <- ferx_example("warfarin")
+  fit_on <- function(...) {
+    suppressWarnings(ferx_fit(ex$model, ex$data, ..., verbose = FALSE,
+                              settings = list(maxiter = 2L)))
+  }
+  fit <- fit_on(ignore = "FOO == 1")
+  expect_true(any(startsWith(fit$warnings, "W_FILTER_COLUMN_ABSENT")))
+  expect_equal(fit$exclusions$n_obs_excluded, 0)
+  expect_error(fit_on(accept = "FOO == 1"), "E_NO_SCORED_OBSERVATIONS", fixed = TRUE)
+  n <- nrow(utils::read.csv(ex$data))
+  expect_equal(nrow(ferx_apply_selection(ex$data, ignore = "FOO == 1")), n)
+  expect_equal(nrow(ferx_apply_selection(ex$data, accept = "FOO == 1")), 0L)
+})
 test_that("ferx_apply_selection() returns ferx_data S3 class", {
   skip_on_cran()
   ex  <- ferx_example("warfarin")
@@ -456,6 +474,27 @@ test_that("ferx_apply_selection() ignores unparseable expression (returns nothin
   expect_equal(nrow(ferx_apply_selection(sel, excluded = TRUE)), 0L)
   expect_equal(length(.sel_attr(sel, "exclusions")$fired_ignore), 0L)
 })
+test_that("ferx_apply_selection() accept on a never-matching condition excludes every record (#776)", {
+  skip_on_cran()
+  # The same never-match that makes an ignore exclude nothing makes an accept
+  # exclude everything: accept drops !mask. One case per cause: an unknown
+  # column, an ordered comparison against a non-numeric value, and an
+  # expression with no operator.
+  df <- .sel_test_df()
+  for (expr in c("FOO == 1", "DV < abc", "UNPARSEABLE EXPR HERE")) {
+    sel  <- ferx_apply_selection(df, accept = expr)
+    excl <- ferx_apply_selection(sel, excluded = TRUE)
+    expect_equal(nrow(sel), 0L, info = expr)
+    expect_equal(nrow(excl), nrow(df), info = expr)
+    expect_identical(unique(excl$.exclude_reason), paste0("accept: ", expr),
+                     info = expr)
+    expect_identical(.sel_attr(sel, "exclusions")$fired_accept,
+                     paste0("accept: ", expr), info = expr)
+    # The ignore twin of the same condition excludes nothing.
+    expect_equal(nrow(ferx_apply_selection(df, ignore = expr)), nrow(df),
+                 info = expr)
+  }
+})
 
 # ---- header from test-selection-helpers.R ----
 # Unit tests for the pure-R data-selection helpers in selection.R:
@@ -531,7 +570,8 @@ test_that(".parse_filter_expr treats non-finite numeric spellings as label strin
 })
 test_that(".parse_filter_expr rejects an ordered comparison against a non-numeric RHS", {
   # ferx-core errors on `BW < abc` (ordered op needs a numeric value); the lenient
-  # R preview mirrors that by returning NULL (no exclusion) instead of a silent
+  # R preview mirrors that by returning NULL (the clause never matches: an
+  # ignore excludes nothing, an accept excludes every record) instead of a silent
   # lexical string comparison that the Rust fit never performs.
   expect_null(ferx:::.parse_filter_expr("BW < abc"))
   expect_null(ferx:::.parse_filter_expr("BW >= abc"))

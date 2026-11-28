@@ -95,9 +95,13 @@ Applies IGNORE/ACCEPT record-level filters to a NONMEM dataset in pure R,
 approximating the semantics of the \code{[data_selection]} model block.
 This is a \strong{preview} function: the canonical, engine-validated
 filtering happens in Rust at fit time. The R-side implementation is
-intentionally lenient: unparseable expressions and unknown column names are
-silently treated as non-matching (no exclusion), whereas Rust will error on
-invalid filters. Use \code{ferx_apply_selection()} to inspect which records will
+intentionally lenient: an unparseable expression, which Rust refuses at fit
+time, is silently treated as never matching. A condition on a column the data
+does not have never matches in either: Rust warns about it
+(\code{W_FILTER_COLUMN_ABSENT}), the preview is silent. A condition that
+never matches does opposite things under the two filters: an \code{ignore}
+on it excludes no record, but an \code{accept} on it excludes
+\strong{every} record, since no record passes it. Use \code{ferx_apply_selection()} to inspect which records will
 be excluded before committing to a fit, or to pass pre-built conditions
 directly to \code{\link{ferx_fit}}.
 }
