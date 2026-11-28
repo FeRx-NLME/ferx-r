@@ -844,6 +844,28 @@ test_that("subject IDs are matched and reported as the file spells them (02 is n
                                            fit$exclusions$n_other_excluded))
   expect_identical(sel794_fit(ex$model, ferx_apply_selection(fit))$exclusions,
                    fit$exclusions)
+
+  # A space-padded ID field: the engine trims it, so ` 2` is subject `2`
+  # (#795 review, round 2).
+  lines <- readLines(write_nonmem_csv(example_rows(), environment()))
+  padded <- withr::local_tempfile(fileext = ".csv")
+  writeLines(c(lines[1L], paste0(" ", lines[-1L])), padded)
+  pfit <- sel794_fit(ex$model, padded, ignore_ids = "2")
+  expect_gt(pfit$exclusions$n_obs_excluded, 0L)
+  expect_identical(
+    attr(ferx_apply_selection(padded, ignore_ids = "2"), "exclusions"),
+    pfit$exclusions
+  )
+  expect_identical(nrow(ferx_apply_selection(pfit, excluded = TRUE)),
+                   as.integer(pfit$exclusions$n_obs_excluded +
+                                pfit$exclusions$n_dose_excluded +
+                                pfit$exclusions$n_other_excluded))
+  afit <- sel794_fit(ex$model, padded, accept = "ID != 3")
+  expect_identical(afit$exclusions$excluded_subject_ids, "3")
+  expect_identical(
+    attr(ferx_apply_selection(padded, accept = "ID != 3"), "exclusions"),
+    afit$exclusions
+  )
 })
 
 test_that("ferx_rust_model_data_selection returns the block in the engine's spelling", {

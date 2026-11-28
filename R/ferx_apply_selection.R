@@ -439,7 +439,8 @@ print.ferx_data <- function(x, n = 6L, ...) {
 # The subject-ID column as text, one entry per record of `id_col`, or NULL
 # when the data has no ID column. For a CSV the column is read again with no
 # type conversion, after the same `[data]` column map, so `02` stays `02` as
-# the engine's reader sees it. A data.frame's IDs were parsed before the
+# the engine's reader sees it, padding trimmed as the reader trims it. A
+# data.frame's IDs were parsed before the
 # preview saw them, so they are taken as they are.
 .ferx_id_text <- function(source_path, column_map, id_col) {
   if (is.null(id_col)) return(NULL)
@@ -447,7 +448,12 @@ print.ferx_data <- function(x, n = 6L, ...) {
     raw <- utils::read.csv(source_path, colClasses = "character",
                            check.names = FALSE)
     txt <- .get_col_sel(.ferx_apply_column_map(raw, column_map), "id")
-    if (!is.null(txt) && length(txt) == length(id_col)) return(txt)
+    # The engine's reader trims every field before it matches or reports an
+    # ID (Rust `str::trim`, Unicode whitespace), so ` 2` is subject `2`
+    # (#795 review, round 2).
+    if (!is.null(txt) && length(txt) == length(id_col)) {
+      return(trimws(txt, whitespace = "[\\h\\v]"))
+    }
   }
   as.character(id_col)
 }
