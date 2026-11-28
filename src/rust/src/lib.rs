@@ -10320,19 +10320,6 @@ fn covariate_types_robj(table: Option<&ferx_core::CovariateTable>) -> Robj {
     robj
 }
 
-/// Returns TRUE if the Rust library was compiled with Enzyme autodiff support.
-///
-/// The Enzyme autodiff path was retired in ferx-core
-/// (FeRx-NLME/ferx-core#381) in favour of hand-rolled analytic sensitivities,
-/// so this is always FALSE. Retained for backwards compatibility with callers
-/// that probe it.
-#[extendr]
-fn ferx_rust_autodiff_enabled() -> bool {
-    entry(move || {
-        Ok(false)
-    })
-}
-
 /// Panic with `msg`, to exercise the panic path from a test.
 ///
 /// extendr's own wrapper hands a panic's text to `throw_r_error`
@@ -17690,7 +17677,6 @@ extendr_module! {
     fn ferx_rust_unstated_selection;
     fn ferx_rust_fit_json_canonical;
     fn ferx_rust_take_engine_diagnostic;
-    fn ferx_rust_autodiff_enabled;
     fn ferx_rust_test_panic;
     fn ferx_rust_test_fit_outcome;
     fn ferx_rust_known_blocks;

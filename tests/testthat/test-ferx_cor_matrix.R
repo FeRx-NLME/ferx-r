@@ -1,8 +1,5 @@
 
 # ---- header from test-fit.R ----
-# Local aliases avoid the ::: operator (undesirable_operator_linter).
-ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "ferx")
-
 # Return structure — Tier 1
 
 

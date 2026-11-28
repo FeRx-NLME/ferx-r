@@ -153,12 +153,6 @@ ferx_rust_take_engine_diagnostic <- function() {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_autodiff_enabled <- function() {
-  .Call("wrap__ferx_rust_autodiff_enabled")
-}
-
-#' @title Internal Rust backend binding
-#' @keywords internal
 ferx_rust_test_panic <- function(msg) {
   .Call("wrap__ferx_rust_test_panic", msg)
 }
