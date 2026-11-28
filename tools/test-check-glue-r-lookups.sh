@@ -134,6 +134,12 @@ case_ eval_qualified_with_args 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"
 case_ eval_qualified_then_expr 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("base::tempdir(); 1"); }'
 case_ eval_qualified_newline_then_expr 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("base::tempdir()\nx"); }'
 case_ eval_qualified_not_called 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("base::pi"); }'
+# #783 review finding 1: the extra code before the qualified call, so the
+# leading `^` anchor is what refuses it.
+case_ eval_unqualified_before_qualified 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("data.frame(); base::tempdir()"); }'
+# #783 review finding 2: an allowed call must not end the line's scan, so a
+# refused one after it on the same line is still reported.
+case_ eval_allowed_then_refused_same_line 1 "lib.rs:4: eval_string() evaluates" "$CLEAN$NL"'fn f() { let x = eval_string("base::tempdir()"); let y = eval_string("data.frame()"); }'
 case_ use_rename_call 1 "lib.rs:4: call is imported or renamed here" "$CLEAN$NL"'use extendr_api::{call as c};'"$NL"'fn f() { let x = c!("list"); }'
 case_ use_multiline_R 1 "lib.rs:6: R is imported or renamed here" "$CLEAN$NL"'use extendr_api::{'"$NL"'    List,'"$NL"'    R,'"$NL"'};'
 case_ lookalikes 0 "glue R lookups OK" "$CLEAN$NL"'fn eval(&self) {}'"$NL"'fn f(l: Robj, e: &Environment) {'"$NL"'    let call = 1; let var = call + 1; let global = var;'"$NL"'    let a = l.eval_with_env(e); let b = factor(2); let c = R(3); let d = l.call(p);'"$NL"'    let s = "R!(1) call!(x) global_env()"; let my_global_env = 0;'"$NL"'    let m = l.global_env(); let n = l.eval_string(code); let o = Self::eval(l);'"$NL"'}'"$NL"'use std::io::Read;'
