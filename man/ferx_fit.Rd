@@ -366,7 +366,13 @@ out of reach of \code{inner_restarts} and \code{inner_screen}. It
 also checks a stall at a large gradient against the gradients around
 it (gradient sampling) and leaves a kink's valley floor along it. Off
 by default because the kicks run whether or not the model has a kink:
-2-20x slower on fast ODE models without one (ferx-core #3159).}
+2-20x slower on fast ODE models without one (ferx-core #3159). The
+stall escape alone runs by default on an ODE model whose prediction
+has a kink (an \code{if}, \code{min}, \code{max}, \code{clamp},
+\code{abs}, \code{floor}, \code{ceil} or \code{round} reading a
+random effect or a state, in \code{[individual_parameters]} or a
+\code{[scaling]} readout); \code{TRUE} adds the kicks and turns the
+escape on for every model (ferx-core #3210).}
 \item{\code{inner_optimizer}}{\code{"auto"} (default), \code{"bfgs"},
 \code{"lbfgs"} or \code{"nelder_mead"}. Inner-loop algorithm.
 \code{"auto"} uses dense BFGS, switching to limited-memory L-BFGS above
