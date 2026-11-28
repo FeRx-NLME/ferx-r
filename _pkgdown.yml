@@ -110,3 +110,6 @@ articles:
       - articles/special-features
       - articles/uncertainty-sir
       - articles/derived-output
+  - title: "Scenarios"
+    contents:
+      - articles/scenarios-qtc
