@@ -70,15 +70,14 @@ warfarin_relabelled <- function(key, labels, no_obs = integer()) {
   })
 }
 
-# "a" (number 1, its position) then "1": adjacent subjects with the same
-# sdtab number, so their rows are one run. A later "1" repeats an ID
-# non-contiguously.
+# "a" then "1": adjacent subjects that a numeric sdtab ID used to merge into
+# one run ("a" became 1, its position; #786 made the ID the text). A later
+# "1" repeats an ID non-contiguously.
 repeat_case <- function() {
   warfarin_relabelled("repeat", c("1" = "a", "2" = "1", "4" = "1"))
 }
 # "p", then "q" without observations, then "p" again: the two "p" blocks are
-# adjacent in predictions.csv and the text cannot tell them apart, while
-# their sdtab numbers are their positions, 1 and 3.
+# adjacent in predictions.csv and sdtab, and the text cannot tell them apart.
 gap_case <- function() {
   warfarin_relabelled("gap", c("1" = "p", "2" = "q", "3" = "p"), no_obs = 2L)
 }
@@ -147,12 +146,13 @@ test_that("fit$subject_summary holds the engine's per-subject values (#554)", {
     owner <- rep.int(seq_len(nrow(summ)), summ$n_obs)
     expect_identical(fit$sdtab$EBE_OFV, summ$ofv_contribution[owner])
   }
-  # The cases are what they claim: the repeat case's first two subjects share
-  # an sdtab number, the gap case has a subject without rows.
-  expect_identical(unique(repeat_case()$fit$sdtab$ID)[1:2], c(1, 3))
+  # The cases are what they claim, with the sdtab ID the subject's text
+  # (#786): the repeat case's "1" comes back after another subject; the gap
+  # case's two "p" subjects, with "q" between them without rows, are one run.
+  expect_identical(rle(repeat_case()$fit$sdtab$ID)$values[1:4], c("a", "1", "3", "1"))
   gap <- gap_case()$fit
   expect_identical(gap$subject_summary$n_obs[2], 0L)
-  expect_identical(unique(gap$sdtab$ID)[1:2], c(1, 3))
+  expect_identical(rle(gap$sdtab$ID)$values[1:2], c("p", "4"))
 })
 
 test_that("ebes.csv carries each subject's own ofv_contribution and n_obs (#540)", {

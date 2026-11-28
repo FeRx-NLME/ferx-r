@@ -1954,7 +1954,7 @@ fn adaptive_decomposition_to_r(
     }
     let mut cols: Vec<(&str, Robj)> = mc.into_pairs();
     cols.push(("SCOPE", scope.into()));
-    cols.push(("ID", id.into()));
+    cols.push(("ID", subject_id_column(id)));
     cols.push(("LAYER", layer.into()));
     cols.push(("STATUS", status.into()));
     cols.push(("VALUE", value.into()));
@@ -1973,7 +1973,7 @@ fn adaptive_decomposition_to_r(
         mc.push(&k.metric);
     }
     let mut cols: Vec<(&str, Robj)> = mc.into_pairs();
-    cols.push(("ID", d.skipped.iter().map(|k| k.subject.clone()).collect::<Vec<String>>().into()));
+    cols.push(("ID", subject_id_column(d.skipped.iter().map(|k| &k.subject))));
     cols.push((
         "N_MISSING",
         d.skipped.iter().map(|k| k.n_missing as i32).collect::<Vec<i32>>().into(),
@@ -2017,7 +2017,7 @@ fn adaptive_result_to_list(
             ("DRAW", l.iter().map(|e| e.draw as i32).collect::<Vec<i32>>().into()),
             ("SIM", l.iter().map(|e| e.sim as i32).collect::<Vec<i32>>().into()),
             ("REP", l.iter().map(|e| e.rep as i32).collect::<Vec<i32>>().into()),
-            ("ID", l.iter().map(|e| e.subject.clone()).collect::<Vec<String>>().into()),
+            ("ID", subject_id_column(l.iter().map(|e| &e.subject))),
             ("TIME", l.iter().map(|e| e.time).collect::<Vec<f64>>().into()),
             ("AMT", l.iter().map(|e| e.amt).collect::<Vec<f64>>().into()),
             ("CMT", l.iter().map(|e| e.cmt as i32).collect::<Vec<i32>>().into()),
@@ -2041,7 +2041,7 @@ fn adaptive_result_to_list(
             ("DRAW", d.iter().map(|e| e.draw as i32).collect::<Vec<i32>>().into()),
             ("SIM", d.iter().map(|e| e.sim as i32).collect::<Vec<i32>>().into()),
             ("REP", d.iter().map(|e| e.rep as i32).collect::<Vec<i32>>().into()),
-            ("ID", d.iter().map(|e| e.subject.clone()).collect::<Vec<String>>().into()),
+            ("ID", subject_id_column(d.iter().map(|e| &e.subject))),
             ("DECISION", d.iter().map(|e| e.decision_idx as i32).collect::<Vec<i32>>().into()),
             ("TIME", d.iter().map(|e| e.time).collect::<Vec<f64>>().into()),
             ("SIGNAL", d.iter().map(|e| first_signal(&e.observed_signals)).collect::<Vec<f64>>().into()),
@@ -2063,7 +2063,7 @@ fn adaptive_result_to_list(
             ("DRAW", m.iter().map(|e| e.draw as i32).collect::<Vec<i32>>().into()),
             ("SIM", m.iter().map(|e| e.sim as i32).collect::<Vec<i32>>().into()),
             ("REP", m.iter().map(|e| e.rep as i32).collect::<Vec<i32>>().into()),
-            ("ID", m.iter().map(|e| e.subject.clone()).collect::<Vec<String>>().into()),
+            ("ID", subject_id_column(m.iter().map(|e| &e.subject))),
             ("CUM_DOSE", m.iter().map(|e| e.cumulative_dose).collect::<Vec<f64>>().into()),
             ("N_DOSES", m.iter().map(|e| e.n_doses as i32).collect::<Vec<i32>>().into()),
             ("N_INCREASES", m.iter().map(|e| e.n_increases as i32).collect::<Vec<i32>>().into()),
@@ -2429,7 +2429,7 @@ fn ferx_rust_predict(
         // which still holds the ones a compartment-free model makes moot.
         Ok(attach_sim_warnings(
             r_data_frame(
-                vec![("ID", id.into()), ("TIME", time.into()), ("PRED", pred.into())],
+                vec![("ID", subject_id_column(id)), ("TIME", time.into()), ("PRED", pred.into())],
                 results.len(),
             ),
             occasion_notes,
@@ -2537,7 +2537,7 @@ fn ferx_rust_predict_from_fit(
         // Core's non-fit bundle; see `ferx_rust_predict` (ferx-r #426).
         Ok(attach_sim_warnings(
             r_data_frame(
-                vec![("ID", id.into()), ("TIME", time.into()), ("PRED", pred.into())],
+                vec![("ID", subject_id_column(id)), ("TIME", time.into()), ("PRED", pred.into())],
                 results.len(),
             ),
             occasion_notes,
@@ -2564,7 +2564,7 @@ fn survival_results_to_df(results: &[ferx_core::SurvivalPredictionResult]) -> Ro
     let mean_survival: Vec<f64> = results.iter().map(|r| r.mean_survival).collect();
     r_data_frame(
         vec![
-            ("ID", id.into()),
+            ("ID", subject_id_column(id)),
             ("CMT", cmt.into()),
             ("TIME", time.into()),
             ("survival", survival.into()),
@@ -3508,9 +3508,9 @@ fn tte_npde_table(
     ) {
         Ok((per_subject, warnings)) => {
             let (mut id, mut time, mut cmt, mut npde) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-            for (si, (subject, scores)) in population.subjects.iter().zip(&per_subject).enumerate() {
+            for (subject, scores) in population.subjects.iter().zip(&per_subject) {
                 for s in scores {
-                    id.push(sdtab_id(&subject.id, si));
+                    id.push(subject.id.as_str());
                     time.push(s.time);
                     cmt.push(s.cmt as i32);
                     npde.push(s.npde);
@@ -3530,7 +3530,7 @@ fn tte_npde_table(
             }));
             let n = id.len();
             let table = r_data_frame(
-                vec![("ID", id.into()), ("TIME", time.into()), ("CMT", cmt.into()), ("NPDE", npde.into())],
+                vec![("ID", subject_id_column(id)), ("TIME", time.into()), ("CMT", cmt.into()), ("NPDE", npde.into())],
                 n,
             );
             (table, notes)
@@ -3996,11 +3996,10 @@ fn ferx_rust_npde_from_fit(
         .map_err(|e| engine_refusal("npde error: ", e))?;
 
         // Flatten per-subject NPDE/NPD back to one row per observation. ID and TIME
-        // are emitted exactly as `io::output::sdtab` builds them — numeric ID
-        // (`id.parse::<f64>()`, falling back to the 1-based subject index) and the
-        // raw data TIME — so the R side can align this table to `fit$sdtab`
+        // are emitted as `fit$sdtab` holds them - the subject's ID text (#786) and
+        // the raw data TIME - so the R side can align this table to `fit$sdtab`
         // positionally and assert per-row ID/TIME agreement rather than re-joining.
-        let mut id: Vec<f64> = Vec::new();
+        let mut id: Vec<&str> = Vec::new();
         let mut time: Vec<f64> = Vec::new();
         let mut npde: Vec<f64> = Vec::new();
         let mut npd: Vec<f64> = Vec::new();
@@ -4008,10 +4007,9 @@ fn ferx_rust_npde_from_fit(
         // (ferx-core #2871): EPRED, and PWRES under its NONMEM name EWRES too.
         let mut epred: Vec<f64> = Vec::new();
         let mut pwres: Vec<f64> = Vec::new();
-        for (si, (subj, sn)) in population.subjects.iter().zip(per_subject.iter()).enumerate() {
-            let id_num = subj.id.parse::<f64>().unwrap_or(si as f64 + 1.0);
+        for (subj, sn) in population.subjects.iter().zip(per_subject.iter()) {
             for j in 0..subj.observations.len() {
-                id.push(id_num);
+                id.push(subj.id.as_str());
                 time.push(
                     subj.obs_raw_times
                         .get(j)
@@ -4029,7 +4027,7 @@ fn ferx_rust_npde_from_fit(
         let n = id.len();
         let mut df: Robj = r_data_frame(
             vec![
-                ("ID", id.into()),
+                ("ID", subject_id_column(id)),
                 ("TIME", time.into()),
                 ("NPDE", npde.into()),
                 ("NPD", npd.into()),
@@ -5006,10 +5004,65 @@ fn prepare_bundle(bundle: &[u8]) -> std::result::Result<PreparedBundle, String> 
     Ok(prepared)
 }
 
-/// The sdtab ID of subject `position` (0-based): its ID as a number, else its
-/// 1-based position, as `ferx_core::io::output::sdtab` numbers it.
-fn sdtab_id(id: &str, position: usize) -> f64 {
-    id.parse::<f64>().unwrap_or(position as f64 + 1.0)
+/// Every `ID` column the glue returns to R: character, each cell the subject's ID
+/// text verbatim, as `fit$subject_ids` and the `.fitrx` bundle hold it (#786). An
+/// ID is a key, not a quantity: parsing it to a number turns `"001"` into `1`,
+/// merges subjects `1` and `1.0`, and makes the column's type depend on the data.
+/// `tools/check-glue-id-columns.sh` fails a returned `("ID", ..)` column built any
+/// other way. A cell that names no subject (a population-level row) is `NA`.
+fn subject_id_column<I>(ids: I) -> Robj
+where
+    I: IntoIterator,
+    I::Item: SubjectIdCell,
+{
+    ids.into_iter()
+        .map(SubjectIdCell::into_cell)
+        .collect::<Vec<Option<String>>>()
+        .into()
+}
+
+/// A cell of [`subject_id_column`]: a subject's ID text, or `None` for `NA`.
+trait SubjectIdCell {
+    fn into_cell(self) -> Option<String>;
+}
+impl SubjectIdCell for String {
+    fn into_cell(self) -> Option<String> {
+        Some(self)
+    }
+}
+impl SubjectIdCell for &String {
+    fn into_cell(self) -> Option<String> {
+        Some(self.clone())
+    }
+}
+impl SubjectIdCell for &str {
+    fn into_cell(self) -> Option<String> {
+        Some(self.to_string())
+    }
+}
+impl SubjectIdCell for Option<String> {
+    fn into_cell(self) -> Option<String> {
+        self
+    }
+}
+
+/// Each sdtab row's subject (0-based), in the order `ferx_core::io::output::sdtab`
+/// lays the rows out and [`sdtab_entries`] writes them: every subject's Gaussian
+/// rows in subject order, then every subject's discrete rows, then every subject's
+/// time-to-event rows.
+fn sdtab_row_subjects(fit: &FitResult) -> Vec<usize> {
+    let repeat = |count: &dyn Fn(&SubjectResult) -> usize| -> Vec<usize> {
+        fit.subjects
+            .iter()
+            .enumerate()
+            .flat_map(|(si, sr)| std::iter::repeat_n(si, count(sr)))
+            .collect()
+    };
+    let mut rows = repeat(&|sr| sr.ipred.len());
+    rows.extend(repeat(&|sr| sr.discrete_rows.len()));
+    #[cfg(feature = "survival")]
+    rows.extend(repeat(&|sr| sr.tte_rows.len()));
+    rows
 }
 
 /// The bundle entry holding the discrete and time-to-event rows of `fit$sdtab` in
@@ -5233,8 +5286,10 @@ fn rewritten_bundle(
     bundle_with_entries(&bytes, &changes)
 }
 
-/// `fit$sdtab` and each subject's occasion labels, read from the rows the bundle
-/// records, since a bundle need not hold the data they were computed from.
+/// `fit$sdtab`, each of its rows' subject (0-based) and each subject's occasion
+/// labels, read from the rows the bundle records, since a bundle need not hold the
+/// data they were computed from. The `ID` column holds placeholders: R gets the
+/// subjects' text ([`sdtab_to_dataframe`]).
 ///
 /// The Gaussian rows are `predictions.csv`. The other rows are
 /// [`ENDPOINT_ROWS_ENTRY`], or for a bundle without it (one core wrote) the discrete
@@ -5247,7 +5302,7 @@ fn recorded_rows(
     bundle: &[u8],
     fit: &mut FitResult,
     population: Option<&Population>,
-) -> std::result::Result<(Vec<(String, Vec<f64>)>, Vec<Vec<u32>>), String> {
+) -> std::result::Result<(Vec<(String, Vec<f64>)>, Vec<usize>, Vec<Vec<u32>>), String> {
     let (header, rows) = bundle_csv(bundle, "predictions.csv")?
         .ok_or_else(|| "the bundle has no predictions.csv".to_string())?;
     let mut cols: Vec<(String, Vec<f64>)> = header
@@ -5271,9 +5326,12 @@ fn recorded_rows(
             occasions[si].push(label as u32);
         }
     }
+    // The `ID` cells are the subject's text, filled from `subjects` when the table
+    // reaches R ([`sdtab_to_dataframe`]); the numbers here are placeholders.
     if let Some(id) = column(&cols, "ID") {
-        cols[id].1 = positions.iter().map(|&si| sdtab_id(&fit.subjects[si].id, si)).collect();
+        cols[id].1 = vec![f64::NAN; positions.len()];
     }
+    let mut subjects = positions.clone();
 
     if let Some((extra_header, extra_rows)) = bundle_csv(bundle, ENDPOINT_ROWS_ENTRY)? {
         fn cell<'a>(header: &[String], name: &str, row: &'a [String]) -> Option<&'a str> {
@@ -5291,9 +5349,10 @@ fn recorded_rows(
                 .filter(|&s| (1..=fit.subjects.len()).contains(&s))
                 .ok_or_else(|| format!("{ENDPOINT_ROWS_ENTRY}: a row names no subject"))?
                 - 1;
+            subjects.push(si);
             for (name, values) in &mut cols {
                 values.push(if name == "ID" {
-                    sdtab_id(&fit.subjects[si].id, si)
+                    f64::NAN
                 } else {
                     cell(&extra_header, name, row).map_or(f64::NAN, csv_number)
                 });
@@ -5352,9 +5411,10 @@ fn recorded_rows(
         }
         for (si, sr) in fit.subjects.iter().enumerate() {
             for d in &sr.discrete_rows {
+                subjects.push(si);
                 for (name, values) in &mut cols {
                     values.push(match name.as_str() {
-                        "ID" => sdtab_id(&sr.id, si),
+                        "ID" => f64::NAN,
                         "CMT" => d.cmt as f64,
                         "TIME" => d.time,
                         "DV" => d.dv,
@@ -5380,9 +5440,10 @@ fn recorded_rows(
             }
             for (si, sr) in fit.subjects.iter().enumerate() {
                 for t in &sr.tte_rows {
+                    subjects.push(si);
                     for (name, values) in &mut cols {
                         values.push(match name.as_str() {
-                            "ID" => sdtab_id(&sr.id, si),
+                            "ID" => f64::NAN,
                             "CMT" => t.cmt as f64,
                             "TIME" => t.time,
                             "DV" => t.dv,
@@ -5399,7 +5460,7 @@ fn recorded_rows(
             }
         }
     }
-    Ok((cols, occasions))
+    Ok((cols, subjects, occasions))
 }
 
 /// Whether `subject` holds time-to-event rows (none without the `survival` feature).
@@ -5544,13 +5605,14 @@ fn ferx_rust_load_fit(bundle: Raw) -> List {
         let mut fit = loaded.fit;
         restore_subject_ids(&mut fit, prepared.escapes);
         check_loaded_fit(&fit)?;
-        let (sdtab, occasions) = recorded_rows(bytes, &mut fit, loaded.population.as_ref())?;
+        let (sdtab, sdtab_subjects, occasions) = recorded_rows(bytes, &mut fit, loaded.population.as_ref())?;
         let parsed = loaded_model(&fit, &loaded.model_source);
         let model = parsed.as_ref().map(|p| &p.model);
         let individual_estimates =
             loaded_individual_estimates(&fit, loaded.population.as_ref(), model);
         let view = FitView {
             sdtab,
+            sdtab_subjects,
             occasions,
             individual_estimates,
             theta_levels: r_null(),
@@ -5699,9 +5761,14 @@ fn ferx_rust_bundle_with_sdtab(bundle: Raw, sdtab: List) -> Raw {
         // A bundle written before ferx-core #911 keeps its time-to-event rows only
         // in the glue's entry. Only `fit` is wanted here, not the rows.
         recorded_rows(bytes, &mut fit, None)?;
+        // `ID` is the subjects' text (#786), which `sdtab_entries` writes from the
+        // fit, so its cells are not read here.
         let columns = sdtab
             .iter()
             .map(|(name, column)| {
+                if name == "ID" {
+                    return Ok((name.to_string(), vec![f64::NAN; column.len()]));
+                }
                 column
                     .as_real_vector()
                     .map(|values| (name.to_string(), values))
@@ -7784,7 +7851,7 @@ fn sim_results_to_df(results: &[ferx_core::api::SimulationResult]) -> Robj {
     let mut cols: Vec<(&str, Robj)> = vec![
         ("DRAW", draw.into()),
         ("SIM", sim.into()),
-        ("ID", id.into()),
+        ("ID", subject_id_column(id)),
         ("TIME", time.into()),
         ("CMT", cmt.into()),
         ("IPRED", ipred.into()),
@@ -7839,7 +7906,7 @@ fn sim_parameters_to_df(table: &ferx_core::SimulatedParameters, model: &Compiled
     let mut values: Vec<Robj> = vec![
         rows.iter().map(|r| r.draw as i32).collect::<Vec<i32>>().into(),
         rows.iter().map(|r| r.sim as i32).collect::<Vec<i32>>().into(),
-        rows.iter().map(|r| r.id.clone()).collect::<Vec<String>>().into(),
+        subject_id_column(rows.iter().map(|r| &r.id)),
     ];
     let has_mixnum = rows.iter().any(|r| r.mixnum.is_some());
     if has_mixnum {
@@ -8351,8 +8418,10 @@ fn warning_details_json(entries: &[ferx_core::WarningEntry]) -> Vec<String> {
 /// this build cannot parse. Everything else in the list comes from the `FitResult`,
 /// by one code path, so a loaded fit matches a fresh one by construction.
 struct FitView {
-    /// The `sdtab` columns.
+    /// The `sdtab` columns. The numbers in `ID` are not read: R gets the subjects' text.
     sdtab: Vec<(String, Vec<f64>)>,
+    /// Each `sdtab` row's subject (0-based), which its `ID` cell names.
+    sdtab_subjects: Vec<usize>,
     /// Each subject's occasion label per observation row, for `ebe_kappas`.
     occasions: Vec<Vec<u32>>,
     individual_estimates: Robj,
@@ -8395,6 +8464,7 @@ fn fit_result_to_list(
         Err(e) => (r_null(), e.into()),
     };
     let view = FitView {
+        sdtab_subjects: sdtab_row_subjects(result),
         sdtab,
         occasions: population.subjects.iter().map(|s| s.occasions.clone()).collect(),
         individual_estimates: build_individual_estimates(result, population, model),
@@ -8520,7 +8590,7 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
     let se_sigma: Vec<f64> = result.se_sigma.clone().unwrap_or_default();
 
     // SDTAB as data frame
-    let sdtab = sdtab_to_dataframe(&view.sdtab);
+    let sdtab = sdtab_to_dataframe(result, &view.sdtab, &view.sdtab_subjects)?;
 
     // Covariate table (NULL unless the model declared a `[covariates]` block).
     let covtab = covtab_to_dataframe(result.covariate_table.as_ref());
@@ -9012,7 +9082,7 @@ fn fit_view_to_list(result: &FitResult, view: FitView) -> std::result::Result<Li
         }
         let n_rows = ids.len();
         let mut pairs: Vec<(&str, Robj)> = Vec::new();
-        pairs.push(("ID", ids.into()));
+        pairs.push(("ID", subject_id_column(ids)));
         pairs.push(("OCC", occs.into()));
         for (k, name) in kappa_names.iter().enumerate() {
             pairs.push((name.as_str(), kappa_cols[k].clone().into()));
@@ -9650,7 +9720,7 @@ fn build_ebe_kappas_by_level(result: &FitResult) -> Robj {
             }
         }
         let n_rows = ids.len();
-        let mut pairs: Vec<(&str, Robj)> = vec![("ID", ids.into()), ("GROUP", group.into())];
+        let mut pairs: Vec<(&str, Robj)> = vec![("ID", subject_id_column(ids)), ("GROUP", group.into())];
         for (name, col) in level.columns.iter().zip(labels) {
             pairs.push((name.as_str(), col.into()));
         }
@@ -9695,7 +9765,7 @@ fn build_ebe_etas(result: &FitResult) -> Robj {
     }
 
     let mut pairs: Vec<(&str, Robj)> = Vec::new();
-    pairs.push(("ID", ids.into()));
+    pairs.push(("ID", subject_id_column(ids)));
     for k in 0..n_eta {
         pairs.push((eta_names[k].as_str(), eta_cols[k].clone().into()));
     }
@@ -9748,7 +9818,7 @@ fn build_subject_summary(result: &FitResult) -> Robj {
     let n_tte: Vec<i32> = vec![0; n_subj];
     finish_df(
         vec![
-            ("ID", ids.into()),
+            ("ID", subject_id_column(ids)),
             ("ofv_contribution", ofv.into()),
             ("n_obs", n_obs.into()),
             ("n_obs_discrete", n_discrete.into()),
@@ -9793,7 +9863,7 @@ fn build_cond_dist_df(result: &FitResult, cd: &CondDist) -> Robj {
     }
 
     let mut pairs: Vec<(&str, Robj)> = Vec::new();
-    pairs.push(("ID", ids.into()));
+    pairs.push(("ID", subject_id_column(ids)));
     pairs.push(("ETA", etas.into()));
     pairs.push(("COND_MEAN", cond_mean.into()));
     pairs.push(("COND_SD", cond_sd.into()));
@@ -9886,7 +9956,7 @@ fn build_individual_estimates(
         .collect();
     let labels = unique_column_names(&raw);
     let mut pairs: Vec<(&str, Robj)> = Vec::with_capacity(columns.len() + 1);
-    pairs.push((labels[0].as_str(), ids.into()));
+    pairs.push((labels[0].as_str(), subject_id_column(ids)));
     for (j, &name) in columns.iter().enumerate() {
         let values: Vec<f64> = maps
             .iter()
@@ -9901,25 +9971,41 @@ fn build_individual_estimates(
     df.into()
 }
 
-fn sdtab_to_dataframe(cols: &[(String, Vec<f64>)]) -> Robj {
+/// `fit$sdtab`: the numeric columns as they are, and `ID` the text of each row's
+/// subject in `subjects` (#786), never the number core's table holds for it.
+fn sdtab_to_dataframe(
+    fit: &FitResult,
+    cols: &[(String, Vec<f64>)],
+    subjects: &[usize],
+) -> std::result::Result<Robj, String> {
     if cols.is_empty() {
-        return ().into();
+        return Ok(().into());
+    }
+    let n_rows = cols[0].1.len();
+    if subjects.len() != n_rows || subjects.iter().any(|&si| si >= fit.subjects.len()) {
+        return Err(format!(
+            "internal: the sdtab has {n_rows} rows and names the subjects of {}",
+            subjects.len()
+        ));
     }
 
     let mut pairs: Vec<(&str, Robj)> = Vec::new();
     for (name, values) in cols {
-        pairs.push((name.as_str(), values.clone().into()));
+        if name == "ID" {
+            pairs.push(("ID", subject_id_column(subjects.iter().map(|&si| &fit.subjects[si].id))));
+        } else {
+            pairs.push((name.as_str(), values.clone().into()));
+        }
     }
 
     // Build data frame via list + class attribute
     let mut df = List::from_pairs(pairs);
     df.set_class(&["data.frame"]).unwrap();
 
-    let n_rows = cols[0].1.len();
     let row_names: Vec<i32> = (1..=n_rows as i32).collect();
     df.set_attrib("row.names", row_names).unwrap();
 
-    df.into()
+    Ok(df.into())
 }
 
 /// Convert a ferx-core `CovariateTable` into an R data.frame, or `NULL` when the
@@ -9938,7 +10024,7 @@ fn covtab_to_dataframe(table: Option<&ferx_core::CovariateTable>) -> Robj {
     let evids: Vec<i32> = table.rows.iter().map(|r| r.evid as i32).collect();
 
     let mut pairs: Vec<(&str, Robj)> = vec![
-        ("ID", ids.into()),
+        ("ID", subject_id_column(ids)),
         ("TIME", times.into()),
         ("EVID", evids.into()),
     ];

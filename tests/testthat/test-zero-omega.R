@@ -153,8 +153,8 @@ test_that("the estimates table reports theta and sigma but no omega rows", {
 #
 # A fit without random effects has no `ebe_etas` rows, and the binary example
 # has no `[individual_parameters]` either, so neither table #468 read IDs from
-# exists. `fit$subject_ids` carries them verbatim; `sdtab$ID` cannot, since it
-# is the engine's number for the ID (a text ID becomes its position).
+# exists. `fit$subject_ids` carries them verbatim, as `sdtab$ID` does since
+# #786 (it was the engine's number, a text ID its position).
 
 binary_sir <- function(f) ferx_sir(f, sir_samples = 400L, sir_resamples = 200L,
                                    sir_seed = 1L)

@@ -756,6 +756,11 @@ test_that(".ferx_fit_subject_ids falls back to one ID per sdtab subject block (#
   old <- list(ebe_etas = NULL, sdtab = data.frame(ID = c(1e5, 1e5, 7, 9, 9, 7, 2.5)))
   expect_identical(subject_ids(old, "ferx_covariance"),
                    c("100000", "7", "9", "7", "2.5"))
+  # Since #786 the column is the subjects' text, taken as it is: "001" stays
+  # "001", and "1" and "1.0" stay two subjects.
+  new <- list(ebe_etas = NULL,
+              sdtab = data.frame(ID = c("001", "001", "S2", "1", "1.0", "1.0")))
+  expect_identical(subject_ids(new, "ferx_covariance"), c("001", "S2", "1", "1.0"))
 })
 
 test_that(".ferx_fit_subject_id_set names the field the IDs came from (#555)", {

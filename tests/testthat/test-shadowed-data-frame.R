@@ -182,11 +182,11 @@ test_that("every glue table has data.frame()'s layout (#780, #781 review)", {
   npde <- capture_glue("ferx_rust_npde_from_fit",
                        suppressWarnings(ferx_calc_npde(pktte_fit(), nsim = 50L, seed = 5L)))[[1]]
   expect_data_frame_layout(npde, c(
-    ID = "numeric", TIME = "numeric", NPDE = "numeric", NPD = "numeric",
+    ID = "character", TIME = "numeric", NPDE = "numeric", NPD = "numeric",
     EPRED = "numeric", EWRES = "numeric", PWRES = "numeric"))
   tte <- attr(npde, "tte_npde", exact = TRUE)
   expect_gt(length(tte[[1]]), 0L)
-  expect_data_frame_layout(tte, c(ID = "numeric", TIME = "numeric",
+  expect_data_frame_layout(tte, c(ID = "character", TIME = "numeric",
                                   CMT = "integer", NPDE = "numeric"))
 })
 

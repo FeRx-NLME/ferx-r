@@ -182,9 +182,14 @@ validate_fit_for_params <- function(fit) {
     source <- "fit$individual_estimates$ID"
   } else if (length(fit$sdtab$ID) > 0L) {
     first <- !duplicated(.ferx_subject_index(fit$sdtab$ID))
-    ids <- vapply(fit$sdtab$ID[first], format, character(1),
-                  scientific = FALSE, digits = 15L, trim = TRUE,
-                  USE.NAMES = FALSE)
+    ids <- fit$sdtab$ID[first]
+    # A fit made before #786 holds the engine's number here; one since, the
+    # subject's text, taken as it is.
+    if (is.numeric(ids)) {
+      ids <- vapply(ids, format, character(1),
+                    scientific = FALSE, digits = 15L, trim = TRUE,
+                    USE.NAMES = FALSE)
+    }
     source <- "fit$sdtab$ID"
   }
   if (is.null(ids)) {

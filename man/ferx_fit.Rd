@@ -1373,7 +1373,9 @@ held at its initial value because it had no effect on the objective
 (see the \code{flat_parameter} warning), even without \code{FIX} in
 the model. The bundle holds them, so a reloaded fit carries the same
 flags.}
-\item{sdtab}{Data frame with ID, TIME, DV, PRED, IPRED, CWRES, IWRES,
+\item{sdtab}{Data frame with ID (character: the subject's ID text
+verbatim, as in the data and \code{subject_ids}; every \code{ID} column
+ferx returns is), TIME, DV, PRED, IPRED, CWRES, IWRES,
 EBE_OFV, N_OBS; OCC if any subject carries an occasion column; CENS
 if any rows are LOQ-censored; CMT if the dataset has more than one
 endpoint (any observation with \code{CMT != 1}).  TAFD (time after
