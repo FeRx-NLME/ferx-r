@@ -3,7 +3,7 @@
 [![R-CMD-check](https://github.com/FeRx-NLME/ferx-r/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/FeRx-NLME/ferx-r/actions/workflows/R-CMD-check.yaml)
 [![codecov](https://codecov.io/gh/FeRx-NLME/ferx-r/branch/main/graph/badge.svg)](https://codecov.io/gh/FeRx-NLME/ferx-r)
 [![CodeFactor](https://www.codefactor.io/repository/github/ferx-nlme/ferx-r/badge)](https://www.codefactor.io/repository/github/ferx-nlme/ferx-r)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT, links LGPL](https://img.shields.io/badge/license-MIT%20%2B%20LGPL%20components-blue.svg)](LICENSE.md)
 [![Dependencies](https://img.shields.io/badge/dependencies-2-brightgreen.svg)](DESCRIPTION)
 
 Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend.
@@ -287,4 +287,12 @@ to a NONMEM `$PRED` model.
 
 ## License
 
-MIT — see [LICENSE.md](LICENSE.md).
+The ferx R package's own code is MIT - see [LICENSE.md](LICENSE.md). Its
+compiled library statically links third-party code under other licenses:
+ferx-core and ferx-tools (MIT), ferx-search (the model-search engine,
+LGPL-3.0-or-later), NLopt (whose Luksan routines are LGPL-2.1-or-later) and
+other Rust crates. [`inst/COPYRIGHTS`](inst/COPYRIGHTS) has the details,
+including how to rebuild the package with a modified ferx-search, and
+[`inst/THIRD-PARTY-NOTICES.txt`](inst/THIRD-PARTY-NOTICES.txt) the notices of
+every linked crate. Installed, they are `system.file("COPYRIGHTS", package =
+"ferx")` and its neighbours.

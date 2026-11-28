@@ -72,14 +72,28 @@ RUN set -eux; \
     cargo +stable build --release --locked -p ferx-cli \
         --features ferx-core/ci,ferx-core/nn,ferx-core/survival; \
     install -m 0755 target/release/ferx /usr/local/bin/ferx; \
+    mkdir -p /usr/local/share/doc/ferx; \
+    /usr/local/bin/ferx --licenses > /usr/local/share/doc/ferx/ferx-cli-LICENSES.txt; \
+    grep -q 'GNU LESSER GENERAL PUBLIC LICENSE' /usr/local/share/doc/ferx/ferx-cli-LICENSES.txt; \
     printf '%s\n' "$rev" > /usr/local/share/ferx-core-rev; \
     rm -rf /src/core /opt/cargo/registry /opt/cargo/git
 
 # The R package (rebuilds the Rust staticlib from the same pinned commit, on
 # stable). Its build tree goes in the same RUN, for the same reason.
+# The package's license notices (#773) are installed with it; they are also
+# copied to /usr/local/share/doc/ferx, beside the CLI's, so the image carries
+# them in one well-known place. The build fails if any is missing.
 COPY . /src/ferx
-RUN R CMD INSTALL --no-multiarch /src/ferx \
-    && rm -rf /src/ferx /opt/cargo/registry /opt/cargo/git /tmp/Rtmp*
+RUN set -eu; \
+    R CMD INSTALL --no-multiarch /src/ferx; \
+    pkg=/usr/local/lib/R/site-library/ferx; \
+    for f in LICENSE COPYRIGHTS THIRD-PARTY-NOTICES.txt licenses/LGPL-3.0.txt \
+             licenses/GPL-3.0.txt licenses/LGPL-2.1.txt; do \
+        test -s "$pkg/$f"; \
+        mkdir -p "$(dirname /usr/local/share/doc/ferx/$f)"; \
+        cp "$pkg/$f" "/usr/local/share/doc/ferx/$f"; \
+    done; \
+    rm -rf /src/ferx /opt/cargo/registry /opt/cargo/git /tmp/Rtmp*
 
 # ===========================================================================
 # Runtime stage: R + installed packages + the CLI. No compilers, no Rust.
@@ -90,13 +104,17 @@ ARG FERX_R_REVISION=unknown
 LABEL org.opencontainers.image.title="ferx-r (slim)" \
       org.opencontainers.image.description="R + the ferx NLME package + the ferx CLI, no RStudio" \
       org.opencontainers.image.source="https://github.com/FeRx-NLME/ferx-r" \
-      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.licenses="MIT AND LGPL-3.0-or-later AND LGPL-2.1-or-later" \
       org.opencontainers.image.revision="${FERX_R_REVISION}"
 
 # rocker/r-ver installs packages into /usr/local/lib/R/site-library.
 COPY --from=build /usr/local/lib/R/site-library /usr/local/lib/R/site-library
 COPY --from=build /usr/local/bin/ferx /usr/local/bin/ferx
 COPY --from=build /usr/local/share/ferx-core-rev /usr/local/share/ferx-core-rev
+# License texts and notices for the package and the CLI: ferx's own code is
+# MIT, and both link ferx-search (LGPL-3.0-or-later) and NLopt
+# (LGPL-2.1-or-later). COPYRIGHTS says what applies to what.
+COPY --from=build /usr/local/share/doc/ferx /usr/local/share/doc/ferx
 
 # Unprivileged default user, uid 1000 so files written to a mounted project
 # usually belong to the host user. Ubuntu 24.04 bases ship an `ubuntu` user at

@@ -70,6 +70,10 @@ Although `Cargo.toml` tracks `branch = "main"`, **CI builds from the commit pinn
 
 To bump: run `tools/update-ferx-core-lock.sh` from the repo root (it advances all three pins to ferx-core `main` HEAD and verifies each `source = "git+..."` line survives, on one shared revision), then commit `src/rust/Cargo.lock`. `ferx-core`, `ferx-tools` and `ferx-search` come from the same repo and the same rev, so this is one bump and three lock entries — never a second pin to track. `cargo update -p ferx-core --precise <sha>` pins a specific revision; run it in `src/rust`, never through the wrapper, because a patch in place strips the git pin and writes a local path. The `R-CMD-check` workflow runs `tools/check-ferx-core-pin.sh`, which fails if any of the three loses its git source, if they land on different revisions, or if the lock carries `[[patch.unused]]` tables.
 
+### License notices (#773)
+
+ferx-r's own code is MIT, but the compiled package statically links ferx-search (LGPL-3.0-or-later) and NLopt's Luksan routines (LGPL-2.1-or-later), so it ships `inst/COPYRIGHTS` (what is under which license, and the rebuild-with-a-modified-ferx-search recipe), `inst/licenses/` (LGPL-3.0, GPL-3.0, LGPL-2.1) and `inst/THIRD-PARTY-NOTICES.txt`. The last is **generated** from `Cargo.lock` by `tools/third-party-notices.py` (every linked crate, its license files, the pinned ferx-core commit): `tools/update-ferx-core-lock.sh` regenerates it, and after any other lock change (a new dependency) run the script yourself and commit the file with the lock - R-CMD-check runs `--check` and fails a stale copy. Never describe the whole package as MIT (README, DESCRIPTION, image labels). `tools/vendor-rust.sh` fails if the vendored crates lose a required license file, and both Dockerfiles copy the notices (and `ferx --licenses`) to `/usr/local/share/doc/ferx`, which the docker workflow's smoke tests assert.
+
 ## Build & Install
 
 Requires a standard stable Rust toolchain.

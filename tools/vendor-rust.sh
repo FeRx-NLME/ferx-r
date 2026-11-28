@@ -77,6 +77,33 @@ grep -q '^directory = "vendor"$' "$STAGE/vendor-config.toml" || {
   exit 1
 }
 
+# The license files must travel with the vendored sources (#773): the tarball
+# carries LGPL code (ferx-search, NLopt's Luksan routines) as source, and those
+# licenses require their texts alongside it. cargo vendor copies each crate's
+# packaged file list, which keeps them today; this fails the release, by name,
+# the day an upstream exclude or a vendor change drops one. The per-crate
+# globs are relative to vendor/ (--versioned-dirs, so <name>-<version>/).
+missing=""
+for want in \
+    'ferx-core-*/LICENSE' \
+    'ferx-tools-*/LICENSE' \
+    'ferx-search-*/COPYING' \
+    'ferx-search-*/COPYING.LESSER' \
+    'ferx-search-*/NOTICE' \
+    'ferx-search-*/LICENSE-MIT' \
+    'nlopt-*/LICENSE' \
+    'nlopt-*/nlopt-*/COPYING' \
+    'nlopt-*/nlopt-*/src/algs/luksan/COPYRIGHT'; do
+  # shellcheck disable=SC2086 # the glob is meant to expand
+  set -- "$STAGE"/vendor/$want
+  [[ -f "$1" ]] || missing="$missing $want"
+done
+if [[ -n "$missing" ]]; then
+  echo "vendor: error: license files missing from the vendored crates:$missing" >&2
+  echo "vendor:   the source tarball must carry them (#773)." >&2
+  exit 1
+fi
+
 # The lock must come out of this byte-for-byte unchanged.
 "$TOOLS_DIR/check-ferx-core-pin.sh" Cargo.lock
 

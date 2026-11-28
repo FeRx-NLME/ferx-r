@@ -69,6 +69,10 @@ if ! bash tools/check-ferx-core-pin.sh "$LOCK" >/dev/null 2>"$CHECK_ERR"; then
   exit 2
 fi
 
+# inst/THIRD-PARTY-NOTICES.txt names the pinned commit and every linked crate's
+# version, so it moves with the lock (#773); R-CMD-check fails a stale copy.
+python3 tools/third-party-notices.py
+
 SHA=$(grep -m1 '^source = "git+https://github.com/FeRx-NLME/ferx-core' "$RUST_DIR/Cargo.lock" \
   | sed -E 's/.*#([0-9a-f]+).*/\1/')
 
@@ -76,3 +80,4 @@ echo
 echo "ferx-core, ferx-tools and ferx-search now pinned to: $SHA"
 echo "Commit suggestion:"
 echo "  chore(deps): update Cargo.lock to ferx-core main (${SHA:0:7})"
+echo "(commit inst/THIRD-PARTY-NOTICES.txt with it)"
