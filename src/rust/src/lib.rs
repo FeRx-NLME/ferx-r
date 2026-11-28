@@ -7771,15 +7771,6 @@ fn folded_fix(after: &[&str]) -> bool {
     false
 }
 
-/// Write a `[mixture]` fit's per-class overrides into their declarations
-/// (ferx-r #678), which `SeedInits` does not read: `overrides` is
-/// `FitResult::mixture_overrides`, each `omega(k)` override's class variance
-/// and then each `sigma(k)` override's class SD, in declaration order. A value
-/// is written on its line's own scale - the variance, or the SD under `(sd)`,
-/// for either kind - and replaces only the number after `~`. A `FIX` override
-/// is left as written, as a `FIX` base parameter is. A fit that records no
-/// overrides, or another count than the block declares, leaves every override
-/// as written, with a note.
 /// A `[mixture]` fit's override values in `fit$mixture_overrides` order (each
 /// `omega(k)` class variance, then each `sigma(k)` class sigma), read from its
 /// packed estimate, for a fit that records no values (a `.fitrx` saved before
@@ -7825,6 +7816,15 @@ fn mixture_overrides_from_packed(
     omega.chain(sigma).collect()
 }
 
+/// Write a `[mixture]` fit's per-class overrides into their declarations
+/// (ferx-r #678), which `SeedInits` does not read: `overrides` is
+/// `FitResult::mixture_overrides`, each `omega(k)` override's class variance
+/// and then each `sigma(k)` override's class SD, in declaration order. A value
+/// is written on its line's own scale - the variance, or the SD under `(sd)`,
+/// for either kind - and replaces only the number after `~`. A `FIX` override
+/// is left as written, as a `FIX` base parameter is. A fit that records no
+/// overrides, or another count than the block declares, leaves every override
+/// as written, with a note.
 fn seed_mixture_overrides(model_text: &str, overrides: &[f64], notes: &mut Vec<String>) -> String {
     // (line index, is_omega) of every override declaration, in file order.
     let lines: Vec<&str> = model_text.split_inclusive('\n').collect();
