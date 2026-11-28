@@ -305,16 +305,20 @@ ferx_vpc <- function(fit, n_sim = 200L, seed = 42L, pred_corr = FALSE,
 # only text field and sits between numbers, so a key reads back one way.
 # Rows sharing (CMT, ID, TIME) are exchangeable draws, so pairing them by
 # occurrence is right in distribution even where a selection dropped one.
-.ferx_vpc_key <- function(cmt, id, time, group = NULL) {
+.ferx_vpc_key <- function(cmt, id, time) {
   k <- paste(cmt, as.character(id), sprintf("%.17g", as.numeric(time)),
              sep = "|")
-  if (!is.null(group)) k <- paste(group, k, sep = "|")
   occ <- stats::ave(seq_along(k), k, FUN = seq_along)
   paste(k, occ, sep = "#")
 }
 
 # For each replicate, in `obs` order, the row of `sim` that simulates each
 # observation. Refuses unless every replicate matches every observation once.
+#
+# Every replicate simulates the same records in the same order, so only the
+# first is keyed. A replicate with the same CMT, ID and TIME at every position
+# takes its pairing; any other is keyed on its own. Keying every row instead
+# cost ~5 s at 200 x 10,000 observations, more than the simulation (#796).
 .ferx_vpc_match <- function(obs, sim, n_sim) {
   reps <- sort(unique(sim$SIM))
   if (length(reps) != n_sim) {
@@ -325,19 +329,32 @@ ferx_vpc <- function(fit, n_sim = 200L, seed = 42L, pred_corr = FALSE,
   }
   n_obs <- nrow(obs)
   k_obs <- .ferx_vpc_key(obs$CMT, obs$ID, obs$TIME)
-  k_sim <- .ferx_vpc_key(sim$CMT, sim$ID, sim$TIME, group = sim$SIM)
-  target <- paste(rep(reps, each = n_obs), rep(k_obs, length(reps)), sep = "|")
-  idx <- match(target, k_sim)
-  if (anyNA(idx)) {
-    miss <- which(is.na(idx))
-    r <- reps[[(miss[[1L]] - 1L) %/% n_obs + 1L]]
-    found <- sum(!is.na(idx[rep(reps, each = n_obs) == r]))
-    .ferx_vpc_mismatch(sprintf(
-      "replicate %s matches %d of the fit's %d observations", format(r),
-      found, n_obs
-    ))
+  rows <- unname(split(seq_len(nrow(sim)), factor(sim$SIM, levels = reps)))
+  pair <- function(j) {
+    r <- rows[[j]]
+    m <- match(k_obs, .ferx_vpc_key(sim$CMT[r], sim$ID[r], sim$TIME[r]))
+    if (anyNA(m)) {
+      .ferx_vpc_mismatch(sprintf(
+        "replicate %s matches %d of the fit's %d observations",
+        format(reps[[j]]), sum(!is.na(m)), n_obs
+      ))
+    }
+    m
   }
-  idx
+  m1 <- pair(1L)
+  first <- rows[[1L]]
+  same <- lengths(rows) == length(first)
+  if (any(same)) {
+    pos <- unlist(rows[same], use.names = FALSE)
+    ref <- rep(first, sum(same))
+    eq <- (sim$CMT[pos] == sim$CMT[ref] & sim$ID[pos] == sim$ID[ref] &
+             sim$TIME[pos] == sim$TIME[ref]) %in% TRUE
+    same[same] <- colSums(matrix(!eq, nrow = length(first))) == 0L
+  }
+  idx <- lapply(seq_along(rows), function(j) {
+    rows[[j]][if (same[[j]]) m1 else pair(j)]
+  })
+  unlist(idx, use.names = FALSE)
 }
 
 .ferx_vpc_mismatch <- function(what) {

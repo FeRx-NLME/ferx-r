@@ -382,3 +382,39 @@ test_that("a replicate that does not match is reported as a ferx bug with the co
   sim$ID[5:6] <- c("1", "2"); sim$TIME[5:6] <- c(2, 1)
   expect_identical(.ferx_vpc_match(obs, sim, 2L), 1:6)
 })
+
+test_that("a replicate holding the records in another order pairs by key, not by replicate 1's positions", {
+  # Mutations: replicate 1's positions reused without the structure check; a
+  # differing replicate refused instead of keyed on its own.
+  obs <- data.frame(ID = c("1", "1", "2"), TIME = c(1, 2, 1), CMT = 1)
+  sim <- data.frame(SIM = rep(1:2, each = 3), ID = c("1", "1", "2", "2", "1", "1"),
+                    TIME = c(1, 2, 1, 1, 1, 2), CMT = 1)
+  expect_identical(.ferx_vpc_match(obs, sim, 2L), c(1L, 2L, 3L, 5L, 6L, 4L))
+})
+
+test_that("the pairing equals a per-row key match on a randomized simulation", {
+  # Reference: every row keyed by (SIM, CMT, ID, TIME, occurrence), as before
+  # #796 finding 6. Replicates differ in length (dropped rows), order and
+  # repeated times, so both branches of .ferx_vpc_match() run.
+  set.seed(796)
+  n <- 60L
+  base <- data.frame(CMT = sample(2:3, n, TRUE), ID = as.character(sample(1:8, n, TRUE)),
+                     TIME = sample(c(0.5, 1, 2, 4), n, TRUE))
+  keep <- !duplicated(base) | seq_len(n) %% 7L == 0L
+  base <- base[keep, ]
+  obs <- base[sample(nrow(base), nrow(base) - 5L), ]
+  obs <- obs[order(as.integer(rownames(obs))), ]
+  sim <- do.call(rbind, lapply(1:6, function(r) {
+    b <- base
+    if (r %in% c(2L, 5L)) b <- b[sample(nrow(b)), ]
+    if (r == 4L) b <- rbind(b, base[1:3, ])
+    cbind(SIM = r, b)
+  }))
+  ref_key <- function(sim_, cmt, id, time) {
+    k <- paste(sim_, cmt, id, sprintf("%.17g", time), sep = "|")
+    paste(k, stats::ave(seq_along(k), k, FUN = seq_along), sep = "#")
+  }
+  k_sim <- ref_key(sim$SIM, sim$CMT, sim$ID, sim$TIME)
+  k_obs <- unlist(lapply(1:6, function(r) ref_key(rep(r, nrow(obs)), obs$CMT, obs$ID, obs$TIME)))
+  expect_identical(.ferx_vpc_match(obs, sim, 6L), match(k_obs, k_sim))
+})
