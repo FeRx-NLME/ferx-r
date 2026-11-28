@@ -1565,8 +1565,10 @@ fn simulate_adaptive(
                 decomposition.as_ref().map(|d| &d.difference),
             );
             List::from_pairs(vec![
-                ("adaptive", attach_sim_warnings(adaptive, occasion_notes, &result)),
-                ("reference", attach_sim_warnings(reference_list, OccasionNotes::none(), &reference)),
+                // Both arms read the same data, so both carry its occasion
+                // notes: shared, they stay untagged in R (#785 review round 2, N1).
+                ("adaptive", attach_sim_warnings(adaptive, occasion_notes.clone(), &result)),
+                ("reference", attach_sim_warnings(reference_list, occasion_notes, &reference)),
                 ("difference", List::from_pairs(difference).into()),
             ])
             .into()
@@ -11243,6 +11245,10 @@ fn iov_occasion_from_r(
 mod occasion_notes {
     use super::*;
 
+    /// `Clone` copies notes this module built; it cannot make one from an
+    /// arbitrary `Vec<String>` (a contrast's two arms read the same data, so
+    /// they carry the same notes, ferx-r #785).
+    #[derive(Clone)]
     pub(super) struct OccasionNotes(Vec<String>);
 
     impl OccasionNotes {

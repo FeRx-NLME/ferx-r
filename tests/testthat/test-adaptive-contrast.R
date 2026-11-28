@@ -184,6 +184,34 @@ test_that("the arms' warnings are merged, a one-arm warning tagged with its arm"
   expect_identical(attr(none, "simulation_warnings"), character(0))
 })
 
+# The occasion note describes the data both arms read, so it is shared, not an
+# "adaptive arm" warning (#785 review round 2, N1). Fixture as in
+# test-posthoc-population.R P15: the TDM model with a kappa, its occasions
+# named twice (iov_column and an iov_occasion rule).
+test_that("the data's occasion note is shared by both arms, untagged", {
+  msg <- paste("iov_occasion is set in [fit_options], so the model-side occasion",
+               "rule is used and the iov_column dataset column is ignored.")
+  text <- readLines(ferx_example("adaptive_tdm")$model)
+  at <- grep("omega ETA_CL", text, fixed = TRUE)
+  text <- append(text, "  kappa KAPPA_CL ~ 0.04", after = at)
+  text <- sub("CL = TVCL * exp(ETA_CL)", "CL = TVCL * exp(ETA_CL + KAPPA_CL)",
+              text, fixed = TRUE)
+  model <- tempfile(fileext = ".ferx")
+  writeLines(c(text, "", "[fit_options]", "  iov_column = OCC",
+               "  iov_occasion = dose"), model)
+  data <- tempfile(fileext = ".csv")
+  utils::write.csv(
+    data.frame(ID = 1L, TIME = seq(0, 96, by = 12), DV = ".", EVID = 0L,
+               AMT = ".", CMT = 1L, MDV = 0L, OCC = 1L),
+    data, row.names = FALSE, quote = FALSE
+  )
+  con <- suppressWarnings(ferx_simulate_adaptive(model, data, n_sim = 1L,
+                                                 seed = 1L, reference = "fixed"))
+  w <- attr(con, "simulation_warnings")
+  expect_identical(sum(w == msg), 1L)
+  expect_false(any(grepl("arm: iov_occasion", w, fixed = TRUE)))
+})
+
 test_that("a regimen contrasted with itself has zero difference, exactly", {
   ex <- ferx_example("adaptive_tdm")
   con <- ferx_simulate_adaptive(.write_inert_model(), ex$data, n_sim = 4L,
