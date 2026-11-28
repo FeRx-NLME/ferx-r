@@ -170,9 +170,11 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
   exclude_reason <- rep(NA_character_, n)
 
   fired_ignore <- character(0)
-  id_col <- .get_col(df_eval, "id")
-  if (length(ignore_ids) > 0L && !is.null(id_col)) {
-    ids_char <- as.character(id_col)
+  # Subject IDs as the file spells them: the engine matches `ignore_subjects`
+  # / `ignore_ids` and reports subjects verbatim, and read.csv() would turn
+  # the ID `02` into 2 (#795 review, row 3).
+  ids_char <- .ferx_id_text(source_path, column_map, .get_col(df_eval, "id"))
+  if (length(ignore_ids) > 0L && !is.null(ids_char)) {
     mask <- ids_char %in% ignore_ids & include
     exclude_reason[mask & is.na(exclude_reason)] <-
       paste0("ignore_subjects: ", ids_char[mask & is.na(exclude_reason)])
@@ -219,12 +221,10 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
   n_dose_excl  <- sum(excl_evid %in% c(1L, 4L), na.rm = TRUE)
   n_other_excl <- nrow(excluded_df) - n_obs_excl - n_dose_excl
 
-  excl_id_col <- .get_col(df_eval[!include, , drop = FALSE], "id")
-  incl_id_col <- .get_col(df_eval[include, , drop = FALSE], "id")
   excl_subj_ids <- character(0)
-  if (!is.null(excl_id_col) && !is.null(incl_id_col)) {
-    all_excl <- unique(as.character(excl_id_col))
-    still_in <- unique(as.character(incl_id_col))
+  if (!is.null(ids_char)) {
+    all_excl <- unique(ids_char[!include])
+    still_in <- unique(ids_char[include])
     excl_subj_ids <- setdiff(all_excl, still_in)
   }
 
@@ -434,6 +434,22 @@ print.ferx_data <- function(x, n = 6L, ...) {
     ">=" = !is.na(lhs_use) & lhs_use >= rhs,
     rep(FALSE, length(lhs_use))
   )
+}
+
+# The subject-ID column as text, one entry per record of `id_col`, or NULL
+# when the data has no ID column. For a CSV the column is read again with no
+# type conversion, after the same `[data]` column map, so `02` stays `02` as
+# the engine's reader sees it. A data.frame's IDs were parsed before the
+# preview saw them, so they are taken as they are.
+.ferx_id_text <- function(source_path, column_map, id_col) {
+  if (is.null(id_col)) return(NULL)
+  if (!is.null(source_path)) {
+    raw <- utils::read.csv(source_path, colClasses = "character",
+                           check.names = FALSE)
+    txt <- .get_col_sel(.ferx_apply_column_map(raw, column_map), "id")
+    if (!is.null(txt) && length(txt) == length(id_col)) return(txt)
+  }
+  as.character(id_col)
 }
 
 # `path` when it names an existing file, else NULL (a loaded fit's model_path

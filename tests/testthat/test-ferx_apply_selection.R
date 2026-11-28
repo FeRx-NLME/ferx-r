@@ -814,6 +814,38 @@ test_that("a replayed selection of a fit that used ignore_ids can be fitted", {
   expect_identical(sel794_fit(ex$model, r)$exclusions, f$exclusions)
 })
 
+test_that("subject IDs are matched and reported as the file spells them (02 is not 2)", {
+  skip_on_cran()
+  d <- example_rows()
+  d$ID <- as.character(d$ID)
+  d$ID[d$ID == "2"] <- "02"
+  csv <- write_nonmem_csv(d, environment())
+  ex  <- ferx_example("warfarin")
+
+  # Call-time ignore_ids.
+  fit <- sel794_fit(ex$model, csv, ignore_ids = "02")
+  expect_gt(fit$exclusions$n_obs_excluded, 0L)
+  expect_identical(fit$exclusions$excluded_subject_ids, "02")
+  pre <- ferx_apply_selection(csv, ignore_ids = "02")
+  expect_identical(attr(pre, "exclusions"), fit$exclusions)
+
+  # A block's ignore_subjects, through model =.
+  m <- model_with_lines(c("[data_selection]", "  ignore_subjects = [02]"),
+                        environment())
+  expect_identical(
+    attr(ferx_apply_selection(csv, model = m), "exclusions"),
+    sel794_fit(m, csv)$exclusions
+  )
+
+  # The replay of the fit, and a refit of it.
+  out <- ferx_apply_selection(fit, excluded = TRUE)
+  expect_identical(nrow(out), as.integer(fit$exclusions$n_obs_excluded +
+                                           fit$exclusions$n_dose_excluded +
+                                           fit$exclusions$n_other_excluded))
+  expect_identical(sel794_fit(ex$model, ferx_apply_selection(fit))$exclusions,
+                   fit$exclusions)
+})
+
 test_that("ferx_rust_model_data_selection returns the block in the engine's spelling", {
   m <- model_with_lines(
     c("[data_selection]", '  ignore = "DV < 1.0"',
