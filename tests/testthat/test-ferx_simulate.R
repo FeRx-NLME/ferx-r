@@ -622,18 +622,16 @@ test_that("T17: selection = \"fit\" skips an empty-DV design record, as the fit 
 
 test_that("T18: a loaded fit's original model and data are still the fit's own (#797 review 1)", {
   # ferx_load_fit() stages the model to a new file; the original still hashes
-  # to the fit's model_hash, so "fit" replays the whole record on it. A byte
-  # copy of the data at another path hashes to its data_hash, so the
-  # fingerprint is checked.
+  # to the fit's model_hash, so "fit" replays the whole record on it. The data
+  # path is kept (the file is still there), so the fingerprint is checked.
   ex <- ferx_example("warfarin_data_selection")
   fit <- warfarin_sel_fit()
   path <- withr::local_tempfile(fileext = ".fitrx")
   suppressWarnings(ferx_save_fit(fit, path))
   loaded <- suppressWarnings(ferx_load_fit(path))
   expect_false(identical(normalizePath(loaded$model_path), normalizePath(ex$model)))
+  expect_identical(normalizePath(loaded$data_path), normalizePath(ex$data))
   expect_null(loaded$data_source)
-  data_copy <- withr::local_tempfile(fileext = ".csv")
-  file.copy(ex$data, data_copy)
   reading <- function(model, data) {
     seen <- NULL
     local_mocked_bindings(
@@ -647,22 +645,25 @@ test_that("T18: a loaded fit's original model and data are still the fit's own (
                                selection = "fit"), "captured")
     seen
   }
-  own <- reading(ex$model, data_copy)
+  own <- reading(ex$model, ex$data)
   expect_true(own$model_is_fits)
   expect_true(nzchar(own$population_fingerprint))
-  expect_sdtab_rows(sel_sim(ex$model, data_copy, n_sim = 1L, seed = 1L, fit = loaded,
+  expect_sdtab_rows(sel_sim(ex$model, ex$data, n_sim = 1L, seed = 1L, fit = loaded,
                             selection = "fit"), loaded)
   # A model file with other bytes is an override: the selection alone, and no
   # fingerprint check.
   other <- withr::local_tempfile(fileext = ".ferx")
   writeLines(c(readLines(ex$model), "# edited"), other)
-  over <- reading(other, data_copy)
+  over <- reading(other, ex$data)
   expect_false(over$model_is_fits)
   expect_identical(over$population_fingerprint, "")
-  # Data with other bytes is not the fit's: no fingerprint check either.
-  rows <- utils::read.csv(ex$data, na.strings = ".")
-  other_data <- rs_csv_without(ex$data, seq_len(nrow(rows)) == nrow(rows))
-  expect_identical(reading(ex$model, other_data)$population_fingerprint, "")
+  # A byte copy of the data at another path is another file (#530): no
+  # fingerprint check, as for ferx_calc_npde(data =).
+  data_copy <- withr::local_tempfile(fileext = ".csv")
+  file.copy(ex$data, data_copy)
+  copy <- reading(ex$model, data_copy)
+  expect_true(copy$model_is_fits)
+  expect_identical(copy$population_fingerprint, "")
 })
 
 test_that("T9: ferx_simulate_with_uncertainty(selection = \"fit\") simulates the fit's rows (#793)", {

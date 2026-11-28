@@ -251,10 +251,12 @@ validate_fit_for_params <- function(fit) {
 #
 # `model_path` / `data_path` are the files the step reads; `model` / `data`
 # the caller's overrides, NULL when the step reads the fit's own. An override
-# naming the fit's file is still the fit's own; so is a file whose bytes hash
-# to the fit's `model_hash` / `data_hash` (the engine's SHA-256), such as the
-# original files of a fit `ferx_load_fit()` staged elsewhere (#797 review 1),
-# and a frame whose CSV text is the fit's `data_source` (#419).
+# naming the fit's file is still the fit's own; so is a model file whose bytes
+# hash to the fit's `model_hash` (the engine's SHA-256), such as the original
+# of a fit `ferx_load_fit()` staged elsewhere (#797 review 1), and a frame
+# whose CSV text is the fit's `data_source` (#419). Another data file is
+# another file even with the fit's bytes (#530): `ferx_load_fit()` keeps the
+# fit's data path when the file is still there.
 .ferx_fit_reading <- function(fit, selection, caller, remedy,
                               model_path, data_path,
                               model = NULL, data = NULL) {
@@ -272,8 +274,7 @@ validate_fit_for_params <- function(fit) {
     identical(normalizePath(data, mustWork = FALSE),
               normalizePath(fit$data_path %||% "", mustWork = FALSE)) ||
     (!is.null(fit$data_source) && file.exists(data) &&
-       identical(.ferx_read_data_text(data), fit$data_source)) ||
-    .ferx_file_has_hash(data, fit$data_hash)
+       identical(.ferx_read_data_text(data), fit$data_source))
   # Another model or data file is not the fit's population by construction,
   # so only the fit's own are checked against its fingerprint.
   reader_args <- .ferx_fit_reader_args(fit)
@@ -294,9 +295,9 @@ validate_fit_for_params <- function(fit) {
        model_is_fits = model_is_fits, population_fingerprint = fingerprint)
 }
 
-# TRUE when the file at `path` hashes to `hash` (a fit's `model_hash` /
-# `data_hash`, the engine's SHA-256 of the bytes it read); FALSE for a fit
-# that records no hash or a file that is not there.
+# TRUE when the file at `path` hashes to `hash` (a fit's `model_hash`, the
+# engine's SHA-256 of the bytes it read); FALSE for a fit that records no
+# hash or a file that is not there.
 .ferx_file_has_hash <- function(path, hash) {
   hash <- .ferx_hash_arg(hash)
   if (length(hash) != 1L || !nzchar(hash) || !file.exists(path)) return(FALSE)

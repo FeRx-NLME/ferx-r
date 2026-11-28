@@ -83,10 +83,10 @@ data selection (\code{fit$reader_settings}: the model file's
 \code{[data_selection]} and any \code{ferx_fit(ignore =, accept =,
     ignore_ids =)}), applied to every record it removed, doses included,
 and the fit's skip of a record with an empty \code{DV}. On the fit's
-own model and data (its files, or files whose bytes still hash to
-\code{fit$model_hash} / \code{fit$data_hash}, such as the originals
-of a fit reloaded with \code{\link{ferx_load_fit}}) the rows are the
-ones the fit was scored on: the
+own model and data (its files; for the model also a file whose bytes
+still hash to \code{fit$model_hash}, such as the original of a fit
+reloaded with \code{\link{ferx_load_fit}}) the rows are the ones the
+fit was scored on: the
 continuous (Gaussian) observation rows of a simulation or prediction
 are \code{fit$sdtab}'s, in order, and a survival prediction or a VPC
 covers the fit's subjects. They are checked against
