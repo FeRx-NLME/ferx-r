@@ -10039,8 +10039,8 @@ fn ferx_rust_test_panic(msg: &str) -> Robj {
 /// default (overridable via the `CARGO_FEATURES` environment variable), which
 /// puts every feature-gated block (`event_model`, `binary_model`,
 /// `count_model`, `markov_model`) in the list; a build that drops `markov`
-/// leaves `markov_model` out. Absence is therefore not the same as "the engine does not know this
-/// name" - a gated-off block is still recognised at parse time and rejected
+/// leaves `markov_model` out. Absence is therefore not the same as "the
+/// engine does not know this name" - a gated-off block is still recognised at parse time and rejected
 /// with `E_BLOCK_FEATURE_DISABLED`, not `E_UNKNOWN_BLOCK`. Callers that map
 /// this list onto a "valid sections" report should take the reason for a
 /// header being absent from the engine's diagnostics rather than assuming it
