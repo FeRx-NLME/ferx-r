@@ -751,6 +751,24 @@ test_that("fitting a model = ferx_data does not restate the model's clauses", {
   expect_identical(via$exclusions, base$exclusions)
 })
 
+test_that("no block clause kind is restated: ignore, accept and ignore_subjects", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  # One clause of each kind, so each half of the merge's subtraction is live.
+  m  <- model_with_lines(
+    c("[data_selection]", "  ignore = DV < 1.0", "  accept = TIME < 100",
+      "  ignore_subjects = [2]"),
+    environment()
+  )
+  sel <- ferx_apply_selection(ex$data, model = m)
+  expect_identical(attr(sel, "accept"), "TIME < 100")
+  expect_identical(attr(sel, "ignore_ids"), "2")
+  via  <- sel794_fit(m, sel)
+  base <- sel794_fit(m, ex$data)
+  expect_identical(via$call_settings, base$call_settings)
+  expect_identical(via$exclusions, base$exclusions)
+})
+
 test_that("a ferx_data built against another model sends the clauses this one lacks", {
   skip_on_cran()
   ex  <- ferx_example("warfarin_data_selection")
