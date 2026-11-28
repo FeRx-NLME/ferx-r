@@ -513,6 +513,10 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
     )
   }))
 
+  # A contrast is stacked first, so every check below reads one result shape
+  # (#785 review, finding 1).
+  if (length(arm_labels) > 0L) res <- .ferx_adaptive_stack_arms(res, arm_labels)
+
   # Under "draw" an `etas` keyed differently from the data (`01` against `1`)
   # matches nobody and every subject is drawn - the mistake "refuse" exists to
   # catch. Say so rather than return an all-drawn run as if etas were used.
@@ -530,8 +534,6 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
       call. = FALSE
     )
   }
-
-  if (length(arm_labels) > 0L) res <- .ferx_adaptive_stack_arms(res, arm_labels)
 
   .ferx_adaptive_warn_unrecorded_signals(res, run_options)
 
@@ -582,7 +584,8 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
 
 # `reference` and `arm_labels` as the glue's `arm_labels`: `character(0)`
 # for one run, `c(adaptive, reference)` for a contrast. Only the shape is
-# checked here; an empty label is core's to refuse (E_ADAPTIVE_OPTIONS).
+# checked here; an empty label is refused by the glue before the run, in R's
+# spelling and with core's code (E_ADAPTIVE_OPTIONS), core's own check behind it.
 .ferx_adaptive_arm_labels <- function(reference, arm_labels) {
   if (is.null(reference)) {
     if (!is.null(arm_labels)) {
@@ -632,9 +635,17 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
     stacked
   })
   out$arm_labels <- arm_labels
-  warnings <- unique(c(attr(res$adaptive, "simulation_warnings", exact = TRUE),
-                       attr(res$reference, "simulation_warnings", exact = TRUE)))
-  attr(out, "simulation_warnings") <- warnings
+  # A warning both arms raised applies to both and is reported once; one that
+  # only one arm raised names it (#785 review, finding 4).
+  w_a <- as.character(attr(res$adaptive, "simulation_warnings", exact = TRUE))
+  w_r <- as.character(attr(res$reference, "simulation_warnings", exact = TRUE))
+  tag <- function(w, other, arm) {
+    lone <- !w %in% other
+    w[lone] <- paste0(arm, " arm: ", w[lone])
+    w
+  }
+  attr(out, "simulation_warnings") <-
+    unique(c(tag(w_a, w_r, "adaptive"), tag(w_r, w_a, "reference")))
   out
 }
 

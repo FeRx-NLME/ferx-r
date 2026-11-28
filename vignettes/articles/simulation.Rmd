@@ -353,7 +353,8 @@ standard error that every `"mean"` and `"fraction_at_least"` row carries) is
 the paired one: it leaves the same sim out of both arms at once, so it
 accounts for the arms' correlation, which combining their own SEs as
 `sqrt(se_A^2 + se_R^2)` ignores. Add
-`decompose = TRUE` (with `n_reps >= 2`) to see which variance layer the
+`decompose = TRUE` (with `n_reps >= 2` and `n_sim >= 2`, plus at least two
+draws under `uncertainty`) to see which variance layer the
 controller removes: a negative `"bsv"` difference at population scope is
 between-patient variability the feedback took out. A fixed start dose is not a
 fair reference for a controller with a loading dose: name your reference in

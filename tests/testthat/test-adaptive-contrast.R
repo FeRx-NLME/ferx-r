@@ -120,6 +120,70 @@ test_that("the controller changes the reference arm's doses, and the difference 
   expect_false(is.na(rows$MC_SE[key & rows$ARM == "difference"]))
 })
 
+# The headline of the difference's MC_SE: it is PAIRED, the jackknife over sims
+# of the per-sim mean effect, sd(a - r) / sqrt(S) - not the arms' SEs combined
+# as sqrt(se_a^2 + se_r^2). PCT_READINGS_IN_WINDOW varies in both arms, so the
+# two differ here (on CUM_DOSE the reference arm is constant and they agree,
+# which could not tell them apart; #785 review, finding 2).
+test_that("the difference's MC_SE is the paired jackknife, not the arms' SEs combined", {
+  con <- .tdm(n_sim = 8L, reference = "fixed")
+  m <- con$metrics
+  per_sim <- function(arm) {
+    x <- m[m$ARM == arm, ]
+    tapply(x$PCT_READINGS_IN_WINDOW, x$SIM, mean)
+  }
+  a <- per_sim("adaptive")
+  r <- per_sim("reference")
+  expect_identical(names(a), names(r))
+  rows <- con$summary_rows
+  key <- rows$STATISTIC == "mean" & rows$METRIC == "PCT_READINGS_IN_WINDOW"
+  se <- stats::setNames(rows$MC_SE[key], rows$ARM[key])
+  paired <- stats::sd(a - r) / sqrt(length(a))
+  unpaired <- sqrt(se[["adaptive"]]^2 + se[["reference"]]^2)
+  expect_equal(se[["difference"]], paired, tolerance = 1e-10)
+  # The fixture separates the two by more than the tolerance.
+  expect_gt(abs(paired - unpaired) / paired, 0.01)
+})
+
+# The etas checks run on the stacked result (#785 review, finding 1: they read
+# `res$metrics` of the unstacked contrast list, which is NULL, and errored).
+test_that("etas = works with reference = \"fixed\", in both arms", {
+  known <- data.frame(ID = "1", ETA_CL = 0.3)
+  con <- .tdm(n_sim = 2L, reference = "fixed", etas = known, unmatched = "draw")
+  m <- con$metrics
+  for (arm in c("adaptive", "reference")) {
+    x <- m[m$ARM == arm, ]
+    expect_true(all(x$ETA_SUPPLIED[x$ID == "1"]), label = arm)
+  }
+  # An `etas` that matches nobody still gets its warning, not an error.
+  expect_warning(
+    .tdm(n_sim = 2L, reference = "fixed", unmatched = "draw",
+         etas = data.frame(ID = "999", ETA_CL = 0.3)),
+    "no row of `etas` matched a subject"
+  )
+})
+
+# Warnings both arms raise apply to both and are reported once, untagged; a
+# warning only one arm raised names that arm (#785 review, finding 4).
+test_that("the arms' warnings are merged, a one-arm warning tagged with its arm", {
+  arm <- function(w) {
+    structure(list(metrics = data.frame(ID = "1")), simulation_warnings = w)
+  }
+  res <- list(adaptive = arm(c("shared", "adaptive only")),
+              reference = arm(c("shared", "reference only")),
+              difference = list())
+  out <- ferx:::.ferx_adaptive_stack_arms(
+    res, c(adaptive = "A", reference = "R"))
+  expect_identical(attr(out, "simulation_warnings"),
+                   c("shared", "adaptive arm: adaptive only",
+                     "reference arm: reference only"))
+  none <- ferx:::.ferx_adaptive_stack_arms(
+    list(adaptive = arm(character(0)), reference = arm(character(0)),
+         difference = list()),
+    c(adaptive = "A", reference = "R"))
+  expect_identical(attr(none, "simulation_warnings"), character(0))
+})
+
 test_that("a regimen contrasted with itself has zero difference, exactly", {
   ex <- ferx_example("adaptive_tdm")
   con <- ferx_simulate_adaptive(.write_inert_model(), ex$data, n_sim = 4L,
