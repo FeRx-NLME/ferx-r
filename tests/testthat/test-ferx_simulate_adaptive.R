@@ -712,48 +712,11 @@ test_that("fit = with data omitted simulates the fit's own data", {
   )
 })
 
-# The mixture_override fixture as an ODE model with an [adaptive_dosing] block.
-.write_mixture_adaptive_model <- function() {
-  path <- tempfile(fileext = ".ferx")
-  writeLines(c(
-    "[parameters]",
-    "  theta TVCL1(1.2, 0.01, 100.0)",
-    "  theta TVCL2(2.5, 0.01, 100.0)",
-    "  theta TVV(10.0, 0.1, 1000.0)",
-    "  theta MIXL(0.0, -10.0, 10.0)",
-    "  omega ETA_CL ~ 0.09",
-    "  sigma EPS ~ 0.04",
-    "[mixture]",
-    "  nsub = 2",
-    "  logit(1) = MIXL",
-    "  omega(2) ETA_CL ~ 0.30",
-    "[individual_parameters]",
-    "  CL = if (MIXNUM == 1) TVCL1 * exp(ETA_CL) else TVCL2 * exp(ETA_CL)",
-    "  V  = TVV",
-    "[structural_model]",
-    "  ode(states=[central])",
-    "[odes]",
-    "  d/dt(central) = -(CL / V) * central",
-    "[scaling]",
-    "  y = central / V",
-    "[error_model]",
-    "  DV ~ proportional(EPS)",
-    "[adaptive_dosing]",
-    "  observe     = central / V",
-    "  at          = every 12 from 0 to 48",
-    "  start_dose  = 100",
-    "  route       = bolus(cmt=1)",
-    "  dose_bounds = [0, 200]",
-    "  confirm     = 1",
-    "  when signal < 1 : increase 25%"
-  ), path)
-  path
-}
-
 test_that("ferx_simulate_adaptive(fit = ) refuses a [mixture] fit without override values, coded (#672)", {
-  # The fit list carries no `mixture_overrides` (a .fitrx saved before #655),
-  # so the class rebuild refuses before anything is simulated. The adaptive
-  # prefix on the message must not cost the refusal its code.
+  # The hand-built fit carries neither `mixture_overrides` nor a packed
+  # estimate (#675), so the class rebuild refuses before anything is
+  # simulated. The adaptive prefix on the message must not cost the refusal
+  # its code.
   path <- .write_mixture_adaptive_model()
   fit <- list(theta = c(TVCL1 = 1.2, TVCL2 = 2.5, TVV = 10, MIXL = 0),
               omega = matrix(0.02, 1, 1, dimnames = list("ETA_CL", "ETA_CL")),

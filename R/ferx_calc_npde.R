@@ -175,6 +175,7 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
       residual_rho = fit_pieces$residual_rho,
       residual_rho_pairs = fit_pieces$residual_rho_pairs,
       mixture_overrides = fit_pieces$mixture_overrides,
+      packed_estimate   = fit_pieces$packed_estimate,
       fit_bindings = fit_pieces$fit_bindings,
       fit_reading = fit_reading,
       # The fit's IOV occasion rule: a `dose` / `time(...)` rule derives the

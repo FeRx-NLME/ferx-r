@@ -18,7 +18,8 @@ ferx_rust_update_model(
   kappa_names,
   residual_rho,
   residual_rho_pairs,
-  mixture_overrides
+  mixture_overrides,
+  packed_estimate
 )
 }
 \description{

@@ -610,12 +610,7 @@ test_that("ferx_covariance on a [mixture] fit matches the in-fit step (#441)", {
   # matrix centred on the declared override inits.
   # A bundle from before the values were recorded has none of the override
   # fields; the loader refuses descriptors or SEs without them (ferx-core #2833).
-  neither <- fitrx_edit_fit(no_packed, function(w) {
-    w$mixture_overrides <- NULL
-    w$mixture_override_params <- NULL
-    w$se_mixture_overrides <- NULL
-    w
-  })
+  neither <- mixture_fit_without_override_values(no_packed)
   expect_error(ferx_covariance(neither),
                "records neither their fitted values", fixed = TRUE)
 })

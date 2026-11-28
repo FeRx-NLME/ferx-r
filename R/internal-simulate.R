@@ -29,6 +29,11 @@ validate_fit_for_params <- function(fit) {
     # base Omega/Sigma plus these; without them a from-fit simulation drew each
     # class at the model file's values (#672).
     mixture_overrides = as.numeric(fit$mixture_overrides %||% numeric()),
+    # The optimizer's packed estimate (numeric(0) when none). The engine reads
+    # it only for a [mixture] fit that records no `mixture_overrides` (a
+    # .fitrx saved before #655), whose override values it holds - as
+    # ferx_sir() / ferx_covariance() read it from the bytes (#675).
+    packed_estimate = as.numeric(fit$packed_estimate %||% numeric()),
     # The IOV occasion rule the fit derived its occasions with, so a rule
     # passed only through `ferx_fit(settings = )` reaches predict / simulate /
     # npde, as it reaches ferx_sir() / ferx_covariance() (#512, #523). "" for a

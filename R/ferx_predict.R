@@ -83,6 +83,7 @@ ferx_predict <- function(model, data = NULL, fit = NULL,
         residual_rho = fit_pieces$residual_rho,
         residual_rho_pairs = fit_pieces$residual_rho_pairs,
         mixture_overrides = fit_pieces$mixture_overrides,
+        packed_estimate   = fit_pieces$packed_estimate,
         fit_bindings = fit_pieces$fit_bindings,
         fit_reading = fit_reading,
         iov_occasion = fit_pieces$iov_occasion

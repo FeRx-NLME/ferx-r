@@ -437,20 +437,6 @@ test_that("ferx_simulate(fit = ) on a [mixture] fit draws each class at its fitt
             label = paste(signif(v[["2"]], 3), "vs", signif(s2, 3)))
 })
 
-test_that("ferx_simulate(fit = ) refuses a [mixture] fit that lost its override values (#672)", {
-  fit <- mixture_override_fit()
-  fit <- unsealed_fit(fit)
-  fit$mixture_overrides <- NULL
-  probe <- engine_error_probe(muffle_mixl_lint(ferx_simulate(
-    test_path("fixtures", "mixture_override.ferx"),
-    test_path("fixtures", "mixture_iv.csv"),
-    n_sim = 1L, seed = 1L, fit = fit
-  )))
-  # Coded, as the same refusal from ferx_simulate_with_uncertainty() is.
-  expect_coded_refusal(probe, "omega(2) ETA_CL", "E_FIT_INPUT_MISSING")
-  expect_null(probe$value)
-})
-
 test_that("ferx_predict(fit = ) on a [mixture] fit without override values still predicts (#672)", {
   mod <- test_path("fixtures", "mixture_override.ferx")
   dat <- test_path("fixtures", "mixture_iv.csv")

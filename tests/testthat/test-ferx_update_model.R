@@ -425,11 +425,26 @@ test_that("a [mixture] fit's per-class overrides take their fitted values (#678)
   expect_equal(refit$mixture_overrides, ov, tolerance = 1e-10)
 })
 
+test_that("a [mixture] fit that records its overrides only in its packed estimate seeds them (#803 review)", {
+  # A .fitrx saved before #655: the values are read from the packed estimate,
+  # omega(k) overrides (one FIX) and the sigma(k) one alike, so the text is
+  # the full fit's.
+  fit <- mixture_update_fit()
+  on.exit(unlink(fit$model_path), add = TRUE)
+  legacy <- mixture_fit_without_override_values(fit)
+  expect_null(legacy$mixture_overrides)
+  expect_length(fit$mixture_overrides, 3L)
+  expect_no_warning(text <- ferx_update_model(legacy))
+  expect_identical(text, ferx_update_model(fit))
+})
+
 test_that("a [mixture] fit without recorded overrides warns and leaves them (#678)", {
   fit <- mixture_update_fit()
   on.exit(unlink(fit$model_path), add = TRUE)
   fit <- unsealed_fit(fit)
   fit$mixture_overrides <- NULL
+  # The packed estimate holds them too (#803 review), so it goes as well.
+  fit$packed_estimate <- NULL
   expect_warning(text <- ferx_update_model(fit), "left as written")
   expect_true("  omega(2) ETA_CL ~ 0.10   # class-2 IIV" %in%
                 strsplit(text, "\n", fixed = TRUE)[[1]])

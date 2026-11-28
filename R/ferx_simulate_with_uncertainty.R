@@ -191,6 +191,7 @@ ferx_simulate_with_uncertainty <- function(model, data, fit,
       # The fitted per-class overrides (ferx-core #1765); each subject runs
       # under its drawn class's Omega and Sigma (ferx-core #2163).
       mixture_overrides    = fit_pieces$mixture_overrides,
+      packed_estimate      = fit_pieces$packed_estimate,
       fit_bindings         = fit_pieces$fit_bindings,
       fit_reading          = fit_reading,
       iov_occasion         = fit_pieces$iov_occasion,

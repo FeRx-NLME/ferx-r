@@ -975,6 +975,10 @@ fn ferx_rust_simulate(
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none. Each class is rebuilt from the fitted base
 ///   Omega/Sigma plus these (ferx-r #672).
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate (empty when the fit carries none). Read only for a `[mixture]`
+///   fit that records no `mixture_overrides`, whose override values it holds
+///   (ferx-core #1765; ferx-r #675).
 /// @param fit_reading How `data_path` is read (ferx-r #793), from
 ///   `.ferx_fit_reading()`: every record (`fit_rows` FALSE, `selection =
 ///   "all"`), or as the fit read it (`selection = "fit"`; see
@@ -1005,6 +1009,7 @@ fn ferx_rust_simulate_from_fit(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
     fit_bindings: List,
     fit_reading: List,
     iov_occasion: &str,
@@ -1055,6 +1060,7 @@ fn ferx_rust_simulate_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            &packed_estimate,
             MixtureClasses::Read,
         ) {
             Ok(p) => p,
@@ -1174,6 +1180,10 @@ fn ferx_rust_simulate_adaptive(
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none. Each class is rebuilt from the fitted base
 ///   Omega/Sigma plus these (ferx-r #672).
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate (empty when the fit carries none). Read only for a `[mixture]`
+///   fit that records no `mixture_overrides`, whose override values it holds
+///   (ferx-core #1765; ferx-r #675).
 /// @param residual_rho Fitted `block_sigma` residual correlations (empty when
 ///   the model declares none), one per row of `fit$residual_correlations`
 /// @param residual_rho_pairs The 1-based `(sigma_i, sigma_j)` pair of each
@@ -1213,6 +1223,7 @@ fn ferx_rust_simulate_adaptive_from_fit(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
     fit_bindings: List,
     n_sim: i32,
     seed: i32,
@@ -1261,6 +1272,7 @@ fn ferx_rust_simulate_adaptive_from_fit(
             residual_rho: &residual_rho,
             residual_rho_pairs: &residual_rho_pairs,
             mixture_overrides: &mixture_overrides,
+            packed_estimate: &packed_estimate,
             fitted: fit_bindings_from_r(&fit_bindings)?,
             fit_bindings: &fit_bindings,
             uncertainty,
@@ -1324,6 +1336,7 @@ struct AdaptiveFit<'a> {
     residual_rho: &'a [f64],
     residual_rho_pairs: &'a [i32],
     mixture_overrides: &'a [f64],
+    packed_estimate: &'a [f64],
     fitted: DataBindings,
     /// The R list `fitted` was read from: the uncertainty draws read what the
     /// fit's covariance step held from it.
@@ -1422,6 +1435,7 @@ fn simulate_adaptive(
                 f.residual_rho,
                 f.residual_rho_pairs,
                 f.mixture_overrides,
+                f.packed_estimate,
                 MixtureClasses::Read,
             )
             .map_err(|e| prefix_refusal("ferx_simulate_adaptive: ", e))?;
@@ -1443,6 +1457,7 @@ fn simulate_adaptive(
                         f.residual_rho,
                         f.residual_rho_pairs,
                         f.mixture_overrides,
+                        f.packed_estimate,
                         f.fit_bindings,
                     )
                     .map_err(|e| prefix_refusal("ferx_simulate_adaptive: ", e))?,
@@ -2244,6 +2259,10 @@ fn unique_column_names_in_order(names: &[String], order: &[usize]) -> Vec<String
 /// @param mixture_overrides `fit$mixture_overrides`, a `[mixture]` fit's
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate (empty when the fit carries none). Read only for a `[mixture]`
+///   fit that records no `mixture_overrides`, whose override values it holds
+///   (ferx-core #1765; ferx-r #675).
 /// @param n_uncertainty_draws Number of parameter sets to draw from the
 ///   uncertainty distribution
 /// @param n_sim_per_draw Number of eta/eps replicates per parameter draw
@@ -2275,6 +2294,7 @@ fn ferx_rust_simulate_with_uncertainty(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
     fit_bindings: List,
     fit_reading: List,
     iov_occasion: &str,
@@ -2329,6 +2349,7 @@ fn ferx_rust_simulate_with_uncertainty(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            &packed_estimate,
             &fit_bindings,
         )?;
 
@@ -2444,6 +2465,10 @@ fn ferx_rust_predict(
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none. Each class is rebuilt from the fitted base
 ///   Omega/Sigma plus these (ferx-r #672).
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate (empty when the fit carries none). Read only for a `[mixture]`
+///   fit that records no `mixture_overrides`, whose override values it holds
+///   (ferx-core #1765; ferx-r #675).
 /// @param fit_reading How `data_path` is read (ferx-r #793); see
 ///   `ferx_rust_simulate_from_fit`.
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
@@ -2465,6 +2490,7 @@ fn ferx_rust_predict_from_fit(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
     fit_bindings: List,
     fit_reading: List,
     iov_occasion: &str,
@@ -2509,6 +2535,7 @@ fn ferx_rust_predict_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            &packed_estimate,
             MixtureClasses::NotRead,
         ) {
             Ok(p) => p,
@@ -2641,6 +2668,10 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none. Each class is rebuilt from the fitted base
 ///   Omega/Sigma plus these (ferx-r #672).
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate (empty when the fit carries none). Read only for a `[mixture]`
+///   fit that records no `mixture_overrides`, whose override values it holds
+///   (ferx-core #1765; ferx-r #675).
 /// @param fit_reading How `data_path` is read (ferx-r #793); see
 ///   `ferx_rust_simulate_from_fit`.
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
@@ -2671,6 +2702,7 @@ fn ferx_rust_predict_survival_from_fit(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
     fit_bindings: List,
     fit_reading: List,
     iov_occasion: &str,
@@ -2733,6 +2765,7 @@ fn ferx_rust_predict_survival_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            &packed_estimate,
             MixtureClasses::NotRead,
         ) {
             Ok(p) => p,
@@ -2829,6 +2862,10 @@ fn ferx_rust_vpc_tte(
 /// @param residual_rho Fitted residual correlations
 /// @param residual_rho_pairs Their endpoint pairs
 /// @param mixture_overrides `fit$mixture_overrides`
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate (empty when the fit carries none). Read only for a `[mixture]`
+///   fit that records no `mixture_overrides`, whose override values it holds
+///   (ferx-core #1765; ferx-r #675).
 /// @param fit_bindings The fit's data bindings
 /// @param fit_reading How `data_path` is read (ferx-r #793); see
 ///   `ferx_rust_simulate_from_fit`
@@ -2860,6 +2897,7 @@ fn ferx_rust_vpc_tte_from_fit(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
     fit_bindings: List,
     fit_reading: List,
     iov_occasion: &str,
@@ -2895,6 +2933,7 @@ fn ferx_rust_vpc_tte_from_fit(
                 residual_rho: &residual_rho,
                 residual_rho_pairs: &residual_rho_pairs,
                 mixture_overrides: &mixture_overrides,
+                packed_estimate: &packed_estimate,
             },
             &fit_bindings,
             &fit_reading,
@@ -2972,6 +3011,10 @@ fn ferx_rust_vpc_kmmc(
 /// @param residual_rho Fitted residual correlations
 /// @param residual_rho_pairs Their endpoint pairs
 /// @param mixture_overrides `fit$mixture_overrides`
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate (empty when the fit carries none). Read only for a `[mixture]`
+///   fit that records no `mixture_overrides`, whose override values it holds
+///   (ferx-core #1765; ferx-r #675).
 /// @param fit_bindings The fit's data bindings
 /// @param fit_reading How `data_path` is read (ferx-r #793); see
 ///   `ferx_rust_simulate_from_fit`
@@ -3005,6 +3048,7 @@ fn ferx_rust_vpc_kmmc_from_fit(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
     fit_bindings: List,
     fit_reading: List,
     iov_occasion: &str,
@@ -3042,6 +3086,7 @@ fn ferx_rust_vpc_kmmc_from_fit(
                 residual_rho: &residual_rho,
                 residual_rho_pairs: &residual_rho_pairs,
                 mixture_overrides: &mixture_overrides,
+                packed_estimate: &packed_estimate,
             },
             &fit_bindings,
             &fit_reading,
@@ -3112,6 +3157,10 @@ fn ferx_rust_vpc_cif(
 /// @param residual_rho Fitted residual correlations
 /// @param residual_rho_pairs Their endpoint pairs
 /// @param mixture_overrides `fit$mixture_overrides`
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate (empty when the fit carries none). Read only for a `[mixture]`
+///   fit that records no `mixture_overrides`, whose override values it holds
+///   (ferx-core #1765; ferx-r #675).
 /// @param fit_bindings The fit's data bindings
 /// @param fit_reading How `data_path` is read (ferx-r #793); see
 ///   `ferx_rust_simulate_from_fit`
@@ -3141,6 +3190,7 @@ fn ferx_rust_vpc_cif_from_fit(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
     fit_bindings: List,
     fit_reading: List,
     iov_occasion: &str,
@@ -3174,6 +3224,7 @@ fn ferx_rust_vpc_cif_from_fit(
                 residual_rho: &residual_rho,
                 residual_rho_pairs: &residual_rho_pairs,
                 mixture_overrides: &mixture_overrides,
+                packed_estimate: &packed_estimate,
             },
             &fit_bindings,
             &fit_reading,
@@ -3194,6 +3245,7 @@ struct FitParams<'a> {
     residual_rho: &'a [f64],
     residual_rho_pairs: &'a [i32],
     mixture_overrides: &'a [f64],
+    packed_estimate: &'a [f64],
 }
 
 /// What every VPC entry point runs on: the model, the observed population laid
@@ -3262,6 +3314,7 @@ impl VpcRun {
             fit.residual_rho,
             fit.residual_rho_pairs,
             fit.mixture_overrides,
+            fit.packed_estimate,
             MixtureClasses::Read,
         )?;
         Ok(VpcRun { parsed, population, params, notes })
@@ -4003,6 +4056,10 @@ fn vpc_cif_to_list(vpc: &ferx_core::CifVpc) -> Robj {
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none. Each class is rebuilt from the fitted base
 ///   Omega/Sigma plus these (ferx-r #672).
+/// @param packed_estimate `fit$packed_estimate`, the optimizer's packed
+///   estimate (empty when the fit carries none). Read only for a `[mixture]`
+///   fit that records no `mixture_overrides`, whose override values it holds
+///   (ferx-core #1765; ferx-r #675).
 /// @param fit_reading How the data are read, from `.ferx_fit_reading()`
 ///   (ferx-r #793): always as the fit read them, so `fit_rows` must be TRUE.
 ///   `reader_settings` is `fit$reader_settings` as JSON ("" when the fit
@@ -4035,6 +4092,7 @@ fn ferx_rust_npde_from_fit(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
     fit_bindings: List,
     fit_reading: List,
     iov_occasion: &str,
@@ -4093,6 +4151,7 @@ fn ferx_rust_npde_from_fit(
             &residual_rho,
             &residual_rho_pairs,
             &mixture_overrides,
+            &packed_estimate,
             MixtureClasses::Read,
         ) {
             Ok(p) => p,
@@ -6710,6 +6769,7 @@ fn params_from_fit(
     residual_rho: &[f64],
     residual_rho_pairs: &[i32],
     mixture_overrides: &[f64],
+    packed_estimate: &[f64],
     classes: MixtureClasses,
 ) -> std::result::Result<ModelParameters, String> {
     let template = &model.default_params;
@@ -6777,6 +6837,7 @@ fn params_from_fit(
                 None,
                 residual_correlations.clone(),
                 (!mixture_overrides.is_empty()).then(|| mixture_overrides.to_vec()),
+                (!packed_estimate.is_empty()).then(|| packed_estimate.to_vec()),
             );
             match ferx_core::estimation::uncertainty_samples::fitted_params_from_result(
                 &skeleton, model,
@@ -6834,6 +6895,7 @@ fn build_fit_result_for_uncertainty(
     residual_rho: &[f64],
     residual_rho_pairs: &[i32],
     mixture_overrides: &[f64],
+    packed_estimate: &[f64],
     fit_bindings: &List,
 ) -> std::result::Result<FitResult, String> {
     let FitUncertainty {
@@ -6932,6 +6994,7 @@ fn build_fit_result_for_uncertainty(
         residual_correlations_from_fit(model, residual_rho, residual_rho_pairs)
             .map_err(|e| format!("Uncertainty error: {e}"))?,
         (!mixture_overrides.is_empty()).then(|| mixture_overrides.to_vec()),
+        (!packed_estimate.is_empty()).then(|| packed_estimate.to_vec()),
     );
     // What the fit's covariance step held (#737 review, finding 3): the
     // asymptotic draws keep a profiled level on its bound (ferx-core #2418)
@@ -7011,6 +7074,7 @@ fn default_fit_result(
     sir_resamples_packed: Option<Vec<Vec<f64>>>,
     residual_correlations_resolved: Vec<ResidualCorrelation>,
     mixture_overrides: Option<Vec<f64>>,
+    packed_estimate: Option<Vec<f64>>,
 ) -> FitResult {
     let template = &model.default_params;
     FitResult {
@@ -7151,10 +7215,14 @@ fn default_fit_result(
         nlopt_missing_algorithms: Vec::new(),
         covariance_n_evals_estimated: None,
         trace_path: None,
-        // In-process optimisation for a `run_covariance` called straight after a fit;
-        // `#[serde(skip)]` upstream, so a reconstructed result legitimately carries `None`
-        // and `run_covariance` re-packs from `omega`. No `.fitrx` / R format change.
-        packed_estimate: None,
+        // The optimizer's packed estimate (`fit$packed_estimate`; `None` when the
+        // fit carries none). `fitted_params_from_result` reads it for one thing
+        // only: a `[mixture]` fit's override values when it records no
+        // `mixture_overrides` (a `.fitrx` saved before #655), and only when it
+        // unpacks bit for bit to the theta / omega / sigma above (ferx-core
+        // #1765 / #1815). Without it such a fit was refused on every from-fit
+        // path while `ferx_sir()` / `ferx_covariance()` accepted it (ferx-r #675).
+        packed_estimate,
         // A [mixture] fit's fitted per-class overrides (ferx-core #1765), the
         // one part of its parameters theta/omega/sigma do not rebuild; without
         // them `simulate_with_uncertainty` refuses such a fit.
@@ -7281,6 +7349,8 @@ fn default_fit_result(
 ///   and their 1-based sigma pairs, flattened `i1, j1, i2, j2, ...`.
 /// @param mixture_overrides A `[mixture]` fit's fitted per-class overrides
 ///   (`fit$mixture_overrides`; empty for none).
+/// @param packed_estimate `fit$packed_estimate` (empty for none): the
+///   overrides' source when `mixture_overrides` is empty (ferx-r #803 review).
 /// @return A list: `text`, the rendered model, and `notes`, one line per
 ///   declaration left as written that a refit would want seeded.
 /// @export
@@ -7301,6 +7371,7 @@ fn ferx_rust_update_model(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
 ) -> Robj {
     entry(move || {
         let parsed = ferx_core::parser::model_parser::parse_full_model(model_text)
@@ -7351,7 +7422,21 @@ fn ferx_rust_update_model(
         );
         level_block_notes(model_text, &theta_names, &mut notes);
         let seeded = if parsed.model.default_params.mixture.is_some() {
-            seed_mixture_overrides(&seeded, &mixture_overrides, &mut notes)
+            let overrides = if mixture_overrides.is_empty() {
+                mixture_overrides_from_packed(
+                    &parsed.model,
+                    &theta,
+                    DMatrix::from_row_slice(d, d, &omega_flat),
+                    &sigma,
+                    (k > 0).then(|| DMatrix::from_row_slice(k, k, &omega_iov_flat)),
+                    residual_correlations_from_fit(&parsed.model, &residual_rho, &residual_rho_pairs)
+                        .unwrap_or_default(),
+                    &packed_estimate,
+                )
+            } else {
+                mixture_overrides
+            };
+            seed_mixture_overrides(&seeded, &overrides, &mut notes)
         } else {
             seeded
         };
@@ -7365,6 +7450,7 @@ fn ferx_rust_update_model(
             None,
             None,
             Vec::new(),
+            None,
             None,
         );
         fit.theta_names = theta_names;
@@ -7683,6 +7769,51 @@ fn folded_fix(after: &[&str]) -> bool {
         }
     }
     false
+}
+
+/// A `[mixture]` fit's override values in `fit$mixture_overrides` order (each
+/// `omega(k)` class variance, then each `sigma(k)` class sigma), read from its
+/// packed estimate, for a fit that records no values (a `.fitrx` saved before
+/// ferx-r #655; #803 review). The engine reads the vector only when it unpacks
+/// bit for bit to the fit's estimates (ferx-core #1815), as on every from-fit
+/// path (#675); otherwise this is empty and the overrides stay as written,
+/// with `seed_mixture_overrides`' note.
+#[allow(clippy::too_many_arguments)]
+fn mixture_overrides_from_packed(
+    model: &CompiledModel,
+    theta: &[f64],
+    omega: DMatrix<f64>,
+    sigma: &[f64],
+    omega_iov: Option<DMatrix<f64>>,
+    residual_correlations: Vec<ResidualCorrelation>,
+    packed_estimate: &[f64],
+) -> Vec<f64> {
+    if packed_estimate.is_empty() {
+        return Vec::new();
+    }
+    let skeleton = default_fit_result(
+        model,
+        theta.to_vec(),
+        omega,
+        sigma.to_vec(),
+        omega_iov,
+        None,
+        None,
+        residual_correlations,
+        None,
+        Some(packed_estimate.to_vec()),
+    );
+    let Ok(params) =
+        ferx_core::estimation::uncertainty_samples::fitted_params_from_result(&skeleton, model)
+    else {
+        return Vec::new();
+    };
+    let Some(mix) = params.mixture else {
+        return Vec::new();
+    };
+    let omega = mix.omega_override_addr.iter().map(|&(c, e)| mix.omega[c].matrix[(e, e)]);
+    let sigma = mix.sigma_override_addr.iter().map(|&(c, i)| mix.sigma[c].values[i]);
+    omega.chain(sigma).collect()
 }
 
 /// Write a `[mixture]` fit's per-class overrides into their declarations
@@ -12780,6 +12911,7 @@ fn ferx_rust_export_dcm(
                 None,
                 residual_correlations_from_fit(&template, &residual_rho, &residual_rho_pairs)
                     .map_err(|e| format!("Error exporting DCM: {e}"))?,
+                None,
                 None,
             );
             // The fit's own names: the template declares the weights where the
