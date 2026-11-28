@@ -4,9 +4,12 @@
 #' approximating the semantics of the \code{[data_selection]} model block.
 #' This is a \strong{preview} function: the canonical, engine-validated
 #' filtering happens in Rust at fit time. The R-side implementation is
-#' intentionally lenient: unparseable expressions and unknown column names are
-#' silently treated as non-matching (no exclusion), whereas Rust will error on
-#' invalid filters. Use \code{ferx_apply_selection()} to inspect which records will
+#' intentionally lenient: an unparseable expression, or a condition on a column
+#' the data does not have, is silently treated as never matching, whereas Rust
+#' will error on invalid filters. A condition that never matches does opposite
+#' things under the two filters: an \code{ignore} on it excludes no record, but
+#' an \code{accept} on it excludes \strong{every} record, since no record
+#' passes it. Use \code{ferx_apply_selection()} to inspect which records will
 #' be excluded before committing to a fit, or to pass pre-built conditions
 #' directly to \code{\link{ferx_fit}}.
 #'
@@ -392,7 +395,8 @@ print.ferx_data <- function(x, n = 6L, ...) {
       # Ordered comparisons require a numeric RHS. ferx-core rejects an ordered
       # op against a non-numeric value (e.g. `BW < abc`) at parse time; mirror
       # that here by treating the whole clause as unparseable (the lenient
-      # preview then excludes nothing) rather than silently doing a lexical
+      # preview then never matches it: an ignore excludes nothing, an accept
+      # excludes every record) rather than silently doing a lexical
       # string comparison the Rust fit never performs.
       if (!is.numeric(rhs) && op %in% c(">=", "<=", ">", "<")) return(NULL)
       result[[i]] <- list(col = tolower(lhs), op = op, rhs = rhs)
