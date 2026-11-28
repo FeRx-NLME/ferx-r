@@ -140,22 +140,6 @@ ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "fe
 
 
 
-# Gradient correctness — [ENZYME ONLY]
-#
-# Two blockers before this test can be fully implemented:
-#
-# 1. Build tier: requires the Enzyme Rust toolchain (a custom Rust fork with
-#    automatic differentiation). The Enzyme build takes ~1.5 h and is not
-#    available on normal dev machines. The skip_if() guard below makes this
-#    test inert on all Tier 1 (FERX_NO_AUTODIFF=1) machines — CI with the
-#    Enzyme toolchain is required to exercise it.
-#
-# 2. Missing API: comparing autodiff vs finite-difference gradients requires
-#    a gradient inspection entry point to be exposed from the Rust side. No
-#    such API exists yet in ferx-core. Once it lands, replace the inner
-#    skip() with a real comparison (e.g. relative error < 1e-4 per element).
-
-
 # -- Diagnostic fields (Step 3 feature-parity) --------------------------------
 
 
@@ -163,18 +147,6 @@ ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "fe
 
 
 # -- IOV: shrinkage_kappa_by_occ (Step 1 feature-parity) ---------------------
-
-
-
-
-# SAEM HMC proposals — [ENZYME ONLY]
-#
-# HMC proposals in the SAEM E-step are gated on the Enzyme autodiff build
-# (`hmc_step` is `#[cfg(feature = "autodiff")]` in ferx-core). On a stable /
-# FERX_NO_AUTODIFF=1 build, `n_leapfrog > 0` is silently ignored and the
-# sampler uses Metropolis-Hastings, so `saem_n_subjects_hmc` is NA. The
-# guard below makes this test inert on Tier 1 machines; CI with the Enzyme
-# toolchain exercises the behavioural assertions.
 
 
 

@@ -12,8 +12,8 @@
 # pass by accident (#511's `inner_tol = 1e-5` is the engine default and
 # `mu_referencing = FALSE` is inert on warfarin; both rows moved, plan section 0b).
 #
-# Engine: the R glue is built FERX_NO_AUTODIFF=1 in the measurements quoted
-# here; ferx-core's inner gradients on these fixtures are analytic either way.
+# Engine: ferx-core's inner gradients on these fixtures are analytic (the
+# Enzyme autodiff path was retired in ferx-core#381).
 
 ps_scratch <- function(ext, env = parent.frame()) {
   withr::local_tempfile(fileext = ext, .local_envir = env)

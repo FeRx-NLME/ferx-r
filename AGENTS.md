@@ -108,7 +108,7 @@ R API (R/*.R)
 
 **R layer** (`R/`): the exported functions in `NAMESPACE` (e.g. `ferx_fit()`, `ferx_simulate()`, `ferx_predict()`, `ferx_example()`). They handle path normalization and input validation, and structure results into S3 objects.
 
-**Rust glue** (`src/rust/src/lib.rs`): the `#[extendr]` FFI layer. Each function calls into ferx-core and converts its result to R lists and data frames; the fit-changing steps also read and rewrite the fit's `.fitrx` bundle (see "A fit's bytes are the fit" below).
+**Rust glue** (`src/rust/src/lib.rs`): the `#[extendr]` FFI layer. Each function calls into ferx-core and converts its result to R lists and data frames; the fit-changing steps also read and rewrite the fit's `.fitrx` bundle (see "A fit's bytes are the fit" below). Build every ferx-core / ferx-tools `*Options` struct with a `..Default::default()` spread, never an exhaustive literal: the engine adds fields freely (ferx-core #529), and a literal then breaks this build (`error[E0063]: missing field`). R-CMD-check enforces it.
 
 **ferx-core** (external crate): the NLME engine - model parser, data reader, estimation methods, analytical and ODE PK models, simulation and prediction. Its [README](https://github.com/FeRx-NLME/ferx-core#readme) is the overview; don't restate its method list here.
 
