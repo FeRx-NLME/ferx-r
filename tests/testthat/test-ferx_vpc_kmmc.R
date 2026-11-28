@@ -220,3 +220,23 @@ test_that("the empty-stratum guidance follows the engine's reason (ferx-core #29
   expect_match(g(" At most 3 of the 20 replicate curves are defined at any grid time ..."),
                "raise n_sim", fixed = TRUE)
 })
+
+# --- #793: selection = "fit" ---------------------------------------------------
+
+test_that("T15: ferx_vpc_kmmc(selection = \"fit\") draws on the fit's subjects (#793)", {
+  # FD fit of tte_weibull on kmmc_data() without its first five subjects.
+  ex <- ferx_example("tte_weibull")
+  d <- kmmc_data()
+  fit <- rs_tte_subjects_fit("tte_weibull", d)
+  without <- rs_csv_without(d, d$ID %in% rs_first_ids(d))
+  run <- function(...) kmmc_quiet(ex$model, covariate = "WT", n_sim = 20L,
+                                  seed = 4L, fit = fit, ...)
+  v <- run(selection = "fit")
+  w <- run(data = without, selection = "all")
+  expect_identical(v$observed, w$observed)
+  expect_identical(v$band, w$band)
+  # T16: the default is "all", every subject in the fit's data.
+  default <- run()
+  expect_identical(default, run(selection = "all"))
+  expect_gt(default$observed$n_risk[1], v$observed$n_risk[1])
+})

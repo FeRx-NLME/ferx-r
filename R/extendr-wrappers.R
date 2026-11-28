@@ -27,8 +27,8 @@ ferx_rust_simulate <- function(model_path, data_path, n_sim, seed, match_method,
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion, n_sim, seed, match_method, horizon) {
-  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion, n_sim, seed, match_method, horizon)
+ferx_rust_simulate_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, fit_reading, iov_occasion, n_sim, seed, match_method, horizon) {
+  .Call("wrap__ferx_rust_simulate_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, fit_reading, iov_occasion, n_sim, seed, match_method, horizon)
 }
 
 #' @title Internal Rust backend binding
@@ -45,8 +45,8 @@ ferx_rust_simulate_adaptive_from_fit <- function(model_path, data_path, theta, o
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_simulate_with_uncertainty <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, method, cov_matrix_flat, cov_matrix_dim, sir_resamples_flat, sir_resamples_n, sir_resamples_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion, n_uncertainty_draws, n_sim_per_draw, seed, horizon) {
-  .Call("wrap__ferx_rust_simulate_with_uncertainty", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), method, cov_matrix_flat, as.integer(cov_matrix_dim), sir_resamples_flat, as.integer(sir_resamples_n), as.integer(sir_resamples_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion, as.integer(n_uncertainty_draws), as.integer(n_sim_per_draw), as.integer(seed), horizon)
+ferx_rust_simulate_with_uncertainty <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, method, cov_matrix_flat, cov_matrix_dim, sir_resamples_flat, sir_resamples_n, sir_resamples_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, fit_reading, iov_occasion, n_uncertainty_draws, n_sim_per_draw, seed, horizon) {
+  .Call("wrap__ferx_rust_simulate_with_uncertainty", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), method, cov_matrix_flat, as.integer(cov_matrix_dim), sir_resamples_flat, as.integer(sir_resamples_n), as.integer(sir_resamples_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, fit_reading, iov_occasion, as.integer(n_uncertainty_draws), as.integer(n_sim_per_draw), as.integer(seed), horizon)
 }
 
 #' @title Internal Rust backend binding
@@ -57,8 +57,8 @@ ferx_rust_predict <- function(model_path, data_path) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_predict_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion) {
-  .Call("wrap__ferx_rust_predict_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion)
+ferx_rust_predict_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, fit_reading, iov_occasion) {
+  .Call("wrap__ferx_rust_predict_from_fit", model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, fit_reading, iov_occasion)
 }
 
 #' @title Internal Rust backend binding
@@ -69,8 +69,8 @@ ferx_rust_predict_survival <- function(model_path, data_path, times) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_predict_survival_from_fit <- function(model_path, data_path, times, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion, individual, eta_ids, eta_names, eta_flat) {
-  .Call("wrap__ferx_rust_predict_survival_from_fit", model_path, data_path, times, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion, individual, eta_ids, eta_names, eta_flat)
+ferx_rust_predict_survival_from_fit <- function(model_path, data_path, times, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, fit_reading, iov_occasion, individual, eta_ids, eta_names, eta_flat) {
+  .Call("wrap__ferx_rust_predict_survival_from_fit", model_path, data_path, times, theta, omega_flat, omega_dim, sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, fit_reading, iov_occasion, individual, eta_ids, eta_names, eta_flat)
 }
 
 #' @title Internal Rust backend binding
@@ -81,8 +81,8 @@ ferx_rust_vpc_tte <- function(model_path, data_path, n_sim, seed, probs, grid, g
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_vpc_tte_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion, n_sim, seed, probs, grid, grid_times, censoring, stratify, strata_covariate, cmt, horizon, max_order) {
-  .Call("wrap__ferx_rust_vpc_tte_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion, as.integer(n_sim), as.integer(seed), probs, grid, grid_times, censoring, stratify, strata_covariate, as.integer(cmt), horizon, as.integer(max_order))
+ferx_rust_vpc_tte_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, fit_reading, iov_occasion, n_sim, seed, probs, grid, grid_times, censoring, stratify, strata_covariate, cmt, horizon, max_order) {
+  .Call("wrap__ferx_rust_vpc_tte_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, fit_reading, iov_occasion, as.integer(n_sim), as.integer(seed), probs, grid, grid_times, censoring, stratify, strata_covariate, as.integer(cmt), horizon, as.integer(max_order))
 }
 
 #' @title Internal Rust backend binding
@@ -93,8 +93,8 @@ ferx_rust_vpc_kmmc <- function(model_path, data_path, n_sim, seed, probs, grid, 
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_vpc_kmmc_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion, n_sim, seed, probs, grid, grid_times, censoring, stratify, strata_covariate, cmt, horizon, covariate, level, min_at_risk) {
-  .Call("wrap__ferx_rust_vpc_kmmc_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion, as.integer(n_sim), as.integer(seed), probs, grid, grid_times, censoring, stratify, strata_covariate, as.integer(cmt), horizon, covariate, level, as.integer(min_at_risk))
+ferx_rust_vpc_kmmc_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, fit_reading, iov_occasion, n_sim, seed, probs, grid, grid_times, censoring, stratify, strata_covariate, cmt, horizon, covariate, level, min_at_risk) {
+  .Call("wrap__ferx_rust_vpc_kmmc_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, fit_reading, iov_occasion, as.integer(n_sim), as.integer(seed), probs, grid, grid_times, censoring, stratify, strata_covariate, as.integer(cmt), horizon, covariate, level, as.integer(min_at_risk))
 }
 
 #' @title Internal Rust backend binding
@@ -105,14 +105,14 @@ ferx_rust_vpc_cif <- function(model_path, data_path, n_sim, seed, probs, grid, g
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_vpc_cif_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, iov_occasion, n_sim, seed, probs, grid, grid_times, censoring, stratify, strata_covariate, horizon) {
-  .Call("wrap__ferx_rust_vpc_cif_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, iov_occasion, as.integer(n_sim), as.integer(seed), probs, grid, grid_times, censoring, stratify, strata_covariate, horizon)
+ferx_rust_vpc_cif_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, fit_reading, iov_occasion, n_sim, seed, probs, grid, grid_times, censoring, stratify, strata_covariate, horizon) {
+  .Call("wrap__ferx_rust_vpc_cif_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, fit_reading, iov_occasion, as.integer(n_sim), as.integer(seed), probs, grid, grid_times, censoring, stratify, strata_covariate, horizon)
 }
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, reader_settings, model_is_fits, population_fingerprint, iov_occasion, nsim, seed) {
-  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, reader_settings, model_is_fits, population_fingerprint, iov_occasion, as.integer(nsim), as.integer(seed))
+ferx_rust_npde_from_fit <- function(model_path, data_path, theta, omega_flat, omega_dim, sigma, omega_iov_flat, omega_iov_dim, residual_rho, residual_rho_pairs, mixture_overrides, fit_bindings, fit_reading, iov_occasion, nsim, seed) {
+  .Call("wrap__ferx_rust_npde_from_fit", model_path, data_path, theta, omega_flat, as.integer(omega_dim), sigma, omega_iov_flat, as.integer(omega_iov_dim), residual_rho, as.integer(residual_rho_pairs), mixture_overrides, fit_bindings, fit_reading, iov_occasion, as.integer(nsim), as.integer(seed))
 }
 
 #' @title Internal Rust backend binding

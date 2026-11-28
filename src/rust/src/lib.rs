@@ -975,6 +975,10 @@ fn ferx_rust_simulate(
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none. Each class is rebuilt from the fitted base
 ///   Omega/Sigma plus these (ferx-r #672).
+/// @param fit_reading How `data_path` is read (ferx-r #793), from
+///   `.ferx_fit_reading()`: every record (`fit_rows` FALSE, `selection =
+///   "all"`), or as the fit read it (`selection = "fit"`; see
+///   `read_fit_population`).
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #523): the population's occasions are derived with it, as
 ///   the fit derived them. "" when the fit records none.
@@ -1002,6 +1006,7 @@ fn ferx_rust_simulate_from_fit(
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
     fit_bindings: List,
+    fit_reading: List,
     iov_occasion: &str,
     n_sim: i32,
     seed: i32,
@@ -1017,35 +1022,27 @@ fn ferx_rust_simulate_from_fit(
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
-        let iov_col = parsed.fit_options.iov_column.clone();
 
-        // Simulation reads a missing `DV` as a design point, not as a forgotten
-        // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
-        // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
-        // the record, and fitting keeps the skip.
-        let (mut population, _) =
-            match ferx_core::api::read_population_for_simulation(
-                &parsed.model,
-                &parsed.covariate_decls,
-                data_path,
-                None,
-                iov_col.as_deref(),
-                None,
-                &parsed.column_map,
-            ) {
-                Ok(r) => r,
-                Err(e) => return Err(format!("Error reading data: {e}")),
-            };
-
-        // Place the design on the fit's theta layout before anything reads theta
-        // by position (ferx-r #370); see `bind_design_from_fit`.
+        // Every record in `data` as a design (a `DV = .` sampling row is
+        // simulated, ferx-core #957), or the fit's own records and missing-DV
+        // skip under `selection = "fit"` (ferx-r #793); either way placed on the
+        // fit's theta layout (ferx-r #370).
+        let reading = fit_reading_from_r(&fit_reading)?;
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| e.refusal(""))?;
+        let (mut population, fingerprint_notes) = read_population_from_fit(
+            "ferx_simulate",
+            &mut parsed,
+            model_path,
+            data_path,
+            &reading,
+            &fitted,
+            read_design_population,
+        )?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
         // `derive_fit_occasions`.
         let occasion_notes =
-            derive_fit_occasions("ferx_simulate", &parsed, &mut population, iov_occasion)?;
+            derive_fit_occasions("ferx_simulate", &parsed, &mut population, iov_occasion)?
+                .after_fingerprint(fingerprint_notes);
 
         let params = match params_from_fit(
             &parsed.model,
@@ -2226,6 +2223,8 @@ fn unique_column_names_in_order(names: &[String], order: &[usize]) -> Vec<String
 /// @param omega_iov_flat Row-major flattened fitted IOV (kappa) omega matrix;
 ///   empty when the model declares no `kappa`.
 /// @param omega_iov_dim Side length of the IOV omega matrix; 0 when no IOV.
+/// @param fit_reading How `data_path` is read (ferx-r #793); see
+///   `ferx_rust_simulate_from_fit`.
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #523): the population's occasions are derived with it, as
 ///   the fit derived them. "" when the fit records none.
@@ -2277,6 +2276,7 @@ fn ferx_rust_simulate_with_uncertainty(
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
     fit_bindings: List,
+    fit_reading: List,
     iov_occasion: &str,
     n_uncertainty_draws: i32,
     n_sim_per_draw: i32,
@@ -2288,34 +2288,25 @@ fn ferx_rust_simulate_with_uncertainty(
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
-        let iov_col = parsed.fit_options.iov_column.clone();
-        // Simulation reads a missing `DV` as a design point, not as a forgotten
-        // `MDV=1` (ferx-core #957): here the DV is the column being produced, so
-        // `DV = .` at a sampling time means "simulate here". `MDV=1` still excludes
-        // the record, and fitting keeps the skip.
-        let (mut population, _) =
-            match ferx_core::api::read_population_for_simulation(
-                &parsed.model,
-                &parsed.covariate_decls,
-                data_path,
-                None,
-                iov_col.as_deref(),
-                None,
-                &parsed.column_map,
-            ) {
-                Ok(r) => r,
-                Err(e) => return Err(format!("Error reading data: {e}")),
-            };
-
-        // Place the design on the fit's theta layout before anything reads theta
-        // by position (ferx-r #370); see `bind_design_from_fit`.
+        // Every record in `data` as a design, or the fit's own records under
+        // `selection = "fit"` (ferx-r #793), on the fit's theta layout (#370);
+        // see `ferx_rust_simulate_from_fit`.
+        let reading = fit_reading_from_r(&fit_reading)?;
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| e.refusal(""))?;
+        let (mut population, fingerprint_notes) = read_population_from_fit(
+            "ferx_simulate_with_uncertainty",
+            &mut parsed,
+            model_path,
+            data_path,
+            &reading,
+            &fitted,
+            read_design_population,
+        )?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
         // `derive_fit_occasions`.
         let occasion_notes =
-            derive_fit_occasions("ferx_simulate_with_uncertainty", &parsed, &mut population, iov_occasion)?;
+            derive_fit_occasions("ferx_simulate_with_uncertainty", &parsed, &mut population, iov_occasion)?
+                .after_fingerprint(fingerprint_notes);
 
         let uncertainty_method = uncertainty_method_from_r(method)?;
         let unc = FitUncertainty {
@@ -2453,12 +2444,15 @@ fn ferx_rust_predict(
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none. Each class is rebuilt from the fitted base
 ///   Omega/Sigma plus these (ferx-r #672).
+/// @param fit_reading How `data_path` is read (ferx-r #793); see
+///   `ferx_rust_simulate_from_fit`.
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #523): the population's occasions are derived with it, as
 ///   the fit derived them. "" when the fit records none.
 /// @return Data frame with ID, TIME, PRED columns
 /// @export
 #[extendr]
+#[allow(clippy::too_many_arguments)]
 fn ferx_rust_predict_from_fit(
     model_path: &str,
     data_path: &str,
@@ -2472,6 +2466,7 @@ fn ferx_rust_predict_from_fit(
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
     fit_bindings: List,
+    fit_reading: List,
     iov_occasion: &str,
 ) -> Robj {
     entry(move || {
@@ -2479,35 +2474,29 @@ fn ferx_rust_predict_from_fit(
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
-        let iov_col = parsed.fit_options.iov_column.clone();
 
         // `predict()` never reads the DV -- PRED is the column it produces -- so a
         // design template (`DV = .` at every sampling time) is as valid here as it is
         // for `simulate()`, and reading it with the fitting policy would return an
         // empty frame (ferx-core #957, ferx-r #286). `MDV=1` still excludes the record.
-        let (mut population, _) =
-            match ferx_core::api::read_population_for_simulation(
-                &parsed.model,
-                &parsed.covariate_decls,
-                data_path,
-                None,
-                iov_col.as_deref(),
-                None,
-                &parsed.column_map,
-            ) {
-                Ok(r) => r,
-                Err(e) => return Err(format!("Error reading data: {e}")),
-            };
-
-        // Place the design on the fit's theta layout before anything reads theta
-        // by position (ferx-r #370); see `bind_design_from_fit`.
+        // Under `selection = "fit"` the fit's own records instead (ferx-r #793). Either
+        // way on the fit's theta layout (ferx-r #370).
+        let reading = fit_reading_from_r(&fit_reading)?;
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| e.refusal(""))?;
+        let (mut population, fingerprint_notes) = read_population_from_fit(
+            "ferx_predict",
+            &mut parsed,
+            model_path,
+            data_path,
+            &reading,
+            &fitted,
+            read_design_population,
+        )?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
         // `derive_fit_occasions`.
         let occasion_notes =
-            derive_fit_occasions("ferx_predict", &parsed, &mut population, iov_occasion)?;
+            derive_fit_occasions("ferx_predict", &parsed, &mut population, iov_occasion)?
+                .after_fingerprint(fingerprint_notes);
 
         let params = match params_from_fit(
             &parsed.model,
@@ -2652,6 +2641,8 @@ fn ferx_rust_predict_survival(model_path: &str, data_path: &str, times: Vec<f64>
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none. Each class is rebuilt from the fitted base
 ///   Omega/Sigma plus these (ferx-r #672).
+/// @param fit_reading How `data_path` is read (ferx-r #793); see
+///   `ferx_rust_simulate_from_fit`.
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   with (ferx-r #523): the population's occasions are derived with it, as
 ///   the fit derived them. "" when the fit records none.
@@ -2681,6 +2672,7 @@ fn ferx_rust_predict_survival_from_fit(
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
     fit_bindings: List,
+    fit_reading: List,
     iov_occasion: &str,
     individual: bool,
     eta_ids: Vec<String>,
@@ -2692,30 +2684,25 @@ fn ferx_rust_predict_survival_from_fit(
             Ok(p) => p,
             Err(e) => return Err(format!("Error parsing model: {e}")),
         };
-        let iov_col = parsed.fit_options.iov_column.clone();
 
-        let (mut population, _) = match ferx_core::api::read_population_for(
-            &parsed.model,
-            &parsed.covariate_decls,
-            data_path,
-            None,
-            iov_col.as_deref(),
-            None,
-            &parsed.column_map,
-        ) {
-            Ok(r) => r,
-            Err(e) => return Err(format!("Error reading data: {e}")),
-        };
-
-        // Place the design on the fit's theta layout before anything reads theta
-        // by position (ferx-r #370); see `bind_design_from_fit`.
+        // Every subject in `data`, or the fit's own under `selection = "fit"`
+        // (ferx-r #793), on the fit's theta layout (ferx-r #370).
+        let reading = fit_reading_from_r(&fit_reading)?;
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| e.refusal(""))?;
+        let (mut population, fingerprint_notes) = read_population_from_fit(
+            "ferx_predict_survival",
+            &mut parsed,
+            model_path,
+            data_path,
+            &reading,
+            &fitted,
+            read_vpc_tte_population,
+        )?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
         // `derive_fit_occasions`.
         let occasion_notes =
-            derive_fit_occasions("ferx_predict_survival", &parsed, &mut population, iov_occasion)?;
+            derive_fit_occasions("ferx_predict_survival", &parsed, &mut population, iov_occasion)?
+                .after_fingerprint(fingerprint_notes);
 
         // Each subject's own etas (ferx-core #1885), as the R side read them off
         // `fit$ebe_etas`. The engine checks the names against the model's and
@@ -2843,6 +2830,8 @@ fn ferx_rust_vpc_tte(
 /// @param residual_rho_pairs Their endpoint pairs
 /// @param mixture_overrides `fit$mixture_overrides`
 /// @param fit_bindings The fit's data bindings
+/// @param fit_reading How `data_path` is read (ferx-r #793); see
+///   `ferx_rust_simulate_from_fit`
 /// @param iov_occasion `fit$iov_occasion`
 /// @param n_sim Number of replicates
 /// @param seed Random seed
@@ -2872,6 +2861,7 @@ fn ferx_rust_vpc_tte_from_fit(
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
     fit_bindings: List,
+    fit_reading: List,
     iov_occasion: &str,
     n_sim: i32,
     seed: i32,
@@ -2907,6 +2897,7 @@ fn ferx_rust_vpc_tte_from_fit(
                 mixture_overrides: &mixture_overrides,
             },
             &fit_bindings,
+            &fit_reading,
             iov_occasion,
         )?;
         run.km_or_rtte(opts, max_order)
@@ -2982,6 +2973,8 @@ fn ferx_rust_vpc_kmmc(
 /// @param residual_rho_pairs Their endpoint pairs
 /// @param mixture_overrides `fit$mixture_overrides`
 /// @param fit_bindings The fit's data bindings
+/// @param fit_reading How `data_path` is read (ferx-r #793); see
+///   `ferx_rust_simulate_from_fit`
 /// @param iov_occasion `fit$iov_occasion`
 /// @param n_sim Number of replicates
 /// @param seed Random seed
@@ -3013,6 +3006,7 @@ fn ferx_rust_vpc_kmmc_from_fit(
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
     fit_bindings: List,
+    fit_reading: List,
     iov_occasion: &str,
     n_sim: i32,
     seed: i32,
@@ -3050,6 +3044,7 @@ fn ferx_rust_vpc_kmmc_from_fit(
                 mixture_overrides: &mixture_overrides,
             },
             &fit_bindings,
+            &fit_reading,
             iov_occasion,
         )?;
         run.kmmc(vpc, covariate, level, min_at_risk)
@@ -3118,6 +3113,8 @@ fn ferx_rust_vpc_cif(
 /// @param residual_rho_pairs Their endpoint pairs
 /// @param mixture_overrides `fit$mixture_overrides`
 /// @param fit_bindings The fit's data bindings
+/// @param fit_reading How `data_path` is read (ferx-r #793); see
+///   `ferx_rust_simulate_from_fit`
 /// @param iov_occasion `fit$iov_occasion`
 /// @param n_sim Number of replicates
 /// @param seed Random seed
@@ -3145,6 +3142,7 @@ fn ferx_rust_vpc_cif_from_fit(
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
     fit_bindings: List,
+    fit_reading: List,
     iov_occasion: &str,
     n_sim: i32,
     seed: i32,
@@ -3178,6 +3176,7 @@ fn ferx_rust_vpc_cif_from_fit(
                 mixture_overrides: &mixture_overrides,
             },
             &fit_bindings,
+            &fit_reading,
             iov_occasion,
         )?;
         run.cif(vpc)
@@ -3224,21 +3223,34 @@ impl VpcRun {
     /// At a fit's parameters: the fit's theta layout and occasions (ferx-r #370,
     /// #523), see `ferx_rust_simulate_from_fit`. The replicates are simulations,
     /// so a `[mixture]` model's classes are drawn under the fitted overrides.
+    /// The observed curve and the replicates share one population: every
+    /// subject in `data`, or the fit's own under `selection = "fit"` (ferx-r
+    /// #793).
+    #[allow(clippy::too_many_arguments)]
     fn at_fit(
         entry_point: &str,
         model_path: &str,
         data_path: &str,
         fit: FitParams<'_>,
         fit_bindings: &List,
+        fit_reading: &List,
         iov_occasion: &str,
     ) -> std::result::Result<Self, String> {
         let mut parsed = ferx_core::parse_full_model_file(Path::new(model_path))
             .map_err(|e| format!("Error parsing model: {e}"))?;
-        let mut population = read_vpc_tte_population(&parsed, data_path)?;
+        let reading = fit_reading_from_r(fit_reading)?;
         let fitted = fit_bindings_from_r(fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| e.refusal(""))?;
-        let notes = derive_fit_occasions(entry_point, &parsed, &mut population, iov_occasion)?;
+        let (mut population, fingerprint_notes) = read_population_from_fit(
+            entry_point,
+            &mut parsed,
+            model_path,
+            data_path,
+            &reading,
+            &fitted,
+            read_vpc_tte_population,
+        )?;
+        let notes = derive_fit_occasions(entry_point, &parsed, &mut population, iov_occasion)?
+            .after_fingerprint(fingerprint_notes);
         let params = params_from_fit(
             &parsed.model,
             fit.theta,
@@ -3375,6 +3387,146 @@ fn read_vpc_tte_population(
     )
     .map(|(population, _)| population)
     .map_err(|e| format!("Error reading data: {e}"))
+}
+
+/// A design a simulate / predict step runs on, read with simulation's
+/// missing-DV policy (ferx-core #957): a `DV = .` sampling row is a design
+/// point, since the DV is the column being produced. `MDV=1` still excludes
+/// the record. No `[data_selection]`: every record in `data` is read.
+fn read_design_population(
+    parsed: &ParsedModel,
+    data_path: &str,
+) -> std::result::Result<Population, String> {
+    let iov_col = parsed.fit_options.iov_column.clone();
+    ferx_core::api::read_population_for_simulation(
+        &parsed.model,
+        &parsed.covariate_decls,
+        data_path,
+        None,
+        iov_col.as_deref(),
+        None,
+        &parsed.column_map,
+    )
+    .map(|(population, _)| population)
+    .map_err(|e| format!("Error reading data: {e}"))
+}
+
+/// How a from-fit step reads its data, the `fit_reading` list
+/// `.ferx_fit_reading()` builds (ferx-r #793). `fit_rows` is
+/// `selection = "fit"`: read the data as the fit read it, with
+/// `reader_settings` (`fit$reader_settings`, "" for a fit that records none),
+/// replayed whole on the fit's own model file (`model_is_fits`) and as the
+/// selection alone on another, then checked against
+/// `population_fingerprint` ("" unless the model and data are the fit's own).
+/// Otherwise (`selection = "all"`) the step reads every record in `data`, as
+/// it always has, and the other three fields are unused.
+struct FitReading {
+    fit_rows: bool,
+    reader_settings: String,
+    model_is_fits: bool,
+    population_fingerprint: String,
+}
+
+fn fit_reading_from_r(r: &List) -> std::result::Result<FitReading, String> {
+    let fields: HashMap<&str, Robj> = r.iter().collect();
+    let flag = |name: &str| -> std::result::Result<bool, String> {
+        fields
+            .get(name)
+            .and_then(|v| v.as_bool())
+            .ok_or_else(|| format!("internal: `fit_reading${name}` is not TRUE or FALSE"))
+    };
+    let text = |name: &str| -> std::result::Result<String, String> {
+        fields
+            .get(name)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| format!("internal: `fit_reading${name}` is not a string"))
+    };
+    Ok(FitReading {
+        fit_rows: flag("fit_rows")?,
+        reader_settings: text("reader_settings")?,
+        model_is_fits: flag("model_is_fits")?,
+        population_fingerprint: text("population_fingerprint")?,
+    })
+}
+
+/// Read `data_path` as the fit read it and place it on the fit's bindings
+/// (ferx-r #416 / #526 / #793): the fit's recorded reader settings - the whole
+/// record on the fit's own model file (its `iov_column` override too), only
+/// the selection on a `model =` override, so that file's `[data]`,
+/// `[covariates]` and `iov_column` still decide how it is read - with the
+/// fit's missing-DV skip. A fit that records no settings reads with the model
+/// file's, `[data_selection]` included; the R side refuses that case when the
+/// fit's exclusions show more. The population, bound for any level block, is
+/// then checked against the fit's fingerprint (`verify_fit_fingerprint`).
+fn read_fit_population(
+    entry_point: &str,
+    mismatch_prefix: &str,
+    parsed: &mut ParsedModel,
+    model_path: &str,
+    data_path: &str,
+    reading: &FitReading,
+    fitted: &DataBindings,
+) -> std::result::Result<(Population, FingerprintNotes), String> {
+    let settings = if reading.reader_settings.is_empty() {
+        ferx_core::api::ReaderSettings::from_parsed(parsed)
+    } else {
+        let recorded: ferx_core::api::ReaderSettings =
+            serde_json::from_str(&reading.reader_settings)
+                .map_err(|e| format!("{entry_point}: `fit$reader_settings`: {e}"))?;
+        if reading.model_is_fits {
+            recorded
+        } else {
+            let mut own = ferx_core::api::ReaderSettings::from_parsed(parsed);
+            own.ignore_exprs = recorded.ignore_exprs;
+            own.accept_exprs = recorded.accept_exprs;
+            own.ignore_subjects = recorded.ignore_subjects;
+            own
+        }
+    };
+    let (mut population, _) =
+        ferx_core::api::read_population_with(&parsed.model, &settings, data_path)
+            .map_err(|e| engine_refusal("Error reading data: ", e))?;
+
+    // Place the design on the fit's theta layout before anything reads theta
+    // by position (ferx-r #370); see `bind_design_from_fit`.
+    bind_design_from_fit(parsed, model_path, &mut population, fitted)
+        .map_err(|e| e.refusal(""))?;
+
+    let notes = verify_fit_fingerprint(
+        entry_point,
+        mismatch_prefix,
+        &reading.population_fingerprint,
+        &parsed.model,
+        &population,
+    )?;
+    Ok((population, notes))
+}
+
+/// The population a from-fit step runs on, on the fit's bindings: as the fit
+/// read it under `selection = "fit"` (`read_fit_population`, with
+/// `"{entry_point}: "` leading a fingerprint refusal), else every record in
+/// `data` as `read_all` reads it, the step's own reader (ferx-r #793).
+#[allow(clippy::too_many_arguments)]
+fn read_population_from_fit(
+    entry_point: &str,
+    parsed: &mut ParsedModel,
+    model_path: &str,
+    data_path: &str,
+    reading: &FitReading,
+    fitted: &DataBindings,
+    read_all: impl FnOnce(&ParsedModel, &str) -> std::result::Result<Population, String>,
+) -> std::result::Result<(Population, FingerprintNotes), String> {
+    if reading.fit_rows {
+        let prefix = format!("{entry_point}: ");
+        return read_fit_population(
+            entry_point, &prefix, parsed, model_path, data_path, reading, fitted,
+        );
+    }
+    let mut population = read_all(parsed, data_path)?;
+    bind_design_from_fit(parsed, model_path, &mut population, fitted)
+        .map_err(|e| e.refusal(""))?;
+    Ok((population, FingerprintNotes::none()))
 }
 
 /// `VpcTteOptions` from the R arguments. The R wrapper has already checked
@@ -3851,14 +4003,15 @@ fn vpc_cif_to_list(vpc: &ferx_core::CifVpc) -> Robj {
 ///   fitted per-class Omega/Sigma override values (ferx-core #1765); empty
 ///   when the fit carries none. Each class is rebuilt from the fitted base
 ///   Omega/Sigma plus these (ferx-r #672).
-/// @param reader_settings `fit$reader_settings` as JSON; "" when the fit
-///   records none (read with the model file's `[data_selection]`).
-/// @param model_is_fits TRUE when `model_path` is the fit's own model file:
-///   the whole record is replayed. FALSE (a `model =` override): only its
-///   selection is, on that file's own reader settings.
-/// @param population_fingerprint `fit$population_fingerprint` as JSON when the
-///   model and the data are the fit's own (left NULL or naming its files), else "":
-///   the re-read population is verified against it (ferx-core #1814).
+/// @param fit_reading How the data are read, from `.ferx_fit_reading()`
+///   (ferx-r #793): always as the fit read them, so `fit_rows` must be TRUE.
+///   `reader_settings` is `fit$reader_settings` as JSON ("" when the fit
+///   records none: read with the model file's `[data_selection]`);
+///   `model_is_fits` TRUE replays the whole record on the fit's own model
+///   file, FALSE (a `model =` override) only its selection, on that file's own
+///   reader settings; `population_fingerprint` is `fit$population_fingerprint`
+///   when the model and the data are the fit's own, else "": the re-read
+///   population is verified against it (ferx-core #1814).
 /// @param iov_occasion `fit$iov_occasion`, the IOV occasion rule the fit ran
 ///   under; "" when the fit records none (the model file's `[fit_options]` rule
 ///   is used then). A `dose` / `time(...)` rule derives the occasion labels the
@@ -3883,9 +4036,7 @@ fn ferx_rust_npde_from_fit(
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
     fit_bindings: List,
-    reader_settings: &str,
-    model_is_fits: bool,
-    population_fingerprint: &str,
+    fit_reading: List,
     iov_occasion: &str,
     nsim: i32,
     seed: i32,
@@ -3902,64 +4053,34 @@ fn ferx_rust_npde_from_fit(
         };
         // Read the rows the fit was computed on, or the NPDE decorrelation runs
         // over a different per-subject observation set than the fit and
-        // silently disagrees with a fit-time `npde_nsim` run. One reader path:
-        // the model file's own reader settings (ferx-r #526 review 10), with a
-        // fit's recorded selection replayed on them (ferx-r #462 / #416), which
-        // carries a selection passed through `ferx_fit(ignore =, accept =,
-        // ignore_ids =)` as well as the file's. On the fit's own model file the
-        // whole record is replayed (its `iov_column` override too); on a `model =`
-        // override only the selection is, so that file's `[data]`, `[covariates]`
-        // and `iov_column` still decide how it is read (review 3). On the fit's own
-        // model and data the re-read population is then verified against the fit's
-        // fingerprint (ferx-core #1814), below; R's row/ID/TIME alignment check in
-        // `.ferx_attach_npde()` stays the backstop for the other cases. A fit that
-        // records none reads with the file's `[data_selection]`; the R entry point
-        // refuses that case when the fit's exclusions show more.
-        let settings = if reader_settings.is_empty() {
-            ferx_core::api::ReaderSettings::from_parsed(&parsed)
-        } else {
-            let recorded: ferx_core::api::ReaderSettings = serde_json::from_str(reader_settings)
-                .map_err(|e| format!("ferx_calc_npde: `fit$reader_settings`: {e}"))?;
-            if model_is_fits {
-                recorded
-            } else {
-                let mut own = ferx_core::api::ReaderSettings::from_parsed(&parsed);
-                own.ignore_exprs = recorded.ignore_exprs;
-                own.accept_exprs = recorded.accept_exprs;
-                own.ignore_subjects = recorded.ignore_subjects;
-                own
-            }
-        };
-        let read = ferx_core::api::read_population_with(&parsed.model, &settings, data_path);
-        let (mut population, _) = match read {
-            Ok(r) => r,
-            Err(e) => return Err(engine_refusal("Error reading data: ", e)),
-        };
-
-        // Place the design on the fit's theta layout before anything reads theta
-        // by position (ferx-r #370); see `bind_design_from_fit`.
+        // silently disagrees with a fit-time `npde_nsim` run: the fit's own
+        // reading, `read_fit_population` (ferx-r #416 / #526 / #793), with a
+        // selection passed through `ferx_fit(ignore =, accept =, ignore_ids =)`
+        // as well as the file's, then verified against the fit's fingerprint
+        // (ferx-core #1814) on its own model and data. R's row/ID/TIME alignment
+        // check in `.ferx_attach_npde()` stays the backstop for the other cases.
+        let reading = fit_reading_from_r(&fit_reading)?;
+        if !reading.fit_rows {
+            return Err("internal: ferx_calc_npde always reads the data as the fit read it \
+                        (`fit_reading$fit_rows` must be TRUE)"
+                .to_string());
+        }
         let fitted = fit_bindings_from_r(&fit_bindings)?;
-        bind_design_from_fit(&mut parsed, model_path, &mut population, &fitted)
-            .map_err(|e| e.refusal(""))?;
-
-        // The population, bound for any level block, is the fit's: the same
-        // checks, order and `E_POPULATION_MISMATCH` refusal as `run_sir` /
-        // `run_covariance` (ferx-core #1814). Only for the fit's own model and
-        // data: R passes "" otherwise.
-        let notes = if population_fingerprint.is_empty() {
-            Vec::new()
-        } else {
-            let fp: ferx_core::PopulationFingerprint = serde_json::from_str(population_fingerprint)
-                .map_err(|e| format!("ferx_calc_npde: `fit$population_fingerprint`: {e}"))?;
-            fp.verify(&parsed.model, &population)
-                .map_err(|e| engine_refusal("npde error: ", e))?
-        };
+        let (mut population, fingerprint_notes) = read_fit_population(
+            "ferx_calc_npde",
+            "npde error: ",
+            &mut parsed,
+            model_path,
+            data_path,
+            &reading,
+            &fitted,
+        )?;
         // The occasions the fit derived, under its own rule (ferx-r #523); see
         // `derive_fit_occasions`. After the check, which is of the population as
         // read: a fingerprint of a fit with derived occasions leaves them out.
         let occasion_notes =
             derive_fit_occasions("ferx_calc_npde", &parsed, &mut population, iov_occasion)?;
-        let notes = [notes, occasion_notes.into_vec()].concat();
+        let notes = occasion_notes.after_fingerprint(fingerprint_notes).into_vec();
 
         let params = match params_from_fit(
             &parsed.model,
@@ -11326,7 +11447,8 @@ fn iov_occasion_from_r(
 /// The glue's own notes for a simulate / predict step's `simulation_warnings`:
 /// the occasion notes `derive_fit_occasions` and `derive_file_occasions` write
 /// (ferx-r #523). The field is private to this module, so outside it the only
-/// way to get one is from those two functions or `none()` - an arbitrary
+/// way to get one is from those two functions or `none()`, joined only by core's
+/// fingerprint notes (`after_fingerprint`, ferx-r #793) - an arbitrary
 /// `Vec<String>`, such as `Population.warnings`, cannot become one. With
 /// `CoreDiag` that closes both arguments of `attach_sim_warnings` to the
 /// reader's raw list (ferx-r #426 / #432).
@@ -11429,9 +11551,57 @@ mod occasion_notes {
             Vec::new()
         })
     }
+
+    /// The notes core's `PopulationFingerprint::verify` returns for data re-read
+    /// as the fit read it (ferx-r #1814 / #793), e.g. a fingerprint in another
+    /// ferx version's encoding that could not be compared. Private like
+    /// `OccasionNotes`: only `verify_fit_fingerprint` builds one, so what joins a
+    /// step's `simulation_warnings` this way is core's verify notes and nothing
+    /// else.
+    pub(super) struct FingerprintNotes(Vec<String>);
+
+    impl FingerprintNotes {
+        /// No notes: a step that checks no fingerprint.
+        pub(super) fn none() -> Self {
+            FingerprintNotes(Vec::new())
+        }
+    }
+
+    impl OccasionNotes {
+        /// The fingerprint notes, then these: the order `ferx_calc_npde` has
+        /// always raised them in.
+        pub(super) fn after_fingerprint(self, fingerprint: FingerprintNotes) -> Self {
+            OccasionNotes([fingerprint.0, self.0].concat())
+        }
+    }
+
+    /// Check a population re-read for a from-fit step against the fit's
+    /// `population_fingerprint` (ferx-core #1814): the same checks and
+    /// `E_POPULATION_MISMATCH` refusal as `run_sir` / `run_covariance`. ""
+    /// checks nothing (R passes it unless the model and data are the fit's
+    /// own). `mismatch_prefix` leads a refusal's text.
+    pub(super) fn verify_fit_fingerprint(
+        entry_point: &str,
+        mismatch_prefix: &str,
+        fingerprint: &str,
+        model: &CompiledModel,
+        population: &Population,
+    ) -> std::result::Result<FingerprintNotes, String> {
+        if fingerprint.is_empty() {
+            return Ok(FingerprintNotes::none());
+        }
+        let fp: ferx_core::PopulationFingerprint = serde_json::from_str(fingerprint)
+            .map_err(|e| format!("{entry_point}: `fit$population_fingerprint`: {e}"))?;
+        fp.verify(model, population)
+            .map(FingerprintNotes)
+            .map_err(|e| engine_refusal(mismatch_prefix, e))
+    }
 }
 
-use occasion_notes::{derive_file_occasions, derive_fit_occasions, OccasionNotes};
+use occasion_notes::{
+    derive_file_occasions, derive_fit_occasions, verify_fit_fingerprint, FingerprintNotes,
+    OccasionNotes,
+};
 
 /// Core's `apply_iov_occasion_rule` (`api/validation.rs`), which is
 /// `pub(crate)`: each subject's occasion labels derived from a model-side rule,

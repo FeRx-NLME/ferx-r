@@ -444,7 +444,7 @@ test_that("ferx_calc_npde() checks a frame equal to the fit's data against the f
   seen <- NULL
   local_mocked_bindings(
     ferx_rust_npde_from_fit = function(...) {
-      seen <<- list(...)$population_fingerprint
+      seen <<- list(...)$fit_reading$population_fingerprint
       stop("stop after capture")
     },
     .package = "ferx"

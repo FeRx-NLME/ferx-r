@@ -23,6 +23,7 @@ ferx_rust_simulate_with_uncertainty(
   residual_rho_pairs,
   mixture_overrides,
   fit_bindings,
+  fit_reading,
   iov_occasion,
   n_uncertainty_draws,
   n_sim_per_draw,

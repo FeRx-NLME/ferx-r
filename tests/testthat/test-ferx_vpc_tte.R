@@ -357,3 +357,37 @@ test_that("the vpc engine notes a panel with no band, in that panel only (#777 r
   labels2 <- unlist(lapply(built2$data, function(l) l$label))
   expect_false(any(grepl("W_VPC_EMPTY_STRATUM", labels2, fixed = TRUE)))
 })
+
+# --- #793: selection = "fit" ---------------------------------------------------
+# Every fit here runs on FD.
+
+test_that("T14: ferx_vpc_tte(selection = \"fit\") draws both curves on the fit's subjects (#793)", {
+  ex <- ferx_example("tte_exponential")
+  fit <- rs_tte_subjects_fit()
+  rows <- utils::read.csv(ex$data)
+  without <- rs_csv_without(ex$data, rows$ID %in% rs_first_ids(rows))
+  run <- function(...) vpc_tte_quiet(ex$model, n_sim = 20L, seed = 4L, fit = fit, ...)
+  v <- run(selection = "fit")
+  expect_identical(v$observed$n_risk[1], 25L)
+  # The fit's reading is the data without those subjects: the observed curve
+  # and the band, both.
+  w <- run(data = without, selection = "all")
+  expect_identical(v$observed, w$observed)
+  expect_identical(v$band, w$band)
+  # T16: the default is "all", every subject in the data.
+  default <- run()
+  expect_identical(default, run(selection = "all"))
+  expect_identical(default$observed$n_risk[1], 30L)
+})
+
+test_that("T6: ferx_vpc_tte(selection = \"fit\") refuses an unstated legacy selection (#793)", {
+  ex <- ferx_example("tte_exponential")
+  fit <- rs_legacy(rs_tte_subjects_fit())
+  e <- tryCatch(vpc_tte_quiet(ex$model, n_sim = 5L, fit = fit, selection = "fit"),
+                error = function(e) e)
+  expect_s3_class(e, "error")
+  expect_match(conditionMessage(e), "ferx_vpc_tte: this fit predates", fixed = TRUE)
+  expect_match(conditionMessage(e), "selection = \"all\"", fixed = TRUE)
+  expect_error(ferx_vpc_tte(ex$model, ex$data, n_sim = 5L, selection = "fit"),
+               "ferx_vpc_tte: selection = \"fit\" needs `fit`", fixed = TRUE)
+})

@@ -146,3 +146,74 @@ rs_accept_fit <- local({
     fit
   }
 })
+
+# --- #793: from-fit readers' `selection = "fit"` ------------------------------
+
+# warfarin_iov (doses at TIME 0 and 120) fitted with its TIME 120 doses dropped
+# by a record-only `ignore =`: a selection that removes doses and no
+# observation, so "all" and "fit" read the same number of rows and differ only
+# in the dose the fit never saw (#793 plan, M3).
+rs_mid_dose_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      ex <- ferx_example("warfarin_iov")
+      fit <<- suppressWarnings(ferx_fit(
+        ex$model, ex$data, verbose = FALSE, covariance = FALSE,
+        ignore = "EVID == 1 && TIME > 0", settings = list(maxiter = 5L)
+      ))
+    }
+    fit
+  }
+})
+
+# The first five subject IDs of a data frame, in file order.
+rs_first_ids <- function(rows) utils::head(unique(rows$ID), 5L)
+
+# A TTE example fitted without its first five subjects, dropped by a
+# record-only `ignore_ids =`. `data` (a frame) replaces the example's file;
+# cached per example. The fit's own reading has the other subjects only.
+rs_tte_subjects_fit <- local({
+  cache <- list()
+  function(name = "tte_exponential", data = NULL) {
+    key <- paste(name, is.null(data))
+    if (is.null(cache[[key]])) {
+      ex <- ferx_example(name)
+      rows <- if (is.null(data)) utils::read.csv(ex$data) else data
+      cache[[key]] <<- suppressWarnings(ferx_fit(
+        ex$model, if (is.null(data)) ex$data else data, verbose = FALSE,
+        covariance = FALSE, ignore_ids = rs_first_ids(rows)
+      ))
+    }
+    cache[[key]]
+  }
+})
+
+# `path` (a CSV, or a frame written to one first) without the records `drop`
+# selects (a logical over its rows), as a new CSV. The kept lines are the
+# file's own bytes, so every number reads back exactly as the fit read it.
+rs_csv_without <- function(path, drop, env = parent.frame()) {
+  if (is.data.frame(path)) {
+    frame <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
+    utils::write.csv(path, frame, row.names = FALSE, quote = FALSE, na = ".")
+    path <- frame
+  }
+  lines <- readLines(path)
+  rows <- utils::read.csv(path, na.strings = ".")
+  stopifnot(length(drop) == nrow(rows), length(lines) == nrow(rows) + 1L)
+  out <- withr::local_tempfile(fileext = ".csv", .local_envir = env)
+  writeLines(lines[c(TRUE, !drop)], out)
+  out
+}
+
+# Every replicate of `out` (grouped by DRAW and SIM) has `fit$sdtab`'s rows:
+# its ID and TIME columns, in order.
+expect_sdtab_rows <- function(out, fit) {
+  groups <- split(out[c("ID", "TIME")],
+                  interaction(out$DRAW, out$SIM, drop = TRUE))
+  testthat::expect_gt(length(groups), 0L)
+  for (g in groups) {
+    testthat::expect_identical(g$ID, as.character(fit$sdtab$ID))
+    testthat::expect_identical(g$TIME, as.numeric(fit$sdtab$TIME))
+  }
+}

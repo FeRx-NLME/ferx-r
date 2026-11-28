@@ -80,6 +80,7 @@
 #' plot(kv)
 #'
 #' @seealso \code{\link{plot.ferx_vpc_kmmc}}, \code{\link{ferx_vpc_tte}}
+#' @inheritParams ferx_simulate
 #' @family simulation
 #' @export
 ferx_vpc_kmmc <- function(model, data = NULL, covariate, level = NULL,
@@ -87,8 +88,9 @@ ferx_vpc_kmmc <- function(model, data = NULL, covariate, level = NULL,
                           fit = NULL, strata = NULL, by_dose = FALSE,
                           censoring = c("observed", "horizon"), cmt = NULL,
                           horizon = NULL, probs = c(0.05, 0.5, 0.95),
-                          grid = "auto") {
+                          grid = "auto", selection = c("all", "fit")) {
   censoring <- match.arg(censoring)
+  selection <- .ferx_selection_arg(selection, fit, "ferx_vpc_kmmc")
   if (missing(covariate) || !is.character(covariate) || length(covariate) != 1L ||
       is.na(covariate) || !nzchar(covariate)) {
     stop("`covariate` must be a single covariate name.", call. = FALSE)
@@ -111,7 +113,7 @@ ferx_vpc_kmmc <- function(model, data = NULL, covariate, level = NULL,
   # no `cmt` at its `vpc_cif` (ferx-core #1887), which ferx_vpc_cif() calls.
   res <- .ferx_engine_spelling(
     .ferx_vpc_call(args, fit, ferx_rust_vpc_kmmc, ferx_rust_vpc_kmmc_from_fit,
-                   extra, "ferx_vpc_kmmc"),
+                   extra, "ferx_vpc_kmmc", selection),
     "E_VPC_TTE_INPUT",
     c("`vpc_rtte`", "`vpc_cif`"),
     c("`ferx_vpc_tte()`", "`ferx_vpc_cif()`")

@@ -98,7 +98,8 @@
 #'   in the \code{simulation_warnings} attribute and re-emitted as an R warning:
 #'   \code{ferx_fit()} skips those same records, so simulated rows at those
 #'   times have no counterpart in a fit's \code{sdtab} (do not overlay the two,
-#'   e.g. in a VPC). Every other data-reader diagnostic the engine raises for
+#'   e.g. in a VPC). Under \code{selection = "fit"} those records are skipped,
+#'   as the fit skipped them. Every other data-reader diagnostic the engine raises for
 #'   \code{data} - a dose that never landed, a covariate with no value for some
 #'   subjects, and so on - travels the same channel.
 #' @param n_sim Number of simulation replicates
@@ -135,6 +136,31 @@
 #'   until the cumulative hazard reaches \code{-log U}, censoring at
 #'   \code{horizon} if no event fires (ferx-core #564). Purely-Gaussian models
 #'   ignore it. \code{NULL} (default) leaves it unset.
+#' @param selection Which records of \code{data} are read, when \code{fit} is
+#'   given:
+#'   \describe{
+#'     \item{\code{"all"}}{(default) every record in \code{data}, whatever
+#'       data selection the fit was made with - what this function has always
+#'       done.}
+#'     \item{\code{"fit"}}{the data as \code{fit} read them: the fit's own
+#'       data selection (\code{fit$reader_settings}: the model file's
+#'       \code{[data_selection]} and any \code{ferx_fit(ignore =, accept =,
+#'       ignore_ids =)}), applied to every record it removed, doses included,
+#'       and the fit's skip of a record with an empty \code{DV}. On the fit's
+#'       own model and data the rows are the ones the fit was scored on: the
+#'       observation rows of a simulation or prediction are
+#'       \code{fit$sdtab}'s, in order, and a survival prediction or a VPC
+#'       covers the fit's subjects. They are checked against
+#'       \code{fit$population_fingerprint}, so a data file edited since the
+#'       fit is refused with code \code{E_POPULATION_MISMATCH}. On another
+#'       model file only the fit's selection is replayed, and on another data
+#'       file nothing is checked. Needs \code{fit}.}
+#'   }
+#'   A fit made before the selection was recorded is refused under
+#'   \code{"fit"} when its \code{fit$exclusions} show a clause its model file
+#'   does not state. The two are different simulations, not one and a filter
+#'   of it: with the same \code{seed}, removing records moves the random
+#'   stream, so \code{"fit"} is not \code{"all"} with some rows dropped.
 #' @return A data.frame, one row per simulated record, with these columns:
 #'   \describe{
 #'     \item{\code{DRAW}}{Parameter draw. Always 1 here; it is the grouping
@@ -221,7 +247,12 @@
 #' @family simulation
 #' @export
 ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL,
-                          match = FALSE, horizon = NULL) {
+                          match = FALSE, horizon = NULL,
+                          selection = c("all", "fit")) {
+  selection <- .ferx_selection_arg(selection, fit, "ferx_simulate")
+  # `data` as the caller passed it (NULL: the fit's own), for the fit's reading.
+  data <- .ferx_data_arg(data)
+  data_override <- data
   if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
@@ -259,6 +290,10 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
     )
   } else {
     fit_pieces <- validate_fit_for_params(fit)
+    fit_reading <- .ferx_fit_reading(
+      fit, selection, "ferx_simulate", "Refit, or use selection = \"all\".",
+      model_path = model, data_path = data, model = model, data = data_override
+    )
     .ferx_engine_call(
       ferx_rust_simulate_from_fit(
         model_path = normalizePath(model),
@@ -273,6 +308,7 @@ ferx_simulate <- function(model, data = NULL, n_sim = 1L, seed = 42L, fit = NULL
         residual_rho_pairs = fit_pieces$residual_rho_pairs,
         mixture_overrides = fit_pieces$mixture_overrides,
         fit_bindings = fit_pieces$fit_bindings,
+        fit_reading = fit_reading,
         iov_occasion = fit_pieces$iov_occasion,
         n_sim = as.integer(n_sim),
         seed = as.integer(seed),

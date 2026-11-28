@@ -58,6 +58,7 @@
 #'   with \code{fit}, a fit that records no occasion rule and so takes the
 #'   model file's.
 #'
+#' @inheritParams ferx_simulate
 #' @inheritSection ferx_simulate Errors raised by the engine
 #' @inheritSection ferx_simulate Theta level blocks
 #'
@@ -81,12 +82,17 @@
 #' @family simulation
 #' @export
 ferx_predict_survival <- function(model, data = NULL, times, fit = NULL,
-                                  type = c("population", "individual")) {
+                                  type = c("population", "individual"),
+                                  selection = c("all", "fit")) {
   type <- match.arg(type)
+  selection <- .ferx_selection_arg(selection, fit, "ferx_predict_survival")
   if (type == "individual" && is.null(fit)) {
     stop("ferx_predict_survival: type = \"individual\" needs `fit`, whose ",
          "EBEs (`fit$ebe_etas`) give each subject's etas.", call. = FALSE)
   }
+  # `data` as the caller passed it (NULL: the fit's own), for the fit's reading.
+  data <- .ferx_data_arg(data)
+  data_override <- data
   if (is.null(data)) data <- .ferx_default_data(model, fit)
   if (is.null(data)) {
     stop(
@@ -119,6 +125,10 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL,
 
   fit_pieces <- validate_fit_for_params(fit)
   etas <- .ferx_survival_etas(fit, type)
+  fit_reading <- .ferx_fit_reading(
+    fit, selection, "ferx_predict_survival", "Refit, or use selection = \"all\".",
+    model_path = model, data_path = data, model = model, data = data_override
+  )
   # A note on how the fit's occasions were derived (#523) comes back on the
   # simulate paths' `simulation_warnings` channel.
   # The engine tells a subject with no supplied eta to call
@@ -138,6 +148,7 @@ ferx_predict_survival <- function(model, data = NULL, times, fit = NULL,
       residual_rho_pairs = fit_pieces$residual_rho_pairs,
       mixture_overrides = fit_pieces$mixture_overrides,
       fit_bindings = fit_pieces$fit_bindings,
+      fit_reading = fit_reading,
       iov_occasion = fit_pieces$iov_occasion,
       individual = type == "individual",
       eta_ids = etas$ids,

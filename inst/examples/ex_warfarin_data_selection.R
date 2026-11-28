@@ -28,3 +28,12 @@ fit$exclusions$fired_ignore        # which ignore conditions fired
 # The same filter can be applied via the R API instead of the model file:
 fit2 <- ferx_fit(ex$model, ferx_apply_selection(ex$data, ignore = "DV < 1.0"))
 isTRUE(abs(fit$ofv - fit2$ofv) < 1e-4)
+
+# --- Simulating the fit's rows --------------------------------------------
+# By default ferx_simulate(fit =) reads every record in the data, the two
+# ignored ones included. selection = "fit" reads the data as the fit read
+# them, so each replicate has the fit's sdtab rows, in order (e.g. for a VPC).
+sim_all <- ferx_simulate(ex$model, n_sim = 2L, seed = 1L, fit = fit)
+sim_fit <- ferx_simulate(ex$model, n_sim = 2L, seed = 1L, fit = fit,
+                         selection = "fit")
+c(all = sum(sim_all$SIM == 1), fit = sum(sim_fit$SIM == 1), sdtab = nrow(fit$sdtab))

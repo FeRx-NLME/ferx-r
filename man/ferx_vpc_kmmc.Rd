@@ -19,7 +19,8 @@ ferx_vpc_kmmc(
   cmt = NULL,
   horizon = NULL,
   probs = c(0.05, 0.5, 0.95),
-  grid = "auto"
+  grid = "auto",
+  selection = c("all", "fit")
 )
 }
 \arguments{
@@ -74,6 +75,32 @@ the lower bound, the middle line and the upper bound.}
 stratum's observed times and 101 evenly spaced points up to \code{H}),
 \code{"all_steps"} (also every step of every replicate curve: exact step
 ribbons, on a large grid), or a numeric vector of times.}
+
+\item{selection}{Which records of \code{data} are read, when \code{fit} is
+given:
+\describe{
+\item{\code{"all"}}{(default) every record in \code{data}, whatever
+data selection the fit was made with - what this function has always
+done.}
+\item{\code{"fit"}}{the data as \code{fit} read them: the fit's own
+data selection (\code{fit$reader_settings}: the model file's
+\code{[data_selection]} and any \code{ferx_fit(ignore =, accept =,
+    ignore_ids =)}), applied to every record it removed, doses included,
+and the fit's skip of a record with an empty \code{DV}. On the fit's
+own model and data the rows are the ones the fit was scored on: the
+observation rows of a simulation or prediction are
+\code{fit$sdtab}'s, in order, and a survival prediction or a VPC
+covers the fit's subjects. They are checked against
+\code{fit$population_fingerprint}, so a data file edited since the
+fit is refused with code \code{E_POPULATION_MISMATCH}. On another
+model file only the fit's selection is replayed, and on another data
+file nothing is checked. Needs \code{fit}.}
+}
+A fit made before the selection was recorded is refused under
+\code{"fit"} when its \code{fit$exclusions} show a clause its model file
+does not state. The two are different simulations, not one and a filter
+of it: with the same \code{seed}, removing records moves the random
+stream, so \code{"fit"} is not \code{"all"} with some rows dropped.}
 }
 \value{
 An object of class \code{ferx_vpc_kmmc}, a list with:
