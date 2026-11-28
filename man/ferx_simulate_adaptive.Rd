@@ -442,6 +442,7 @@ Other simulation:
 \code{\link[=ferx_sim_parameters]{ferx_sim_parameters()}},
 \code{\link[=ferx_simulate]{ferx_simulate()}},
 \code{\link[=ferx_simulate_with_uncertainty]{ferx_simulate_with_uncertainty()}},
+\code{\link[=ferx_vpc]{ferx_vpc()}},
 \code{\link[=ferx_vpc_cif]{ferx_vpc_cif()}},
 \code{\link[=ferx_vpc_kmmc]{ferx_vpc_kmmc()}},
 \code{\link[=ferx_vpc_tte]{ferx_vpc_tte()}}

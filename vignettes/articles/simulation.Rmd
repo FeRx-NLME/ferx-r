@@ -139,10 +139,30 @@ ggplot() +
        y     = "DV")
 ```
 
-The simple aggregation above stratifies only by `TIME`. For a "real" VPC you
-would also stratify by dose or covariate group, and bin times for sparse
-designs - both are downstream data-frame manipulations and are not built into
-ferx.
+The simple aggregation above stratifies only by `TIME` and compares against
+every observation in the data file.
+
+### Visual predictive check with `ferx_vpc()`
+
+`ferx_vpc(fit)` builds a binned VPC with the [vpc](https://CRAN.R-project.org/package=vpc)
+package. It simulates `n_sim` replicates at the fit's estimates and pairs each
+simulated row with the observation it reproduces, by compartment, subject and
+time, so only the records the fit used are compared: rows a
+`[data_selection]` block ignored are left out, and censored (`CENS = 1` /
+`-1`) observations are blanked rather than plotted at the limit.
+`pred_corr = TRUE` gives the prediction-corrected VPC, with each simulated row
+carrying its observation's `PRED`. Binning, intervals and the plot are vpc's:
+pass `bins`, `pi`, `ci`, `log_y`, ... through `...`, and `vpcdb = TRUE` for
+the data instead of the plot.
+
+```{r ferx-vpc, eval = requireNamespace("vpc", quietly = TRUE), fig.width = 7, fig.height = 4.5}
+ferx_vpc(fit, n_sim = 200L, seed = 1L)
+ferx_vpc(fit, n_sim = 200L, seed = 1L, pred_corr = TRUE)
+```
+
+A fit with several continuous endpoints needs `cmt =`; `stratify =` takes
+columns of the fit's data. Time-to-event endpoints have their own VPC,
+`ferx_vpc_tte()`.
 
 ### Contrast VPC: checking the treatment difference
 
