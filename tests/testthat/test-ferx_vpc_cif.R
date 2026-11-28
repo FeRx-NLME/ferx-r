@@ -380,4 +380,7 @@ test_that("T15: ferx_vpc_cif(selection = \"fit\") draws on the fit's subjects (#
   default <- run()
   expect_identical(default, run(selection = "all"))
   expect_identical(v$strata$n_subjects, default$strata$n_subjects - 5L)
+  # Without a fit there is no reading to replay (#793 review 1, finding 5).
+  expect_error(ferx_vpc_cif(ex$model, ex$data, n_sim = 5L, selection = "fit"),
+               "ferx_vpc_cif: selection = \"fit\" needs `fit`", fixed = TRUE)
 })

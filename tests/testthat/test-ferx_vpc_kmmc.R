@@ -239,4 +239,8 @@ test_that("T15: ferx_vpc_kmmc(selection = \"fit\") draws on the fit's subjects (
   default <- run()
   expect_identical(default, run(selection = "all"))
   expect_gt(default$observed$n_risk[1], v$observed$n_risk[1])
+  # Without a fit there is no reading to replay (#793 review 1, finding 5).
+  expect_error(ferx_vpc_kmmc(ex$model, d, covariate = "WT", n_sim = 5L,
+                             selection = "fit"),
+               "ferx_vpc_kmmc: selection = \"fit\" needs `fit`", fixed = TRUE)
 })
