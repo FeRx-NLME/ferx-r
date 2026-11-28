@@ -636,9 +636,9 @@ test_that("the mapped preview agrees with the engine's exclusions, and a fit rep
     ferx_fit(mapped$model, mapped$data, method = "foce", verbose = FALSE,
              covariance = FALSE, settings = list(maxiter = 5L))
   )
+  # The block's clause is not restated: `model =` applies it (#794).
   preview <- attr(
-    ferx_apply_selection(mapped$data, ignore = "TIME > 24",
-                         model = mapped$model),
+    ferx_apply_selection(mapped$data, model = mapped$model),
     "exclusions"
   )
 
@@ -653,4 +653,235 @@ test_that("the mapped preview agrees with the engine's exclusions, and a fit rep
                fit$exclusions$n_obs_excluded + fit$exclusions$n_dose_excluded +
                  fit$exclusions$n_other_excluded)
   expect_true("TAFD" %in% names(replayed))
+})
+
+# ---------------------------------------------------------------------------
+# ferx_apply_selection(model = ) applies the model's [data_selection] block
+# (ferx-r #794)
+# ---------------------------------------------------------------------------
+
+ferx_rust_model_data_selection <-
+  getFromNamespace("ferx_rust_model_data_selection", "ferx")
+
+# A 2-iteration fit: only its exclusions and call settings are read.
+sel794_fit <- function(model, data, ...) {
+  suppressWarnings(
+    ferx_fit(model, data, method = "foce", verbose = FALSE,
+             covariance = FALSE, settings = list(maxiter = 2L), ...)
+  )
+}
+
+test_that("model = applies the block: the preview keeps the fit's records (path)", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin_data_selection")
+  sel <- ferx_apply_selection(ex$data, model = ex$model)
+  ex_fit <- sel794_fit(ex$model, ex$data)$exclusions
+  expect_identical(nrow(sel), 118L)
+  expect_identical(
+    nrow(sel),
+    as.integer(ex_fit$n_records_total - ex_fit$n_obs_excluded -
+                 ex_fit$n_dose_excluded - ex_fit$n_other_excluded)
+  )
+  expect_identical(attr(sel, "exclusions"), ex_fit)
+  # The block's clause is recorded on the ferx_data.
+  expect_identical(attr(sel, "ignore"), "DV < 1.0")
+})
+
+test_that("model = applies the block: the preview keeps the fit's records (data.frame)", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin_data_selection")
+  df  <- utils::read.csv(ex$data, na.strings = ".")
+  sel <- ferx_apply_selection(df, model = ex$model)
+  expect_identical(nrow(sel), 118L)
+  expect_identical(attr(sel, "exclusions"), sel794_fit(ex$model, df)$exclusions)
+})
+
+test_that("model = with excluded = TRUE returns the block's excluded rows", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin_data_selection")
+  out <- ferx_apply_selection(ex$data, model = ex$model, excluded = TRUE)
+  expect_identical(nrow(out), 2L)
+  expect_identical(unique(out$.exclude_reason),
+                   sel794_fit(ex$model, ex$data)$exclusions$fired_ignore)
+})
+
+test_that("a quoted block value is applied in the engine's spelling", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  m  <- model_with_lines(c("[data_selection]", '  ignore = "DV < 1.0"'),
+                         environment())
+  sel <- ferx_apply_selection(ex$data, model = m)
+  expect_identical(nrow(sel), 118L)
+  expect_identical(attr(sel, "exclusions"), sel794_fit(m, ex$data)$exclusions)
+})
+
+test_that("block clauses go first and fired rules run in first-excluded-row order", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  m  <- model_with_lines(c("[data_selection]", "  ignore = DV < 1.0"),
+                         environment())
+  sel <- ferx_apply_selection(ex$data, model = m, ignore = "DV < 2",
+                              accept = "TIME < 100", ignore_ids = 1)
+  fit <- sel794_fit(m, ex$data, ignore = "DV < 2", accept = "TIME < 100",
+                    ignore_ids = 1)
+  pre <- attr(sel, "exclusions")
+  expect_identical(pre$fired_ignore[1L], "ignore_subjects: 1")
+  expect_true(all(c("ignore: DV < 1.0", "ignore: DV < 2") %in% pre$fired_ignore))
+  expect_identical(pre, fit$exclusions)
+})
+
+test_that("fired accept rules run in first-excluded-row order too", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  # Subject 1's first record fails `ID != 1` before any record fails
+  # `TIME < 100`, so the engine lists the second clause first.
+  acc <- c("TIME < 100", "ID != 1")
+  pre <- attr(ferx_apply_selection(ex$data, accept = acc), "exclusions")
+  fit <- sel794_fit(ex$model, ex$data, accept = acc)
+  expect_identical(pre$fired_accept, c("accept: ID != 1", "accept: TIME < 100"))
+  expect_identical(pre, fit$exclusions)
+})
+
+test_that("fitting a model = ferx_data does not restate the model's clauses", {
+  skip_on_cran()
+  ex   <- ferx_example("warfarin_data_selection")
+  via  <- sel794_fit(ex$model, ferx_apply_selection(ex$data, model = ex$model))
+  base <- sel794_fit(ex$model, ex$data)
+  expect_identical(via$call_settings, base$call_settings)
+  expect_identical(via$exclusions, base$exclusions)
+})
+
+test_that("no block clause kind is restated: ignore, accept and ignore_subjects", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  # One clause of each kind, so each half of the merge's subtraction is live.
+  m  <- model_with_lines(
+    c("[data_selection]", "  ignore = DV < 1.0", "  accept = TIME < 100",
+      "  ignore_subjects = [2]"),
+    environment()
+  )
+  sel <- ferx_apply_selection(ex$data, model = m)
+  expect_identical(attr(sel, "accept"), "TIME < 100")
+  expect_identical(attr(sel, "ignore_ids"), "2")
+  via  <- sel794_fit(m, sel)
+  base <- sel794_fit(m, ex$data)
+  expect_identical(via$call_settings, base$call_settings)
+  expect_identical(via$exclusions, base$exclusions)
+})
+
+test_that("a ferx_data built against another model sends the clauses this one lacks", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin_data_selection")
+  sel <- ferx_apply_selection(ex$data, model = ex$model)
+  fit <- sel794_fit(ferx_example("warfarin")$model, sel)
+  expect_identical(fit$exclusions$n_obs_excluded, 2L)
+  expect_identical(fit$call_settings$ignore, "DV < 1.0")
+})
+
+test_that("a model the engine cannot parse is refused by the fit, ferx_data or not", {
+  skip_on_cran()
+  ex  <- ferx_example("warfarin")
+  bad <- model_with_lines(c("[data_selection]", "  ignore = DV <"),
+                          environment())
+  sel <- ferx_apply_selection(ex$data)
+  e_path <- tryCatch(sel794_fit(bad, ex$data), error = identity)
+  e_sel  <- tryCatch(sel794_fit(bad, sel), error = identity)
+  expect_s3_class(e_path, "error")
+  expect_identical(class(e_sel), class(e_path))
+  expect_identical(conditionMessage(e_sel), conditionMessage(e_path))
+})
+
+test_that("a fit's replay applies its fired rules, not a later block edit", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin_data_selection")
+  m  <- withr::local_tempfile(fileext = ".ferx")
+  file.copy(ex$model, m)
+  fit <- sel794_fit(m, ex$data)
+  cat("  ignore = TIME > 100\n", file = m, append = TRUE)
+  expect_true("TIME > 100" %in%
+                ferx_rust_model_data_selection(normalizePath(m))$ignore)
+  out <- ferx_apply_selection(fit, excluded = TRUE)
+  expect_identical(nrow(out), as.integer(fit$exclusions$n_obs_excluded))
+})
+
+test_that("a replayed selection of a fit that used ignore_ids can be fitted", {
+  skip_on_cran()
+  ex <- ferx_example("warfarin")
+  f  <- sel794_fit(ex$model, ex$data, ignore_ids = 1, ignore = "TIME > 100")
+  r  <- ferx_apply_selection(f)
+  expect_identical(attr(r, "ignore"), "TIME > 100")
+  expect_identical(attr(r, "ignore_ids"), "1")
+  expect_identical(sel794_fit(ex$model, r)$exclusions, f$exclusions)
+})
+
+test_that("subject IDs are matched and reported as the file spells them (02 is not 2)", {
+  skip_on_cran()
+  d <- example_rows()
+  d$ID <- as.character(d$ID)
+  d$ID[d$ID == "2"] <- "02"
+  csv <- write_nonmem_csv(d, environment())
+  ex  <- ferx_example("warfarin")
+
+  # Call-time ignore_ids.
+  fit <- sel794_fit(ex$model, csv, ignore_ids = "02")
+  expect_gt(fit$exclusions$n_obs_excluded, 0L)
+  expect_identical(fit$exclusions$excluded_subject_ids, "02")
+  pre <- ferx_apply_selection(csv, ignore_ids = "02")
+  expect_identical(attr(pre, "exclusions"), fit$exclusions)
+
+  # A block's ignore_subjects, through model =.
+  m <- model_with_lines(c("[data_selection]", "  ignore_subjects = [02]"),
+                        environment())
+  expect_identical(
+    attr(ferx_apply_selection(csv, model = m), "exclusions"),
+    sel794_fit(m, csv)$exclusions
+  )
+
+  # The replay of the fit, and a refit of it.
+  out <- ferx_apply_selection(fit, excluded = TRUE)
+  expect_identical(nrow(out), as.integer(fit$exclusions$n_obs_excluded +
+                                           fit$exclusions$n_dose_excluded +
+                                           fit$exclusions$n_other_excluded))
+  expect_identical(sel794_fit(ex$model, ferx_apply_selection(fit))$exclusions,
+                   fit$exclusions)
+
+  # A space-padded ID field: the engine trims it, so ` 2` is subject `2`
+  # (#795 review, round 2).
+  lines <- readLines(write_nonmem_csv(example_rows(), environment()))
+  padded <- withr::local_tempfile(fileext = ".csv")
+  writeLines(c(lines[1L], paste0(" ", lines[-1L])), padded)
+  pfit <- sel794_fit(ex$model, padded, ignore_ids = "2")
+  expect_gt(pfit$exclusions$n_obs_excluded, 0L)
+  expect_identical(
+    attr(ferx_apply_selection(padded, ignore_ids = "2"), "exclusions"),
+    pfit$exclusions
+  )
+  expect_identical(nrow(ferx_apply_selection(pfit, excluded = TRUE)),
+                   as.integer(pfit$exclusions$n_obs_excluded +
+                                pfit$exclusions$n_dose_excluded +
+                                pfit$exclusions$n_other_excluded))
+  afit <- sel794_fit(ex$model, padded, accept = "ID != 3")
+  expect_identical(afit$exclusions$excluded_subject_ids, "3")
+  expect_identical(
+    attr(ferx_apply_selection(padded, accept = "ID != 3"), "exclusions"),
+    afit$exclusions
+  )
+})
+
+test_that("ferx_rust_model_data_selection returns the block in the engine's spelling", {
+  m <- model_with_lines(
+    c("[data_selection]", '  ignore = "DV < 1.0"',
+      "  accept = BW >= 30 && BW < 48", '  ignore_subjects = [3, "A"]'),
+    environment()
+  )
+  s <- ferx_rust_model_data_selection(normalizePath(m))
+  expect_identical(s$ignore, "DV < 1.0")
+  expect_identical(s$accept, "BW >= 30 && BW < 48")
+  expect_identical(s$ignore_subjects, c("3", "A"))
+
+  none <- ferx_rust_model_data_selection(
+    normalizePath(ferx_example("warfarin")$model))
+  expect_identical(none,
+                   list(ignore = character(0), accept = character(0),
+                        ignore_subjects = character(0)))
 })

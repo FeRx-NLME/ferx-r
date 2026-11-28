@@ -387,6 +387,12 @@ ferx_rust_model_column_map <- function(model_path) {
 
 #' @title Internal Rust backend binding
 #' @keywords internal
+ferx_rust_model_data_selection <- function(model_path) {
+  .Call("wrap__ferx_rust_model_data_selection", model_path)
+}
+
+#' @title Internal Rust backend binding
+#' @keywords internal
 ferx_rust_model_structure <- function(model_path) {
   .Call("wrap__ferx_rust_model_structure", model_path)
 }

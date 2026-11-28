@@ -11179,6 +11179,49 @@ fn ferx_rust_model_column_map(model_path: &str) -> List {
     })
 }
 
+/// A model file's `[data_selection]` clauses in the spelling the reader reports
+/// them: `ignore` / `accept` as `FilterClause::source` (the `fit$exclusions`
+/// label minus its `ignore: ` / `accept: ` prefix), `ignore_subjects` bare as
+/// stored. The raw `ignore_exprs` text is not that spelling: a quoted block
+/// value (`ignore = "DV < 1.0"`) keeps its quotes there (ferx-r #794). The
+/// parser has already validated every clause, so none is dropped here.
+fn data_selection_sources(
+    opts: &FitOptions,
+) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let sources = |exprs: &[String]| -> Vec<String> {
+        exprs
+            .iter()
+            .filter_map(|e| ferx_core::io::filter_expr::FilterClause::parse(e).ok())
+            .map(|c| c.source)
+            .collect()
+    };
+    (sources(&opts.ignore_exprs), sources(&opts.accept_exprs), opts.ignore_subjects.clone())
+}
+
+/// Return the selection a model file's `[data_selection]` block states (#794).
+///
+/// Parses `model_path` and returns the block's clauses as the engine's reader
+/// applies and reports them, so `ferx_apply_selection(model = )` previews the
+/// records `ferx_fit()` keeps and `ferx_fit()` can tell a `ferx_data`'s own
+/// copy of the model's clauses from call-time ones.
+///
+/// @param model_path Path to .ferx model file
+/// @return Named list with character vectors `ignore`, `accept` and
+///   `ignore_subjects`, each empty when the block states none
+/// @export
+#[extendr]
+fn ferx_rust_model_data_selection(model_path: &str) -> List {
+    entry(move || {
+        let parsed =
+            match ferx_core::parser::model_parser::parse_full_model_file(Path::new(model_path)) {
+                Ok(p) => p,
+                Err(e) => return Err(format!("Error parsing model: {e}")),
+            };
+        let (ignore, accept, ignore_subjects) = data_selection_sources(&parsed.fit_options);
+        Ok(list!(ignore = ignore, accept = accept, ignore_subjects = ignore_subjects))
+    })
+}
+
 /// Return a model file's structure as the engine parses it, before any fit.
 ///
 /// Parses `model_path` and returns `model_structure_list()`, the list a fit
@@ -12259,17 +12302,14 @@ fn ferx_rust_unstated_selection(
     entry(move || {
         let mut source = read_fit_model(entry_point, model_path, model_hash)?;
         let opts = &source.parsed.fit_options;
-        let labels = |prefix: &str, exprs: &[String]| -> Vec<String> {
-            exprs
-                .iter()
-                .filter_map(|e| ferx_core::io::filter_expr::FilterClause::parse(e).ok())
-                .map(|c| format!("{prefix}: {}", c.source))
-                .collect()
+        let (ignore, accept, ignore_subjects) = data_selection_sources(opts);
+        let prefixed = |prefix: &str, v: Vec<String>| -> Vec<String> {
+            v.into_iter().map(|s| format!("{prefix}: {s}")).collect()
         };
-        let mut stated = labels("ignore", &opts.ignore_exprs);
-        stated.extend(labels("accept", &opts.accept_exprs));
+        let mut stated = prefixed("ignore", ignore);
+        stated.extend(prefixed("accept", accept));
         // Stored bare, and matched by the reader verbatim against the data's ID.
-        stated.extend(opts.ignore_subjects.iter().map(|id| format!("ignore_subjects: {id}")));
+        stated.extend(prefixed("ignore_subjects", ignore_subjects));
         let mut unstated: Vec<String> = fired_ignore
             .into_iter()
             .chain(fired_accept)
@@ -17387,6 +17427,7 @@ extendr_module! {
     fn ferx_rust_validate_model;
     fn ferx_rust_model_data_path;
     fn ferx_rust_model_column_map;
+    fn ferx_rust_model_data_selection;
     fn ferx_rust_model_structure;
     fn ferx_rust_inits_from_nca;
     fn ferx_rust_prepare_frem;
