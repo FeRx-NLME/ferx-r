@@ -29,14 +29,16 @@ the simulation.}
 \item{pred_corr}{\code{TRUE} for a prediction-corrected VPC.}
 
 \item{cmt}{The continuous endpoint's compartment. Required when the fit has
-more than one.}
+more than one, unless \code{stratify} includes \code{"CMT"}, which shows
+every continuous endpoint, one stratum each.}
 
 \item{stratify}{Optional character vector of data columns to stratify by
 (read from the fit's data file, observation records), or \code{"CMT"}.
 Passed to \code{vpc::vpc()}.}
 
-\item{lloq, uloq}{Lower / upper limit of quantification. \code{NULL} takes
-the limit from the fit's \code{CENS = 1} / \code{CENS = -1} rows.}
+\item{lloq, uloq}{Lower / upper limit of quantification; at most one. With
+both \code{NULL}, each is taken from the fit's \code{CENS = 1} /
+\code{CENS = -1} rows.}
 
 \item{horizon}{Administrative horizon for the simulation; required by a
 joint PK-TTE model (see \code{\link{ferx_simulate}()}).}
@@ -78,9 +80,12 @@ not match every observation exactly once the call is refused.
 value. \code{lloq} defaults to the \code{DV} of the \code{CENS = 1} rows and
 \code{uloq} to that of the \code{CENS = -1} rows; \pkg{vpc} takes one limit,
 so several values are refused unless you pass \code{lloq =} /
-\code{uloq =}. \pkg{vpc} draws the limit. A prediction-corrected VPC with
-a limit is refused: \pkg{vpc} (1.2.4) censors the simulated values at it and
-then fails on them, so use \code{pred_corr = FALSE} for such a fit.
+\code{uloq =}. It also takes only one of the two: a fit censored on both
+sides is refused until you pass the limit to draw, and a limit you pass
+replaces both defaults (the censored rows stay blanked either way).
+\pkg{vpc} draws the limit. A prediction-corrected VPC with a limit is
+refused: \pkg{vpc} (1.2.4) censors the simulated values at it and then fails
+on them, so use \code{pred_corr = FALSE} for such a fit.
 
 \strong{Several endpoints.} A fit with more than one continuous endpoint
 (\code{CMT} values in \code{fit$sdtab}) needs \code{cmt =}. A time-to-event

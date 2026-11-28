@@ -24,9 +24,12 @@
 #' value. \code{lloq} defaults to the \code{DV} of the \code{CENS = 1} rows and
 #' \code{uloq} to that of the \code{CENS = -1} rows; \pkg{vpc} takes one limit,
 #' so several values are refused unless you pass \code{lloq =} /
-#' \code{uloq =}. \pkg{vpc} draws the limit. A prediction-corrected VPC with
-#' a limit is refused: \pkg{vpc} (1.2.4) censors the simulated values at it and
-#' then fails on them, so use \code{pred_corr = FALSE} for such a fit.
+#' \code{uloq =}. It also takes only one of the two: a fit censored on both
+#' sides is refused until you pass the limit to draw, and a limit you pass
+#' replaces both defaults (the censored rows stay blanked either way).
+#' \pkg{vpc} draws the limit. A prediction-corrected VPC with a limit is
+#' refused: \pkg{vpc} (1.2.4) censors the simulated values at it and then fails
+#' on them, so use \code{pred_corr = FALSE} for such a fit.
 #'
 #' \strong{Several endpoints.} A fit with more than one continuous endpoint
 #' (\code{CMT} values in \code{fit$sdtab}) needs \code{cmt =}. A time-to-event
@@ -41,12 +44,14 @@
 #' @param seed Random seed for the simulation (a non-negative integer).
 #' @param pred_corr \code{TRUE} for a prediction-corrected VPC.
 #' @param cmt The continuous endpoint's compartment. Required when the fit has
-#'   more than one.
+#'   more than one, unless \code{stratify} includes \code{"CMT"}, which shows
+#'   every continuous endpoint, one stratum each.
 #' @param stratify Optional character vector of data columns to stratify by
 #'   (read from the fit's data file, observation records), or \code{"CMT"}.
 #'   Passed to \code{vpc::vpc()}.
-#' @param lloq,uloq Lower / upper limit of quantification. \code{NULL} takes
-#'   the limit from the fit's \code{CENS = 1} / \code{CENS = -1} rows.
+#' @param lloq,uloq Lower / upper limit of quantification; at most one. With
+#'   both \code{NULL}, each is taken from the fit's \code{CENS = 1} /
+#'   \code{CENS = -1} rows.
 #' @param horizon Administrative horizon for the simulation; required by a
 #'   joint PK-TTE model (see \code{\link{ferx_simulate}()}).
 #' @param ... Further arguments to \code{vpc::vpc()}, for example \code{bins},
@@ -178,7 +183,10 @@ ferx_vpc <- function(fit, n_sim = 200L, seed = 42L, pred_corr = FALSE,
   as.numeric(x)
 }
 
-.ferx_vpc_list <- function(x) paste(format(sort(unique(x))), collapse = ", ")
+.ferx_vpc_list <- function(x) {
+  paste(format(sort(unique(x)), trim = TRUE, drop0trailing = TRUE),
+        collapse = ", ")
+}
 
 # The observation and simulation frames vpc::vpc() gets, with the limits it
 # draws. `obs` has ID, TIME, DV (censored rows blanked), PRED, CMT and the
@@ -200,7 +208,9 @@ ferx_vpc <- function(fit, n_sim = 200L, seed = 42L, pred_corr = FALSE,
 
   # The endpoint: from the sdtab's CMT when the fit has several endpoints
   # (only then does it carry one), else from the simulation below.
-  if ("CMT" %in% names(obs)) {
+  # `stratify = "CMT"` with no `cmt` keeps every continuous endpoint, one
+  # stratum each; the key carries CMT, so each still matches its own rows.
+  if ("CMT" %in% names(obs) && !(is.null(cmt) && "CMT" %in% stratify)) {
     tte_cmt <- if (length(blocks$tte) > 0L) sdtab$CMT[blocks$tte]
     cmt <- .ferx_vpc_pick_cmt(cmt, obs$CMT, tte_cmt)
     obs <- obs[obs$CMT == cmt, , drop = FALSE]
@@ -358,16 +368,25 @@ ferx_vpc <- function(fit, n_sim = 200L, seed = 42L, pred_corr = FALSE,
   ))
 }
 
-# Blank the censored observations and take each limit from them unless given.
+# Blank the censored observations and, when neither limit is given, take each
+# from them. vpc::vpc() takes one limit, so two are refused: a limit you pass
+# replaces both defaults.
 .ferx_vpc_censor <- function(obs, lloq, uloq) {
+  if (!is.null(lloq) && !is.null(uloq)) {
+    .ferx_vpc_stop(paste0(
+      "vpc::vpc() takes one quantification limit; pass `lloq =` or `uloq =` ",
+      "to ferx_vpc(), not both."
+    ))
+  }
   if (!"CENS" %in% names(obs)) {
     return(list(obs = obs, lloq = lloq, uloq = uloq))
   }
   cens <- suppressWarnings(as.numeric(obs$CENS))
   below <- cens %in% 1
   above <- cens %in% -1
-  pick <- function(given, rows, name, flag) {
-    if (!is.null(given) || !any(rows)) return(given)
+  given <- !is.null(lloq) || !is.null(uloq)
+  pick <- function(rows, name, flag) {
+    if (!any(rows)) return(NULL)
     v <- unique(obs$DV[rows])
     if (length(v) > 1L) {
       .ferx_vpc_stop(paste0(
@@ -379,8 +398,19 @@ ferx_vpc <- function(fit, n_sim = 200L, seed = 42L, pred_corr = FALSE,
     }
     v
   }
-  lloq <- pick(lloq, below, "lloq", "1")
-  uloq <- pick(uloq, above, "uloq", "-1")
+  if (!given) {
+    lloq <- pick(below, "lloq", "1")
+    uloq <- pick(above, "uloq", "-1")
+    if (!is.null(lloq) && !is.null(uloq)) {
+      .ferx_vpc_stop(paste0(
+        "This fit has observations censored on both sides (lloq = ",
+        .ferx_vpc_list(lloq), " from CENS = 1, uloq = ", .ferx_vpc_list(uloq),
+        " from CENS = -1), and vpc::vpc() takes one quantification limit. ",
+        "Pass `lloq =` or `uloq =` to ferx_vpc() to choose the one it draws; ",
+        "the censored observations on both sides stay blanked."
+      ))
+    }
+  }
   obs$DV[below | above] <- NA_real_
   list(obs = obs, lloq = lloq, uloq = uloq)
 }

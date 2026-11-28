@@ -164,12 +164,64 @@ for (ids in c("numeric", "text")) {
     fit <- vpc_fit("warfarin_bloq", ids, edit = two_lloq, tag = "two_lloq")
     e <- vpc_err(ferx_vpc(fit, n_sim = 5L))
     expect_s3_class(e, "ferx_vpc_error")
-    expect_match(conditionMessage(e), "1.5, 2", fixed = TRUE)
+    expect_match(conditionMessage(e), "values (1.5, 2),", fixed = TRUE)
     expect_match(conditionMessage(e), "single `lloq`", fixed = TRUE)
     expect_match(conditionMessage(e), "`lloq =`", fixed = TRUE)
     db <- ferx_vpc(fit, n_sim = 5L, lloq = 2, vpcdb = TRUE)
     expect_equal(db$lloq, 2)
     expect_true(all(is.na(db$obs$dv[vpc_obs(fit)$CENS %in% 1])))
+  })
+
+  test_that(paste0("ULOQ: CENS = -1 observations are blanked and uloq comes from them (", ids, " IDs)"), {
+    # Mutation: CENS = -1 never marked as censored (review round 1, #1).
+    above_only <- function(d) {
+      d$CENS[d$CENS == "1"] <- "0"
+      i <- which(d$EVID == "0" & d$CENS == "0")[c(2L, 3L, 13L)]
+      d$CENS[i] <- "-1"
+      d$DV[i] <- "15"
+      d
+    }
+    fit <- vpc_fit("warfarin_bloq", ids, edit = above_only, tag = "uloq")
+    obs <- vpc_obs(fit)
+    above <- obs$CENS %in% -1
+    expect_equal(sum(above), 3L)
+    expect_false(any(obs$CENS %in% 1))
+    db <- ferx_vpc(fit, n_sim = 5L, vpcdb = TRUE)
+    expect_true(all(is.na(db$obs$dv[above])))
+    expect_false(anyNA(db$obs$dv[!above]))
+    expect_equal(db$uloq, 15)
+    expect_null(db$lloq)
+  })
+
+  test_that(paste0("censored on both sides: refused before simulating; a given limit replaces both defaults (", ids, " IDs)"), {
+    # Mutations: the both-sides refusal removed (vpc's own stop after the
+    # simulation); a given lloq still defaulting uloq.
+    both <- function(d) {
+      i <- which(d$EVID == "0" & d$CENS == "0")[c(2L, 3L, 13L)]
+      d$CENS[i] <- "-1"
+      d$DV[i] <- "15"
+      d
+    }
+    fit <- vpc_fit("warfarin_bloq", ids, edit = both, tag = "both")
+    obs <- vpc_obs(fit)
+    cens <- obs$CENS %in% c(1, -1)
+    expect_equal(sum(cens), 13L)
+    local({
+      local_mocked_bindings(.ferx_vpc_simulate = function(...) stop("simulated"))
+      e <- vpc_err(ferx_vpc(fit, n_sim = 5L))
+      expect_s3_class(e, "ferx_vpc_error")
+      expect_match(conditionMessage(e),
+                   "(lloq = 2 from CENS = 1, uloq = 15 from CENS = -1)", fixed = TRUE)
+      expect_match(conditionMessage(e), "Pass `lloq =` or `uloq =`", fixed = TRUE)
+      e <- vpc_err(ferx_vpc(fit, n_sim = 5L, lloq = 2, uloq = 15))
+      expect_s3_class(e, "ferx_vpc_error")
+      expect_match(conditionMessage(e), "not both", fixed = TRUE)
+    })
+    db <- ferx_vpc(fit, n_sim = 5L, lloq = 2, vpcdb = TRUE)
+    expect_equal(db$lloq, 2)
+    expect_null(db$uloq)
+    expect_true(all(is.na(db$obs$dv[cens])))
+    expect_false(anyNA(db$obs$dv[!cens]))
   })
 
   test_that(paste0("several endpoints: cmt = NULL refused, cmt picks one in obs and sim (", ids, " IDs)"), {
@@ -190,7 +242,20 @@ for (ids in c("numeric", "text")) {
       expect_true(all(db$sim$CMT == c))
     }
     e <- vpc_err(ferx_vpc(fit, n_sim = 5L, cmt = 7))
-    expect_match(conditionMessage(e), "valid|endpoints are CMT 2, 3")
+    expect_match(conditionMessage(e), "its continuous endpoints are CMT 2, 3.",
+                 fixed = TRUE)
+  })
+
+  test_that(paste0("stratify = \"CMT\" with no cmt shows every continuous endpoint (", ids, " IDs)"), {
+    # Mutation: the CMT filter applied regardless of stratify (review round 1, #3).
+    fit <- vpc_fit("emax_pkpd", ids)
+    obs <- vpc_obs(fit)
+    db <- ferx_vpc(fit, n_sim = 5L, stratify = "CMT", vpcdb = TRUE)
+    expect_equal(nrow(db$obs), nrow(obs))
+    expect_equal(nrow(db$sim), 5L * nrow(obs))
+    expect_equal(as.numeric(table(db$obs$CMT)[c("2", "3")]), c(15, 12))
+    expect_setequal(as.character(unique(db$obs$strat)), c("2", "3"))
+    expect_identical(as.character(db$sim$strat), rep(as.character(db$obs$strat), 5L))
   })
 
   test_that(paste0("joint PK-TTE: horizon is required and named; with it the continuous rows match (", ids, " IDs)"), {
