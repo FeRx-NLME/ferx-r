@@ -80,9 +80,11 @@ not match every observation exactly once the call is refused.
 value. \code{lloq} defaults to the \code{DV} of the \code{CENS = 1} rows and
 \code{uloq} to that of the \code{CENS = -1} rows; \pkg{vpc} takes one limit,
 so several values are refused unless you pass \code{lloq =} /
-\code{uloq =}. It also takes only one of the two: a fit censored on both
-sides is refused until you pass the limit to draw, and a limit you pass
-replaces both defaults (the censored rows stay blanked either way).
+\code{uloq =}. It also takes only one of the two, and counts every censored
+observation past that one limit. So a fit censored on both sides is
+refused, as is a limit on the other side from the fit's censoring
+(\code{uloq =} on a fit with \code{CENS = 1} rows, or \code{lloq =} with
+\code{CENS = -1} rows).
 \pkg{vpc} draws the limit. A prediction-corrected VPC with a limit is
 refused: \pkg{vpc} (1.2.4) censors the simulated values at it and then fails
 on them, so use \code{pred_corr = FALSE} for such a fit.

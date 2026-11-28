@@ -193,9 +193,10 @@ for (ids in c("numeric", "text")) {
     expect_null(db$lloq)
   })
 
-  test_that(paste0("censored on both sides: refused before simulating; a given limit replaces both defaults (", ids, " IDs)"), {
-    # Mutations: the both-sides refusal removed (vpc's own stop after the
-    # simulation); a given lloq still defaulting uloq.
+  test_that(paste0("censored on both sides: refused, whatever limit is given (", ids, " IDs)"), {
+    # Review round 2, 2a: one limit counts the other side's censored rows on
+    # the wrong side of vpc's percentiles. Mutation: the both-sides refusal
+    # removed (lloq = 2 then runs, and no refusal is raised).
     both <- function(d) {
       i <- which(d$EVID == "0" & d$CENS == "0")[c(2L, 3L, 13L)]
       d$CENS[i] <- "-1"
@@ -203,25 +204,47 @@ for (ids in c("numeric", "text")) {
       d
     }
     fit <- vpc_fit("warfarin_bloq", ids, edit = both, tag = "both")
-    obs <- vpc_obs(fit)
-    cens <- obs$CENS %in% c(1, -1)
-    expect_equal(sum(cens), 13L)
-    local({
-      local_mocked_bindings(.ferx_vpc_simulate = function(...) stop("simulated"))
-      e <- vpc_err(ferx_vpc(fit, n_sim = 5L))
+    expect_equal(sum(vpc_obs(fit)$CENS %in% c(1, -1)), 13L)
+    local_mocked_bindings(.ferx_vpc_simulate = function(...) stop("simulated"))
+    for (args in list(list(), list(lloq = 2), list(uloq = 15))) {
+      e <- vpc_err(do.call(ferx_vpc, c(list(fit, n_sim = 5L), args)))
       expect_s3_class(e, "ferx_vpc_error")
       expect_match(conditionMessage(e),
-                   "(lloq = 2 from CENS = 1, uloq = 15 from CENS = -1)", fixed = TRUE)
-      expect_match(conditionMessage(e), "Pass `lloq =` or `uloq =`", fixed = TRUE)
-      e <- vpc_err(ferx_vpc(fit, n_sim = 5L, lloq = 2, uloq = 15))
+                   "(DV 2 with CENS = 1, DV 15 with CENS = -1)", fixed = TRUE)
+      expect_match(conditionMessage(e), "cannot draw a VPC of this fit", fixed = TRUE)
+    }
+    e <- vpc_err(ferx_vpc(fit, n_sim = 5L, lloq = 2, uloq = 15))
+    expect_s3_class(e, "ferx_vpc_error")
+    expect_match(conditionMessage(e), "not both", fixed = TRUE)
+  })
+
+  test_that(paste0("a limit on the other side from the fit's censoring is refused (", ids, " IDs)"), {
+    # Review round 2, 2a (the mirror case). Mutations: either opposite-side
+    # refusal removed.
+    above_only <- function(d) {
+      d$CENS[d$CENS == "1"] <- "0"
+      i <- which(d$EVID == "0" & d$CENS == "0")[c(2L, 3L, 13L)]
+      d$CENS[i] <- "-1"
+      d$DV[i] <- "15"
+      d
+    }
+    below <- vpc_fit("warfarin_bloq", ids)
+    above <- vpc_fit("warfarin_bloq", ids, edit = above_only, tag = "uloq")
+    local({
+      local_mocked_bindings(.ferx_vpc_simulate = function(...) stop("simulated"))
+      e <- vpc_err(ferx_vpc(below, n_sim = 5L, uloq = 15))
       expect_s3_class(e, "ferx_vpc_error")
-      expect_match(conditionMessage(e), "not both", fixed = TRUE)
+      expect_match(conditionMessage(e), "below the LLOQ (CENS = 1)", fixed = TRUE)
+      expect_match(conditionMessage(e), "Pass `lloq =` instead", fixed = TRUE)
+      e <- vpc_err(ferx_vpc(above, n_sim = 5L, lloq = 2))
+      expect_s3_class(e, "ferx_vpc_error")
+      expect_match(conditionMessage(e), "above the ULOQ (CENS = -1)", fixed = TRUE)
+      expect_match(conditionMessage(e), "Pass `uloq =` instead", fixed = TRUE)
     })
-    db <- ferx_vpc(fit, n_sim = 5L, lloq = 2, vpcdb = TRUE)
-    expect_equal(db$lloq, 2)
-    expect_null(db$uloq)
-    expect_true(all(is.na(db$obs$dv[cens])))
-    expect_false(anyNA(db$obs$dv[!cens]))
+    # The limit on the fit's own side runs.
+    db <- ferx_vpc(above, n_sim = 5L, uloq = 15, vpcdb = TRUE)
+    expect_equal(db$uloq, 15)
+    expect_true(all(is.na(db$obs$dv[vpc_obs(above)$CENS %in% -1])))
   })
 
   test_that(paste0("several endpoints: cmt = NULL refused, cmt picks one in obs and sim (", ids, " IDs)"), {

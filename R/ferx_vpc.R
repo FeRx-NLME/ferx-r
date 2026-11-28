@@ -24,9 +24,11 @@
 #' value. \code{lloq} defaults to the \code{DV} of the \code{CENS = 1} rows and
 #' \code{uloq} to that of the \code{CENS = -1} rows; \pkg{vpc} takes one limit,
 #' so several values are refused unless you pass \code{lloq =} /
-#' \code{uloq =}. It also takes only one of the two: a fit censored on both
-#' sides is refused until you pass the limit to draw, and a limit you pass
-#' replaces both defaults (the censored rows stay blanked either way).
+#' \code{uloq =}. It also takes only one of the two, and counts every censored
+#' observation past that one limit. So a fit censored on both sides is
+#' refused, as is a limit on the other side from the fit's censoring
+#' (\code{uloq =} on a fit with \code{CENS = 1} rows, or \code{lloq =} with
+#' \code{CENS = -1} rows).
 #' \pkg{vpc} draws the limit. A prediction-corrected VPC with a limit is
 #' refused: \pkg{vpc} (1.2.4) censors the simulated values at it and then fails
 #' on them, so use \code{pred_corr = FALSE} for such a fit.
@@ -385,9 +387,12 @@ ferx_vpc <- function(fit, n_sim = 200L, seed = 42L, pred_corr = FALSE,
   ))
 }
 
-# Blank the censored observations and, when neither limit is given, take each
-# from them. vpc::vpc() takes one limit, so two are refused: a limit you pass
-# replaces both defaults.
+# Blank the censored observations and, when no limit is given, take it from
+# them. vpc::vpc() takes one limit, and its quantile_cens() counts every blank
+# observation past that limit (below `lloq`, above `uloq`). A fit censored on
+# both sides, or a limit on the other side from the fit's censoring, would put
+# censored observations on the wrong side of the percentiles, so both are
+# refused (#796 review round 2).
 .ferx_vpc_censor <- function(obs, lloq, uloq) {
   if (!is.null(lloq) && !is.null(uloq)) {
     .ferx_vpc_stop(paste0(
@@ -401,7 +406,30 @@ ferx_vpc <- function(fit, n_sim = 200L, seed = 42L, pred_corr = FALSE,
   cens <- suppressWarnings(as.numeric(obs$CENS))
   below <- cens %in% 1
   above <- cens %in% -1
-  given <- !is.null(lloq) || !is.null(uloq)
+  if (any(below) && any(above)) {
+    .ferx_vpc_stop(paste0(
+      "This fit has observations censored on both sides (DV ",
+      .ferx_vpc_list(obs$DV[below]), " with CENS = 1, DV ",
+      .ferx_vpc_list(obs$DV[above]), " with CENS = -1). vpc::vpc() censors ",
+      "at one limit and counts every censored observation past it, so either ",
+      "limit would count the other side's censored observations on the wrong ",
+      "side of the percentiles; ferx_vpc() cannot draw a VPC of this fit."
+    ))
+  }
+  if (any(below) && !is.null(uloq)) {
+    .ferx_vpc_stop(paste0(
+      "The fit's censored observations are below the LLOQ (CENS = 1), and ",
+      "with `uloq =` vpc::vpc() would count them above it. Pass `lloq =` ",
+      "instead, or leave both NULL to take the LLOQ from them."
+    ))
+  }
+  if (any(above) && !is.null(lloq)) {
+    .ferx_vpc_stop(paste0(
+      "The fit's censored observations are above the ULOQ (CENS = -1), and ",
+      "with `lloq =` vpc::vpc() would count them below it. Pass `uloq =` ",
+      "instead, or leave both NULL to take the ULOQ from them."
+    ))
+  }
   pick <- function(rows, name, flag) {
     if (!any(rows)) return(NULL)
     v <- unique(obs$DV[rows])
@@ -415,18 +443,9 @@ ferx_vpc <- function(fit, n_sim = 200L, seed = 42L, pred_corr = FALSE,
     }
     v
   }
-  if (!given) {
+  if (is.null(lloq) && is.null(uloq)) {
     lloq <- pick(below, "lloq", "1")
     uloq <- pick(above, "uloq", "-1")
-    if (!is.null(lloq) && !is.null(uloq)) {
-      .ferx_vpc_stop(paste0(
-        "This fit has observations censored on both sides (lloq = ",
-        .ferx_vpc_list(lloq), " from CENS = 1, uloq = ", .ferx_vpc_list(uloq),
-        " from CENS = -1), and vpc::vpc() takes one quantification limit. ",
-        "Pass `lloq =` or `uloq =` to ferx_vpc() to choose the one it draws; ",
-        "the censored observations on both sides stay blanked."
-      ))
-    }
   }
   obs$DV[below | above] <- NA_real_
   list(obs = obs, lloq = lloq, uloq = uloq)
