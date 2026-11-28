@@ -188,19 +188,19 @@ Non-ASCII in `\preformatted{}` blocks or `@examples` code comments (`#' #`) also
 **Before every PR, verify with** (prints nothing when clean):
 
 ```r
-for (f in Sys.glob("R/*.R")) tools::showNonASCIIfile(f)
+for (f in Sys.glob("R/*.R")) if (length(tools::showNonASCIIfile(f))) message("  in ", f)
 ```
 
 ## Tests
 
-testthat, under `tests/testthat/` (`test-<area>.R`, shared helpers in `helper-*.R`, fixtures in `fixtures/`). Run against an installed build:
+testthat, under `tests/testthat/` (`test-<area>.R`, shared helpers in `helper-*.R`, fixtures in `fixtures/`). Run them (`devtools::test()` loads the package from source, so it compiles through `src/Makevars` like the other commands in the lock table):
 
 ```bash
 NOT_CRAN=true Rscript -e 'devtools::test()'
 NOT_CRAN=true Rscript -e 'devtools::test(filter = "ferx_simulate")'
 ```
 
-Without `NOT_CRAN=true`, the `skip_on_cran()` tests are skipped; CI sets it. CI runs `R CMD check` (`R-CMD-check.yaml`, which also runs the `tools/` guard scripts) and `covr` coverage (`test-coverage.yaml`). The Codecov targets in `codecov.yml` - 70% project, 80% patch - are informational: they report, they do not fail a PR.
+Without `NOT_CRAN=true`, the `skip_on_cran()` tests are skipped. Only the coverage job sets it; the R CMD check job runs without it. CI runs `R CMD check` (`R-CMD-check.yaml`, which also runs the `tools/` guard scripts) and `covr` coverage (`test-coverage.yaml`). The Codecov targets in `codecov.yml` - 70% project, 80% patch - are informational: they report, they do not fail a PR.
 
 **Every new feature requires a test**, and a bug fix requires a regression test that fails without the fix.
 
@@ -208,7 +208,7 @@ Without `NOT_CRAN=true`, the `skip_on_cran()` tests are skipped; CI sets it. CI 
 
 When creating a PR in this repo, always read `.github/PULL_REQUEST_TEMPLATE.md` and fill every section before calling `gh pr create`.
 
-After reviewing a PR, always post your comments on the PR.
+After reviewing a PR, always post your review on the PR, once the user has approved the draft.
 
 ## Priority labels
 
@@ -225,4 +225,4 @@ Two gates:
 - `tools/changelog.sh check` (CI step in `R-CMD-check`) validates every fragment's name and shape, and fails if anything is written under `# ferx X.Y.Z.9000 (development version)` - that heading stays empty between releases.
 - The `NEWS fragment` workflow (`.github/workflows/changelog.yml`) fails a PR that changes `R/`, `src/` (the glue and the ferx-core pin in `Cargo.lock`), `inst/`, `NAMESPACE` or `DESCRIPTION` without adding a fragment. A PR that is not user-facing (refactor, tests, CI) takes the **`no-changelog`** label instead. The same workflow fails a PR that deletes or renames another PR's pending fragment, label or not; rewording one is fine.
 
-At release time only: open every issue labelled **`release-checklist`** (`gh issue list --label release-checklist`) and do its items; then assemble `NEWS.md` as `changelog.d/README.md` describes.
+At release time only: open every issue labelled **`release-checklist`** (`gh issue list --label release-checklist`) Do their before-the-tag items before tagging and their after-the-tag items once the tag is pushed; close each issue when all its items are done, or move what is left to the next release with a comment. Then assemble `NEWS.md` as `changelog.d/README.md` describes.

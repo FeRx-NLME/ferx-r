@@ -70,7 +70,7 @@ revision, and regenerates `inst/THIRD-PARTY-NOTICES.txt`.
 ## Test harnesses
 
 CI never has a sibling checkout, so the scripts are driven by stub harnesses
-that the `R-CMD-check` workflow runs:
+that the `R-CMD-check` workflow runs (all but the last row, which `docker.yml` runs against the built image):
 
 | harness | drives |
 |---|---|
