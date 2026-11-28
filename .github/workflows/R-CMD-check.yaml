@@ -166,7 +166,7 @@ jobs:
       # tests/public_api_boundary.rs), so the glue must construct them with a
       # `..Default::default()` spread. An exhaustive literal breaks this build
       # with `error[E0063]: missing field` the moment the engine adds a field —
-      # the cross-repo trap AGENTS.md's sibling-repo note warns about, which
+      # the cross-repo trap AGENTS.md's "Architecture" section warns about, which
       # already bit us once for `SimulateOptions` (ferx-core #522 -> #200).
       #
       # The scan is textual: it opens at any `<Name>Options {` that is not a

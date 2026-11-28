@@ -6,47 +6,45 @@ This file provides guidance to AI coding agents (Claude Code, Codex, Copilot, an
 
 ferx is an R package for nonlinear mixed effects (NLME) modeling. It provides a user-facing R API that delegates to a high-performance Rust backend via extendr FFI. The core computation engine lives in the sibling **ferx-core** crate at `../ferx-core` (sibling directory).
 
+## Code style: parsimony
+
+Prefer the simplest solution that solves the problem.
+
+- Write the least code that does the job correctly. No speculative generality, extra options, or layers that nothing asks for yet.
+- Factor shared logic into functions rather than duplicating it: two code paths computing the same thing should call the same function, or the second copy will drift. Numerics belong in ferx-core; the R layer and the glue convert and validate, they do not recompute.
+- Keep functions small and single-purpose; extract a helper when a block *you are already changing* has a nameable job.
+- A PR fixes its issue, not the area around it; a neighbouring defect gets its own issue - unless it is a small review finding inside the feature, which is fixed in the same PR.
+- Reuse existing helpers before writing new ones - search `R/` and `src/rust/src/` first.
+- Delete dead code rather than leaving it commented out or behind a flag nothing enables (code behind the `nn`/`survival`/`markov` cargo features is not dead).
+- Parsimony governs production code. It is not a reason to drop test assertions, or comments recording a measured number.
+
 ## Worktree isolation
 
 When working on a feature branch or any branch other than `main`, always use `EnterWorktree` at the start of the session. This prevents uncommitted WIP from one session contaminating another session on a different branch (a real problem when two chats share the same checkout directory).
 
 ## ferx-core dependency: do NOT edit `src/rust/Cargo.toml`
 
-`src/rust/Cargo.toml` declares **three** git dependencies pinned to `main`, all from the ferx-core repository: `ferx-core` (the engine), `ferx-tools` (model-development tooling built on it — the bootstrap and GAM screening) and `ferx-search` (model search: `search`, `covsearch`, `iivsearch`, `amd`, ..., split out of ferx-tools in ferx-core #3185). The list lives once, as `FERX_CRATES` in `tools/ferx-core-lock-lib.sh`; a fourth crate from that repository goes there, in `Cargo.toml` and in `.github/dependabot.yml`'s ignore list. Don't change any of them to a path dep when working locally — the local-vs-GitHub swap is handled by a cargo `[patch]`, which `src/Makevars` hands to **one** cargo invocation:
+`src/rust/Cargo.toml` declares **three** git dependencies pinned to `main`, all from the ferx-core repository: `ferx-core` (the engine), `ferx-tools` (model-development tooling: the bootstrap and GAM screening) and `ferx-search` (model search: `search`, `covsearch`, `iivsearch`, `amd`, ...). The list lives once, as `FERX_CRATES` in `tools/ferx-core-lock-lib.sh`; a fourth crate from that repository goes there, in `Cargo.toml` and in `.github/dependabot.yml`'s ignore list.
 
-```
---config 'patch."https://github.com/FeRx-NLME/ferx-core".ferx-core.path="<abs path to ../ferx-core>"'
---config 'patch."https://github.com/FeRx-NLME/ferx-core".ferx-tools.path="<...>/crates/ferx-tools"'
---config 'patch."https://github.com/FeRx-NLME/ferx-core".ferx-search.path="<...>/crates/ferx-search"'
-```
+**Never change any of them to a path dep**, not even locally. Reviewers and CI build the GitHub pin, so a path dep breaks their builds. The local swap is a cargo `[patch]` that `src/Makevars` hands, through `tools/sibling-cargo-build.sh`, to one cargo invocation whenever a sibling `../ferx-core` checkout exists - for all three crates, or the wrapper refuses the build. Without a sibling (CI), Makevars runs cargo directly on the revision `Cargo.lock` pins. Develop against a feature branch in `../ferx-core` freely. How the wrapper works and how it is tested: `tools/README.md`.
 
-`tools/sibling-cargo-build.sh` builds that command line, and snapshots and restores `src/rust/Cargo.lock` around it. **The patch is not written to a file** (ferx-r #353). `src/rust/.cargo/config.toml` is still generated on every build — `src/rust/.cargo/` is gitignored, and Makevars truncates and rewrites it — but it now holds only `[build]` (plus, after an offline build from a vendored tarball, the `[source]` replacement pointing at `src/rust/vendor/` - never a patch; see "Vendored release tarballs"), so nothing outside that one build sees a patch: cargo by hand and an editor's rust-analyzer resolve the pinned revision, and leave the lock alone.
+**A patch that does not apply is a warning, not an error**: cargo builds the pinned revision and nothing else looks wrong. Read the wrapper's last line - `ferx: the sibling supplied ALL of ...` or `ferx: WARNING the sibling was NOT used ...`. Two ways to get a "local" build that is not local:
 
-Cargo patches **per package name**: an entry for `ferx-core` alone leaves `ferx-tools` and `ferx-search` resolving to GitHub `main` while `ferx-core` comes from your working tree — two revisions of a workspace whose parts move together, with no error to say so. All entries, or none. The wrapper passes all three, and refuses a build in which only some of them land (below).
-
-When a sibling `../ferx-core` checkout exists, `src/Makevars` builds through the wrapper; when it doesn't (e.g. CI without a paired checkout), it runs cargo directly and the build uses the revision `Cargo.lock` pins.
-
-**A patch that does not apply is a warning, not an error.** Cargo prints `warning: patch ... was not used in the crate graph` on stderr, builds the pinned GitHub revision instead, and nothing else in the output looks wrong — so read the wrapper's own last line, which says per crate where the build came from: `ferx: the sibling supplied ALL of ...`, or `ferx: WARNING the sibling was NOT used ...`. Two ways to get a "local" build that is not local:
-
-- **The sibling's version differs from the locked one — by any amount, in either direction.** Cargo uses a `[patch]` only when the patched crate's version equals the version `Cargo.lock` pins for it. A patch-level difference is enough (`0.4.0` locked, `0.4.1` in the sibling), so is an older sibling (`0.3.9` against `0.4.0`); dependents' version requirements don't enter into it, and the semver boundary #346 crossed (`0.3.1` -> `0.4.0`) was just one instance. The check is per crate, so a sibling whose `ferx-tools` version alone differs would get `ferx-core` patched and `ferx-tools` from the pin. **The wrapper refuses that mixed build** — before compiling when the manifests predict it, and after the resolve when cargo produced one anyway. Bumping the lock (below) moves the pin to ferx-core `main`, which restores the patch when the sibling is at `main`'s version; otherwise check out a sibling revision at the locked version.
-- **Working inside a `.claude/worktrees/` worktree.** Makevars looks for the sibling at `../../ferx-core` relative to `src/`, which from `<repo>/.claude/worktrees/<name>/src` is `<repo>/.claude/worktrees/ferx-core` — usually not there, so the build uses the pin, as CI does, and Makevars says `ferx: no sibling checkout at ... (this is a git worktree)`. Since worktrees are mandated above, that is the normal case. To build worktrees against your sibling instead, link it where the lookup lands, once, from the repo root: `ln -s ../../../ferx-core .claude/worktrees/ferx-core`. The link redirects **every** worktree build under `.claude/worktrees/` — PR-review and pin-bump worktrees included, which then stop building the pin CI builds. Remove it before a review or a bump, or neutralise it for one command with `MAKEFLAGS="LOCAL_FERX_CORE=" R CMD INSTALL .`. Don't hand-write paths into `src/rust/.cargo/config.toml` instead: Makevars truncates that file on every build, and a `[patch]` there is exactly what #353 took out.
+- **The sibling's version differs from the locked one**, by any amount, in either direction (`0.4.0` locked vs `0.4.1` or `0.3.9` in the sibling). Cargo only patches a crate whose version equals the locked one. Bump the lock (below) when the sibling is at ferx-core `main`; otherwise check out a sibling revision at the locked version.
+- **Working inside a `.claude/worktrees/` worktree.** Makevars looks for `../../ferx-core` relative to `src/`, i.e. `<repo>/.claude/worktrees/ferx-core`, usually absent - so the build uses the pin, as CI does, and says `ferx: no sibling checkout at ... (this is a git worktree)`. To build worktrees against the sibling, link it once from the repo root: `ln -s ../../../ferx-core .claude/worktrees/ferx-core`. The link redirects **every** worktree build, PR-review and pin-bump worktrees included: remove it before a review or a bump, or neutralise it for one command with `MAKEFLAGS="LOCAL_FERX_CORE=" R CMD INSTALL .`. Never hand-write a `[patch]` into `src/rust/.cargo/config.toml`: Makevars truncates that file on every build (#353).
 
 ### The lock, and what still rewrites it
 
-Any cargo command that resolves **with a patch in place** rewrites the lock: an applied patch deletes both `source = "git+..."` lines (cargo records no source for a path package), silently unpinning the crates for CI and everyone else, and an unused one keeps them but appends `[[patch.unused]]` tables. Since #353 only the wrapper's own cargo run carries a patch, and it puts the lock back:
+Any cargo resolve **with a patch in place** rewrites `src/rust/Cargo.lock`, silently unpinning the crates for CI. Only the wrapper's own cargo run carries a patch, and it puts the lock back:
 
 | command | with a sibling | without one |
 |---|---|---|
 | `R CMD INSTALL .`, `roxygen2::roxygenize()`, `pkgload::load_all()`, `devtools::test()` | patched build, lock restored byte-for-byte | pinned build, lock untouched |
 | `cargo metadata` / `tree` / `build` in `src/rust`, rust-analyzer | pinned build, lock untouched | pinned build, lock untouched |
 | `cd src && sh ../tools/sibling-cargo-build.sh <args>` | patched run, lock restored byte-for-byte | refused |
-| `cargo update` in `src/rust` | moves the pin to today's `main` — use `tools/update-ferx-core-lock.sh` | same |
+| `cargo update` in `src/rust` | moves the pin to today's `main` - use `tools/update-ferx-core-lock.sh` | same |
 
-The wrapper says which of the three lock outcomes happened: `Cargo.lock untouched by this build`, `Cargo.lock restored to its pin`, or a `WARNING` that the lock was **already** unpinned before the build, in which case it is put back exactly as found and nothing is claimed about a pin. It also keeps the lock through an interrupt and through a reader that goes away mid-build (`R CMD INSTALL . | head`), which `kill -9` is now the only way past.
-
-**One sibling build at a time per checkout.** A snapshot is only good while nobody else is rewriting the same lock, so the wrapper holds a guard (`src/rust/target/.ferx-lock-guard`) across read, snapshot, build, verdict and restore. A second build says `ferx: waiting for another sibling build in this checkout` and starts when the first is done; a guard left by a killed build is taken over, with a warning naming the dead process. Two builds at once used to end with whichever finished last putting the other's mid-build lock back - unpinned, both exiting 0.
-
-Damage can still reach the lock — a stale `config.toml` from a checkout that has not been rebuilt since #353, a `cargo update`, a `kill -9`. Check before staging; this runs no cargo, so it is always safe, and it is exactly what CI runs:
+Run one sibling build at a time per checkout (a second one waits). Damage can still reach the lock - a stale `config.toml` from before #353, a `cargo update`, a `kill -9` - and `git status` shows it as an ordinary modified file. **Check before staging**; this runs no cargo, and it is exactly what CI runs:
 
 ```bash
 tools/check-ferx-core-pin.sh
@@ -56,23 +54,17 @@ If it fails, read `git diff src/rust/Cargo.lock` before restoring; the script na
 
 - **Only the damage:** `git checkout -- src/rust/Cargo.lock`.
 - **A pin bump you meant:** re-run `tools/update-ferx-core-lock.sh`.
-- **Any other change you meant**, such as a dependency newly added to `src/rust/Cargo.toml`: `git checkout -- src/rust/Cargo.lock`, then run cargo in `src/rust` (e.g. `cargo metadata --format-version 1 >/dev/null`) and check again. With no patch in `config.toml` that records the change and nothing else. Not the bump script: its whole-graph `cargo update` also moves every registry crate and the pin to ferx-core `main`.
-
-Don't count on `git status` to flag a damaged lock: it shows up as an ordinary modified file.
-
-This means: develop against a feature branch in `../ferx-core` freely, but never commit Cargo.toml changes that flip the dep to a path. Reviewers and CI run against the GitHub `main`, so a path dep in Cargo.toml would break their builds.
-
-Both scripts are covered by stub-driven harnesses that CI runs, since CI itself never has a sibling checkout: `tools/test-check-ferx-core-pin.sh` (damaged locks) and `tools/test-sibling-cargo-build.sh` (a stub `cargo` for the applied, unused, mixed, failing, pre-stripped, closed-pipe and concurrent cases, under every shell on the box).
+- **Any other change you meant**, such as a dependency newly added to `src/rust/Cargo.toml`: `git checkout -- src/rust/Cargo.lock`, then run cargo in `src/rust` (e.g. `cargo metadata --format-version 1 >/dev/null`) and check again. Not the bump script: its whole-graph `cargo update` also moves every registry crate and the pin to ferx-core `main`.
 
 ### Bumping the pinned ferx-core commit (`src/rust/Cargo.lock`)
 
-Although `Cargo.toml` tracks `branch = "main"`, **CI builds from the commit pinned in `src/rust/Cargo.lock`** — *not* the latest `main`. The patch above only redirects local builds (which have the sibling), so a new ferx-core commit is invisible to CI until the lock is bumped. Symptom: a ferx-r PR that uses a freshly-`pub`'d ferx-core API fails CI with `error[E0603]: ... is private`, because the lock still points at a commit predating the change.
+**CI builds the commit pinned in `src/rust/Cargo.lock`**, not the latest `main`, so a new ferx-core commit is invisible to CI until the lock is bumped. Symptom: a PR using a freshly-`pub`'d ferx-core API fails CI with `error[E0603]: ... is private`.
 
-To bump: run `tools/update-ferx-core-lock.sh` from the repo root (it advances all three pins to ferx-core `main` HEAD and verifies each `source = "git+..."` line survives, on one shared revision), then commit `src/rust/Cargo.lock`. `ferx-core`, `ferx-tools` and `ferx-search` come from the same repo and the same rev, so this is one bump and three lock entries — never a second pin to track. `cargo update -p ferx-core --precise <sha>` pins a specific revision; run it in `src/rust`, never through the wrapper, because a patch in place strips the git pin and writes a local path. The `R-CMD-check` workflow runs `tools/check-ferx-core-pin.sh`, which fails if any of the three loses its git source, if they land on different revisions, or if the lock carries `[[patch.unused]]` tables.
+To bump: run `tools/update-ferx-core-lock.sh` from the repo root (it moves all three crates to ferx-core `main` HEAD on one shared revision - one bump, never a second pin), then commit `src/rust/Cargo.lock` and the regenerated `inst/THIRD-PARTY-NOTICES.txt`. To pin a specific revision, run `cargo update -p ferx-core --precise <sha>` in `src/rust`, never through the wrapper.
 
 ### License notices (#773)
 
-ferx-r's own code is MIT, but the compiled package statically links ferx-search (LGPL-3.0-or-later) and NLopt's Luksan routines (LGPL-2.1-or-later), so it ships `inst/COPYRIGHTS` (what is under which license, and the rebuild-with-a-modified-ferx-search recipe), `inst/licenses/` (LGPL-3.0, GPL-3.0, LGPL-2.1) and `inst/THIRD-PARTY-NOTICES.txt`. The last is **generated** from `Cargo.lock` by `tools/third-party-notices.py` (every linked crate, its license files, the pinned ferx-core commit): `tools/update-ferx-core-lock.sh` regenerates it, and after any other lock change (a new dependency) run the script yourself and commit the file with the lock - R-CMD-check runs `--check` and fails a stale copy. Never describe the whole package as MIT (README, DESCRIPTION, image labels). `tools/vendor-rust.sh` fails if the vendored crates lose a required license file, and both Dockerfiles copy the notices (and `ferx --licenses`) to `/usr/local/share/doc/ferx`, which the docker workflow's smoke tests assert.
+ferx-r's own code is MIT, but the compiled package statically links ferx-search (LGPL-3.0-or-later) and NLopt's Luksan routines (LGPL-2.1-or-later), so it ships `inst/COPYRIGHTS`, `inst/licenses/` and `inst/THIRD-PARTY-NOTICES.txt`. **Never describe the whole package as MIT** (README, DESCRIPTION, image labels). `inst/THIRD-PARTY-NOTICES.txt` is generated from `Cargo.lock` by `tools/third-party-notices.py`: the bump script regenerates it; after any other lock change (a new dependency) run the script yourself and commit the file with the lock - R-CMD-check runs `--check` and fails a stale copy.
 
 ## Build & Install
 
@@ -92,26 +84,18 @@ cd src && sh ../tools/sibling-cargo-build.sh build --release
 Rscript -e 'roxygen2::roxygenize()'
 ```
 
-Building against the sibling is an explicit opt-in: the two R-driven commands take it automatically when the checkout is there, and plain `cargo` never does. Every one of them leaves `src/rust/Cargo.lock` as it found it (see the dependency section).
-The cargo feature set is `CARGO_FEATURES` in `src/Makevars`, assigned with `?=` so the environment wins (#288): `CARGO_FEATURES="--no-default-features --features ci,survival,markov" R CMD INSTALL .` builds without `nn` (Deep Compartment Models), the heaviest part of the dependency graph. Unset, the default `ci,nn,survival,markov` is used (`markov`, which implies `survival`, since #788) - that is what CI and every release build compile, so never assume a local no-`nn` build's block list matches theirs.
+Building against the sibling is an explicit opt-in: the R-driven commands take it automatically when the checkout is there, and plain `cargo` never does. Each leaves `src/rust/Cargo.lock` as it found it; still run `tools/check-ferx-core-pin.sh` before staging.
 
-**With a sibling `../ferx-core` patched in, all three commands rewrite `src/rust/Cargo.lock`** — `roxygenize()` too, since it compiles through `src/Makevars` — so run `tools/check-ferx-core-pin.sh` before staging (see the dependency section).
+The cargo feature set is `CARGO_FEATURES` in `src/Makevars`, assigned with `?=` so the environment wins (#288): `CARGO_FEATURES="--no-default-features --features ci,survival,markov" R CMD INSTALL .` builds without `nn` (Deep Compartment Models), the heaviest part of the dependency graph. Unset, the default `ci,nn,survival,markov` is used - that is what CI and every release build compile, so never assume a local no-`nn` build's block list matches theirs.
 
-### Vendored release tarballs (#666)
+### Release tarballs and Docker images
 
-A release source tarball must build offline (GxP validation rebuilds it with no network and a read-only `CARGO_HOME`). Before `R CMD build`, run `tools/vendor-rust.sh`: it vendors every crate `Cargo.lock` pins (ferx-core/ferx-tools at the pinned commit included) into `src/rust/vendor.tar.xz`, together with the `[source]` replacement `cargo vendor` printed. When that file is present and no sibling checkout is, `src/Makevars` unpacks it, appends the replacement to `.cargo/config.toml` and runs `cargo build --offline --locked`; without it the build is the usual online one. **Never commit `vendor.tar.xz`** (~25 MB per pin bump; it is gitignored): GitHub installs must keep fetching the pinned ferx-core online. `tools/vendor-rust.sh --clean` removes it - do that after building a release tarball, or every later local build in that checkout tries the vendored set first. A lock bump makes that set stale; Makevars compares the lock packed into the tarball with the current one and refuses a mismatch by name. CI's `offline-install` job installs a vendored tarball inside `unshare --net`.
+Release engineering; most sessions never touch it. How it works: `tools/README.md`. The rules:
 
-### Docker images (#723)
-
-Two images: `Dockerfile.slim` (R + ferx + the `ferx` CLI; published by `.github/workflows/docker.yml` to `ghcr.io/ferx-nlme/ferx-r` on every `main` push that can change it, and on `v*` tags) and the root `Dockerfile` (RStudio; built and smoke-tested on PRs, never published). Both build the CLI and the package from the ferx-core commit `Cargo.lock` pins, so **a pin bump needs no Dockerfile edit**. What does:
-
-- **The R version** is the rocker base tag (`rocker/r-ver` in both `Dockerfile.slim` stages, `rocker/tidyverse` in `Dockerfile`), written as a literal so Dependabot (`docker` ecosystem, monthly, one grouped PR) proposes new ones. Keep all three FROM lines on one R version.
-- **A new system library** the package needs at build or run time goes in the slim build stage's `apt-get` (build) or a runtime `apt-get` (run), and the root `Dockerfile`'s. The PR smoke tests (`library(ferx)` + a fit, both images) catch a missing one.
-- **Actions** move with the existing `github-actions` Dependabot entry.
-
-Never build ferx-core outside `src/Makevars` without `cargo +stable`: ferx-core's own `rust-toolchain.toml` names nightly, which rustup installs unasked. Never clone it to `<package>/../ferx-core` in an image: that is the sibling path, and Makevars patches it in. `docker-cleanup.yml` deletes old `:sha` images weekly (keeps `latest`, release tags and the 30 newest). A publish run warns ("GHCR package is private") while anonymous pulls fail; only an org owner can make the package public.
-
-**Secrets never enter an image.** `.dockerignore` is an allowlist (only what `R CMD INSTALL` needs), so a stray license file, `.env` or token in the checkout cannot reach the build. `tools/scan-image-secrets.sh` scans every built image (config, history, filesystem) before anything is pushed, and then the pushed bytes themselves (pulled by digest, before any tag points at them; a failure deletes that version), and fails on tokens, private keys, credential files, `*.lic` files and NONMEM license banners. `tools/test-scan-image-secrets.sh` proves it still catches them. Never pass a credential as a build arg or `ENV`, never widen the allowlist beyond package files, and add a `known_public()` entry to the scanner only for a public upstream file you have read.
+- **Never commit `src/rust/vendor.tar.xz`** (gitignored, ~25 MB per pin bump). `tools/vendor-rust.sh` builds it before `R CMD build` of an offline release tarball (#666); `tools/vendor-rust.sh --clean` removes it afterwards, or every later local build in that checkout tries the vendored set first.
+- **Secrets never enter an image** (#723). `.dockerignore` is an allowlist: never widen it beyond package files. Never pass a credential as a build arg or `ENV`. Add a `known_public()` entry to `tools/scan-image-secrets.sh` only for a public upstream file you have read.
+- **Outside `src/Makevars`, build ferx-core with `cargo +stable`**: its `rust-toolchain.toml` names nightly, which rustup installs unasked. Never clone it to `<package>/../ferx-core` in an image: that is the sibling path, and Makevars patches it in.
+- A pin bump needs no Dockerfile edit. A new R version or system library does: see `tools/README.md`.
 
 ## Architecture
 
@@ -122,17 +106,17 @@ R API (R/*.R)
       → ferx-core crate (parser, fitting engine, PK models, ODE solver)
 ```
 
-**R layer** (`R/`): User-facing functions — `ferx_fit()`, `ferx_simulate()`, `ferx_predict()`, `ferx_example()` — that handle path normalization, input validation, and result structuring into S3 objects.
+**R layer** (`R/`): the exported functions in `NAMESPACE` (e.g. `ferx_fit()`, `ferx_simulate()`, `ferx_predict()`, `ferx_example()`). They handle path normalization and input validation, and structure results into S3 objects.
 
-**Rust glue** (`src/rust/src/lib.rs`): ~250 lines. Three `#[extendr]` functions that call into ferx-core and convert results to R lists/data frames via `fit_result_to_list()` and `sdtab_to_dataframe()`.
+**Rust glue** (`src/rust/src/lib.rs`): the `#[extendr]` FFI layer. Each function calls into ferx-core and converts its result to R lists and data frames; the fit-changing steps also read and rewrite the fit's `.fitrx` bundle (see "A fit's bytes are the fit" below). Build every ferx-core / ferx-tools `*Options` struct with a `..Default::default()` spread, never an exhaustive literal: the engine adds fields freely (ferx-core #529), and a literal then breaks this build (`error[E0063]: missing field`). R-CMD-check enforces it.
 
-**ferx-core** (external crate): The actual NLME engine — model parser, NONMEM CSV reader, FOCE/FOCEI optimizer, analytical PK models (1/2-cpt), ODE solver (RK45), simulation, and prediction.
+**ferx-core** (external crate): the NLME engine - model parser, data reader, estimation methods, analytical and ODE PK models, simulation and prediction. Its [README](https://github.com/FeRx-NLME/ferx-core#readme) is the overview; don't restate its method list here.
 
 **`R/extendr-wrappers.R`** is auto-generated by extendr — do not edit by hand.
 
 ## Model DSL
 
-Models are defined in `.ferx` text files with sections: `[parameters]`, `[individual_parameters]`, `[structural_model]`, `[odes]`, `[error_model]`, `[fit_options]`, and the optional `[scaling]` block (unit conversion / observation readout). See `inst/examples/models/` for references.
+Models are defined in `.ferx` text files made of sections, e.g. `[parameters]`, `[individual_parameters]`, `[structural_model]`, `[odes]`, `[error_model]`, `[fit_options]`; `ferx_rust_known_blocks()` is the list. See `inst/examples/models/` for references.
 
 Section names are **closed-world** in the engine (ferx-core #1040): a header it does not recognise is a parse error (`E_UNKNOWN_BLOCK`), not a silently ignored block. Never hard-code the valid list in R — `ferx_rust_known_blocks()` returns it from the engine. `[initial_values]` is *not* one of them: the engine dropped it in ferx-core e5e934d (inits live inline in `[parameters]`) and silently ignored leftovers ever since; a file still carrying one parses with a `W_DEPRECATED_BLOCK` warning and the block is ignored (ferx-core #2913; it was the parse error `E_DEPRECATED_BLOCK` before). Data uses NONMEM CSV format (ID, TIME, DV, EVID, AMT, CMT, etc.); optional columns: RATE, MDV, II, SS, CENS, OCC. Use `ferx_example("warfarin")` to get paths to bundled examples.
 
@@ -150,7 +134,7 @@ Section names are **closed-world** in the engine (ferx-core #1040): a header it 
 Before treating example work as done:
 
 - `git status` must show **no untracked** `inst/examples/` files - the assets have to ship, not sit as local files. (The TTE / `transit_savic` examples were authored but left untracked, so the survival feature shipped without them.)
-- **Run the `ex_<name>.R` script end-to-end** against a fresh `FERX_NO_AUTODIFF=1 R CMD INSTALL .`. Parse-only checks miss API-signature drift - e.g. an example calling `ferx_predict_survival(fit)` when the signature is `ferx_predict_survival(model, data, times, fit = NULL)`.
+- **Run the `ex_<name>.R` script end-to-end** against a fresh `R CMD INSTALL .`. Parse-only checks miss API-signature drift - e.g. an example calling `ferx_predict_survival(fit)` when the signature is `ferx_predict_survival(model, data, times, fit = NULL)`.
 
 `tests/testthat/test-example.R` already asserts every `ferx_example()` data path exists on disk, but nothing runs the scripts - so the script-execution check above is manual.
 
@@ -160,9 +144,7 @@ Before treating example work as done:
 
 **A fit's bytes are the fit** (ferx-core #2693). `fit$bundle` is core's `.fitrx` serialization, and the list is a view of it: `ferx_save_fit()` writes those bytes, and every step that produces a changed fit (`ferx_covariance()`, `ferx_sir()`, `ferx_calc_npde()`, `ferx_collect()`) reads them, makes new ones in the glue, and rebuilds the list with `.ferx_fit_with_bundle()`. Such a step starts from `.ferx_fit_canonical()`, the fit as its bytes say it is, and reads nothing from the caller's list. Never graft fields onto a fit: what is not in the bytes is lost on save, and a list edit does not reach the engine. In tests, put a fit in another state with `fitrx_edit_fit()`, which edits the bytes. Fits are read-only (#713): `$<-`, `[[<-` and `[<-` refuse a core field (`ferx_fit_read_only_error`), and `ferx_save_fit()` refuses a fit whose core fields no longer match the digest `.ferx_fit_seal()` took when it was built (`ferx_fit_edited_error`). Package code that builds or rebuilds a fit edits the unclassed list and seals it at the end; never assign into a sealed fit. A test probing how a reader handles a list field may edit `unsealed_fit(fit)` (helper-fitrx-bundle.R), which a save refuses. New names on a fit are the user's: saved under `r$user` in `interface_extras.json` in the allowlisted node encoding of `.ferx_user_encode()` and restored on load by `.ferx_user_decode()`. A bundle is untrusted: never decode its contents with `jsonlite::unserializeJSON()` or `unserialize()`. R-only fields go in `interface_extras.json` (`.fitrx_interface_extras()`), and the glue swaps in the wide `predictions.csv` and `sdtab_endpoint_rows.csv`, since core's table has fixed columns. `fit$model_path` and `fit$data_path` stay list fields: they say where the files are now. A subject ID's line break is escaped by the glue, since core reads its CSV entries by line: `subject_id_line_breaks.json` names the two private-use characters a bundle uses, so anything else in an ID is the ID's own.
 
-`ferx_simulate()` returns a data frame: SIM, ID, TIME, IPRED, DV_SIM.
-
-`ferx_predict()` returns a data frame: ID, TIME, PRED.
+`ferx_simulate()`, `ferx_predict()` and the other readers return data frames whose columns are documented in each function's `@return` (`?ferx_simulate`, `?ferx_predict`); read those rather than a copy here.
 
 ## Output Label Convention
 
@@ -203,18 +185,34 @@ Always run `roxygen2::roxygenize()` and commit the updated `man/` files before o
 
 Non-ASCII in `\preformatted{}` blocks or `@examples` code comments (`#' #`) also causes RStudio's help viewer to render `?` or silently truncate the page.
 
-**Before every PR, verify with:**
+**Before every PR, verify with** (prints nothing when clean):
+
 ```r
-for (f in list.files("R", pattern = "\\.R$", full.names = TRUE)) {
-  n <- sum(chartr(rawToChar(as.raw(128:255)), strrep("x", 128), readLines(f, warn = FALSE)) != readLines(f, warn = FALSE))
-  if (n > 0) message(f, ": ", n, " non-ASCII lines")
-}
+for (f in Sys.glob("R/*.R")) if (length(tools::showNonASCIIfile(f))) message("  in ", f)
 ```
-Or from the shell: `python3 -c "import os; [print(f) for f in __import__('glob').glob('R/*.R') if any(b > 127 for b in open(f,'rb').read())]"`
+
+## Tests
+
+testthat, under `tests/testthat/` (`test-<area>.R`, shared helpers in `helper-*.R`, fixtures in `fixtures/`). Run them (`devtools::test()` loads the package from source, so it compiles through `src/Makevars` like the other commands in the lock table):
+
+```bash
+NOT_CRAN=true Rscript -e 'devtools::test()'
+NOT_CRAN=true Rscript -e 'devtools::test(filter = "ferx_simulate")'
+```
+
+Without `NOT_CRAN=true`, the `skip_on_cran()` tests are skipped. Only the coverage job sets it; the R CMD check job runs without it. CI runs `R CMD check` (`R-CMD-check.yaml`, which also runs the `tools/` guard scripts) and `covr` coverage (`test-coverage.yaml`). The Codecov targets in `codecov.yml` - 70% project, 80% patch - are informational: they report, they do not fail a PR.
+
+**Every new feature requires a test**, and a bug fix requires a regression test that fails without the fix.
 
 ## Pull Requests
 
 When creating a PR in this repo, always read `.github/PULL_REQUEST_TEMPLATE.md` and fill every section before calling `gh pr create`.
+
+After reviewing a PR, always post your review on the PR, once the user has approved the draft.
+
+## Priority labels
+
+Issues and PRs carry GitHub labels `P0`-`P3` (correctness severity x how common the trigger): `P0` silent wrong results in common use; `P1` wrong results in realistic use, or a loud failure blocking common workflows; `P2` edge-case correctness, important features, UX/diagnostics; `P3` performance, refactors, nice-to-haves, research. The applied label is the source of truth, not a priority written in the title.
 
 ## NEWS: add a fragment, never edit `NEWS.md`
 
@@ -227,4 +225,4 @@ Two gates:
 - `tools/changelog.sh check` (CI step in `R-CMD-check`) validates every fragment's name and shape, and fails if anything is written under `# ferx X.Y.Z.9000 (development version)` - that heading stays empty between releases.
 - The `NEWS fragment` workflow (`.github/workflows/changelog.yml`) fails a PR that changes `R/`, `src/` (the glue and the ferx-core pin in `Cargo.lock`), `inst/`, `NAMESPACE` or `DESCRIPTION` without adding a fragment. A PR that is not user-facing (refactor, tests, CI) takes the **`no-changelog`** label instead. The same workflow fails a PR that deletes or renames another PR's pending fragment, label or not; rewording one is fine.
 
-At release time only: open every issue labelled **`release-checklist`** (`gh issue list --label release-checklist`) - chores that exist only once the version does, such as docs that say "from the next release" or a check that the tag published the release image (#744). Do their before-the-tag items now, and their after-the-tag items once the tag is pushed; close each issue when all its items are done, or move what is left to the next release with a comment. Set `DESCRIPTION`'s `Version`; `tools/changelog.sh assemble <version>` replaces the development heading with `# ferx <version>` and the fragments under their sections, newest first, and deletes them; `tools/changelog.sh preview` shows what is pending. The post-release bump to `X.Y.Z.9000` adds a new, empty development heading. `tools/test-changelog.sh` (also run in CI) drives the script over scratch trees.
+At release time only: open every issue labelled **`release-checklist`** (`gh issue list --label release-checklist`), do their before-the-tag items before tagging and their after-the-tag items once the tag is pushed; close each issue when all its items are done, or move what is left to the next release with a comment. Then assemble `NEWS.md` as `changelog.d/README.md` describes.
