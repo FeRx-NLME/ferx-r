@@ -304,11 +304,38 @@ jobs:
       # cargo and R library locations are handed over explicitly.
       - name: Install with no network and a read-only CARGO_HOME
         run: |
+          set -o pipefail
           mkdir -p "$RUNNER_TEMP/cargo-home" "$RUNNER_TEMP/lib"
           chmod 555 "$RUNNER_TEMP/cargo-home"
           tarball=$(ls ferx_*.tar.gz)
           sudo unshare --net -- sudo -u "$(id -un)" env \
             "HOME=$HOME" "PATH=$PATH" "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" \
             "CARGO_HOME=$RUNNER_TEMP/cargo-home" "R_LIBS=$(Rscript -e 'cat(.libPaths(), sep=":")')" \
-            R CMD INSTALL -l "$RUNNER_TEMP/lib" "$tarball"
+            R CMD INSTALL -l "$RUNNER_TEMP/lib" "$tarball" 2>&1 | tee "$RUNNER_TEMP/install.log"
           Rscript -e 'library(ferx, lib.loc = file.path(Sys.getenv("RUNNER_TEMP"), "lib")); cat(ferx:::ferx_rust_known_blocks(), "\n")'
+
+      # README.md says a first install "takes a few minutes" with no figure,
+      # since a figure drifts (#771, #801): 3m 39s on 2026-11-20, 4m 49s on
+      # 2026-11-28. This is a cold build from the vendored crates, as a user's
+      # first install is, so warn here once it is no longer a few minutes.
+      # Cargo prints `Xm YYs` from a minute up and `N.NNs` below; a line this
+      # cannot read is a warning too, never a failure. The line is uncoloured
+      # because sudo drops the job's CARGO_TERM_COLOR=always and the env list
+      # above does not pass it on; a coloured line would not match the grep.
+      - name: Rust build-time budget
+        run: |
+          budget=600
+          line=$(grep -E 'Finished .* in [0-9]' "$RUNNER_TEMP/install.log" | tail -n 1 | tr -d '\r')
+          t=${line##* in }
+          if [[ $t =~ ^([0-9]+)m\ ([0-9]+)s$ ]]; then
+            secs=$((10#${BASH_REMATCH[1]} * 60 + 10#${BASH_REMATCH[2]}))
+          elif [[ $t =~ ^([0-9]+)(\.[0-9]+)?s$ ]]; then
+            secs=$((10#${BASH_REMATCH[1]}))
+          else
+            echo "::warning::no cargo 'Finished ... in <time>' line in the R CMD INSTALL log; the build-time budget was not checked"
+            exit 0
+          fi
+          echo "Offline install: cargo release build took **$t** (${secs}s; budget ${budget}s)." >> "$GITHUB_STEP_SUMMARY"
+          if (( secs > budget )); then
+            echo "::warning::the offline install's Rust build took $t, over the $((budget / 60))-minute budget: revisit README.md's install line (\"takes a few minutes\")"
+          fi
