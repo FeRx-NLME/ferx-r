@@ -40,9 +40,15 @@ edited_warfarin <- local({
 # The data file a fit was made from, as the fit records it.
 id_data <- function(fit) fit$data_path
 
-# Every data frame column named `ID` anywhere in `x`, as `path = typeof`.
+# Every data frame column named `ID` anywhere in `x`, as `path = typeof`: list
+# elements and attributes alike, since some tables ride as an attribute
+# (`ferx_simulate()`'s `parameters`, which `ferx_sim_parameters()` reads).
 id_column_types <- function(x, path = "x") {
   out <- character()
+  for (a in setdiff(names(attributes(x)), c("names", "row.names", "class", "dim", "dimnames"))) {
+    value <- attr(x, a, exact = TRUE)
+    if (is.list(value)) out <- c(out, id_column_types(value, paste0(path, "@", a)))
+  }
   if (is.data.frame(x)) {
     if ("ID" %in% names(x)) out[path] <- typeof(x[["ID"]])
     x <- unclass(x)
@@ -157,7 +163,10 @@ test_that("every ID column survives ferx_save_fit() / ferx_load_fit() as text (#
 })
 
 # -- the sweep: every returned frame, one fixture per family -------------------
-# A site the sweep does not reach is held by tools/check-glue-id-columns.sh.
+# The guard (tools/check-glue-id-columns.sh) holds every `("ID", ..)` column;
+# the sweep holds the two tables built from parallel name/value vectors, which
+# the guard cannot see: `sim_parameters_to_df` (`ferx_sim_parameters()`) and
+# `individual_estimates`.
 
 test_that("every ID column is character: fit, simulate, predict, npde (#786)", {
   skip_on_cran()
@@ -165,6 +174,9 @@ test_that("every ID column is character: fit, simulate, predict, npde (#786)", {
   expect_all_ids_character(unclass(fit), "fit")
   sim <- ferx_simulate(fit$model_path, id_data(fit), n_sim = 1L, seed = 1L, fit = fit)
   expect_all_ids_character(list(sim = sim), "simulate")
+  expect_true("simulate$sim@parameters" %in% names(id_column_types(list(sim = sim), "simulate")))
+  expect_identical(typeof(ferx_sim_parameters(sim)$ID), "character")
+  expect_true("fit$individual_estimates" %in% names(id_column_types(unclass(fit), "fit")))
   pred <- ferx_predict(fit$model_path, id_data(fit), fit = fit)
   expect_all_ids_character(list(pred = pred), "predict")
   post <- suppressWarnings(ferx_calc_npde(fit, nsim = 50L, seed = 1L))
@@ -214,14 +226,30 @@ test_that("every ID column is character: SAEM conditional distributions (#786)",
   expect_identical(typeof(fit$cond_dist$data$ID), "character")
 })
 
+test_that("ferx_calc_npde(data = <frame>) names the ID pair that does not match (#786 review, 1)", {
+  skip_on_cran()
+  fit <- id_fit("padded")
+  # Plain read.csv() reads "001" as the number 1, which is not the fit's text.
+  err <- tryCatch(suppressWarnings(ferx_calc_npde(fit, data = utils::read.csv(fit$data_path),
+                                                  nsim = 20L, seed = 1L)),
+                  error = conditionMessage)
+  expect_match(err, 'observation row 1 is subject "001" in fit$sdtab but "1"', fixed = TRUE)
+  expect_match(err, 'colClasses = c(ID = "character")', fixed = TRUE)
+  as_text <- utils::read.csv(fit$data_path, colClasses = c(ID = "character"))
+  post <- suppressWarnings(ferx_calc_npde(fit, data = as_text, nsim = 20L, seed = 1L))
+  expect_true(all(is.finite(post$sdtab$NPDE)))
+})
+
 test_that("ferx_calc_npde refuses NPDE rows whose text IDs do not line up (#786)", {
   attach_npde <- getFromNamespace(".ferx_attach_npde", "ferx")
   attach_tte <- getFromNamespace(".ferx_attach_tte_npde", "ferx")
   sdtab <- data.frame(ID = c("S1", "S2"), TIME = c(1, 1))
   swapped <- data.frame(ID = c("S2", "S1"), TIME = c(1, 1), NPDE = c(0.1, 0.2))
   # As numbers both IDs read NA, and NA "equals" NA: compared as text they differ.
-  expect_error(attach_npde(sdtab, swapped), "do not line up")
-  expect_error(attach_tte(sdtab, swapped, 1:2), "do not line up")
+  expect_error(attach_npde(sdtab, swapped),
+               'observation row 1 is subject "S1" in fit$sdtab but "S2"', fixed = TRUE)
+  expect_error(attach_tte(sdtab, swapped, 1:2),
+               'time-to-event row 1 is subject "S1" in fit$sdtab but "S2"', fixed = TRUE)
   expect_identical(attach_npde(sdtab, swapped[2:1, ])$NPDE, c(0.2, 0.1))
   expect_identical(attach_tte(sdtab, swapped[2:1, ], 1:2)$NPDE, c(0.2, 0.1))
 })

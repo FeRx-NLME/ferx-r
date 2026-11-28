@@ -247,6 +247,24 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
 # positional, checked by ID and TIME as `.ferx_attach_npde()` checks the
 # Gaussian rows. EPRED / PWRES stay NA there: a single event has no moment to
 # weight. A NULL or empty table leaves the rows as they are (NA).
+# The refusal when the engine's table names other subjects than fit$sdtab on
+# the same rows, naming the first pair; NULL when the IDs agree. IDs are the
+# subjects' text since #786, so a `data` frame read with `read.csv()` turns
+# "001" into 1 and no longer matches a fit made from the file.
+.ferx_npde_id_mismatch <- function(fit_ids, table_ids, what) {
+  fit_ids <- as.character(fit_ids)
+  table_ids <- as.character(table_ids)
+  if (identical(fit_ids, table_ids)) return(NULL)
+  at <- which(is.na(fit_ids) != is.na(table_ids) | fit_ids != table_ids)[1L]
+  sprintf(paste0(
+    "ferx_calc_npde: %s row %d is subject \"%s\" in fit$sdtab but \"%s\" in the ",
+    "engine's table, so the rows do not line up by ID; refusing to attach ",
+    "possibly-misaligned diagnostics. Subject IDs are compared as text: if ",
+    "`data` is a data frame, read its ID column as text (for example ",
+    "`read.csv(path, colClasses = c(ID = \"character\"))`) or pass the file path."),
+    what, at, fit_ids[at], table_ids[at])
+}
+
 .ferx_attach_tte_npde <- function(sdtab, tte_tbl, tte_rows) {
   if (!is.data.frame(tte_tbl) || nrow(tte_tbl) == 0L) return(sdtab)
   tte_rows <- as.integer(tte_rows)
@@ -258,8 +276,9 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
       nrow(tte_tbl), length(tte_rows)), call. = FALSE)
   }
   rows <- sdtab[tte_rows, , drop = FALSE]
-  if (!identical(as.character(rows$ID), as.character(tte_tbl$ID)) ||
-      !isTRUE(all.equal(as.numeric(rows$TIME), as.numeric(tte_tbl$TIME)))) {
+  id_error <- .ferx_npde_id_mismatch(rows$ID, tte_tbl$ID, "time-to-event")
+  if (!is.null(id_error)) stop(id_error, call. = FALSE)
+  if (!isTRUE(all.equal(as.numeric(rows$TIME), as.numeric(tte_tbl$TIME)))) {
     stop("ferx_calc_npde: time-to-event NPDE rows do not line up with ",
          "fit$sdtab by ID/TIME; refusing to attach possibly-misaligned ",
          "diagnostics.", call. = FALSE)
@@ -314,9 +333,9 @@ ferx_calc_npde <- function(fit, nsim = 1000L, seed = NULL, model = NULL, data = 
   }
   # Both ID columns are the subjects' text (#786): compared as text, so "S1"
   # and "S2" cannot both read NA and pass.
-  id_ok   <- identical(as.character(sdtab$ID), as.character(npde_tbl$ID))
-  time_ok <- isTRUE(all.equal(as.numeric(sdtab$TIME), as.numeric(npde_tbl$TIME)))
-  if (!id_ok || !time_ok) {
+  id_error <- .ferx_npde_id_mismatch(sdtab$ID, npde_tbl$ID, "observation")
+  if (!is.null(id_error)) stop(id_error, call. = FALSE)
+  if (!isTRUE(all.equal(as.numeric(sdtab$TIME), as.numeric(npde_tbl$TIME)))) {
     stop("ferx_calc_npde: NPDE rows do not line up with fit$sdtab by ID/TIME; ",
          "refusing to attach possibly-misaligned diagnostics.", call. = FALSE)
   }
