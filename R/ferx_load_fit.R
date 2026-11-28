@@ -65,7 +65,9 @@
 #'   and has no extension, a \code{.fitrx} extension is tried, mirroring
 #'   \code{\link{ferx_save_fit}}'s default (so a fit saved to
 #'   \code{"results/run1"} loads back from the same bare path).
-#' @return A \code{ferx_fit}-classed list.
+#' @return A \code{ferx_fit}-classed list, as \code{\link{ferx_fit}()} returns it:
+#'   its \code{sdtab$ID} (and every other \code{ID} column) is character, the
+#'   subject's ID text verbatim, whatever ferx wrote the bundle.
 #' @examples
 #' ex  <- ferx_example("warfarin")
 #' fit <- ferx_fit(ex$model, ex$data, method = "gn", covariance = FALSE)

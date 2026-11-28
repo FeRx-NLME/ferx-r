@@ -28,8 +28,9 @@ test_that("a joint PK-TTE fit's sdtab carries one residual row per TTE record, l
   n_tte <- sum(summ$n_obs_tte)
   tte <- sdtab[nrow(sdtab) - rev(seq_len(n_tte)) + 1L, , drop = FALSE]
   gauss <- sdtab[seq_len(nrow(sdtab) - n_tte), , drop = FALSE]
-  # Subject order, on the endpoint's CMT, no concentration prediction.
-  expect_identical(tte$ID, as.numeric(summ$ID))
+  # Subject order (the subject's ID text, #786), on the endpoint's CMT, no
+  # concentration prediction.
+  expect_identical(tte$ID, summ$ID)
   expect_true(all(tte$CMT == 3))
   expect_true(all(is.na(tte$PRED)))
   expect_true(all(is.na(as.matrix(gauss[tte_cols]))))

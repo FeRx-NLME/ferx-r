@@ -13,7 +13,9 @@ and has no extension, a \code{.fitrx} extension is tried, mirroring
 \code{"results/run1"} loads back from the same bare path).}
 }
 \value{
-A \code{ferx_fit}-classed list.
+A \code{ferx_fit}-classed list, as \code{\link{ferx_fit}()} returns it:
+its \code{sdtab$ID} (and every other \code{ID} column) is character, the
+subject's ID text verbatim, whatever ferx wrote the bundle.
 }
 \description{
 Reads a portable \code{.fitrx} archive written by \code{\link{ferx_save_fit}}
