@@ -687,8 +687,10 @@ test_that("SAEM with n_leapfrog = 0 uses MH (no HMC subjects)", {
   skip_on_cran()
   fit <- warfarin_saem_leapfrog_fit(0L)
 
-  # n_leapfrog = 0 is pure Metropolis-Hastings: no subject uses HMC.
-  expect_true(is.na(fit$saem_n_subjects_hmc) || fit$saem_n_subjects_hmc == 0L)
+  # n_leapfrog = 0 is pure Metropolis-Hastings: HMC is off, so the engine
+  # reports no count at all (NA), not a count of 0 subjects. A 0 would mean
+  # HMC was on and every subject fell back to MH.
+  expect_identical(fit$saem_n_subjects_hmc, NA_integer_)
 })
 
 # ---- header from test-fit-options-conflicts.R ----
