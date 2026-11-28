@@ -87,9 +87,6 @@ test_that("ferx_fit() reports an unrecognised arg without evaluating its value",
 })
 
 # ---- header from test-fit.R ----
-# Local aliases avoid the ::: operator (undesirable_operator_linter).
-ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "ferx")
-
 # Return structure — Tier 1
 
 
@@ -545,13 +542,6 @@ test_that("outer_ftol / outer_xtol BOBYQA settings are accepted by ferx_fit (fer
   )
   expect_true(ran)
 })
-test_that("autodiff OFV gradient matches finite-difference gradient within tolerance", {
-  skip_if(
-    !isTRUE(ferx_rust_autodiff_enabled()),
-    "Enzyme autodiff not available — skipping gradient-correctness test"
-  )
-  skip("Gradient inspection API not yet exposed from ferx-core — implement once available")
-})
 test_that("$n_threads_used is a positive integer", {
   fit <- warfarin_fit()
   expect_true(is.integer(fit$n_threads_used) || is.numeric(fit$n_threads_used))
@@ -654,25 +644,35 @@ test_that("print.ferx_fit leaves out a per-occasion kappa shrinkage no observati
   expect_identical(back$shrinkage_kappa_by_occ, fit$shrinkage_kappa_by_occ)
   expect_identical(back$shrinkage_kappa, fit$shrinkage_kappa)
 })
-test_that("SAEM with n_leapfrog > 0 uses HMC proposals on the AD build", {
-  skip_if(
-    !isTRUE(ferx_rust_autodiff_enabled()),
-    "Enzyme autodiff not available — skipping SAEM HMC behavioural test"
+# SAEM's HMC proposal needs no autodiff build: ferx-core's HMC step uses the
+# analytic eta-NLL gradient (#804). warfarin_saem's [fit_options] set
+# n_exploration, n_convergence and seed, so the short call-time schedule raises
+# three conflict warnings; only those are muffled.
+warfarin_saem_leapfrog_fit <- function(n_leapfrog) {
+  ex <- ferx_example("warfarin_saem")
+  withCallingHandlers(
+    ferx_fit(
+      ex$model, ex$data,
+      method   = "saem",
+      verbose  = FALSE,
+      settings = list(
+        n_leapfrog    = n_leapfrog,
+        n_exploration = 50L,
+        n_convergence = 50L,
+        omega_burnin  = 20L,
+        seed          = 42L
+      )
+    ),
+    warning = function(w) {
+      if (grepl("sets `(n_exploration|n_convergence|seed) = ", conditionMessage(w))) {
+        invokeRestart("muffleWarning")
+      }
+    }
   )
-
-  ex  <- ferx_example("warfarin_saem")
-  fit <- ferx_fit(
-    ex$model, ex$data,
-    method   = "saem",
-    verbose  = FALSE,
-    settings = list(
-      n_leapfrog    = 3L,
-      n_exploration = 50L,
-      n_convergence = 50L,
-      omega_burnin  = 20L,
-      seed          = 42L
-    )
-  )
+}
+test_that("SAEM with n_leapfrog > 0 uses HMC proposals", {
+  skip_on_cran()
+  fit <- warfarin_saem_leapfrog_fit(3L)
 
   expect_s3_class(fit, "ferx_fit")
   # The count must be a non-NA integer, and at least one subject must have
@@ -684,23 +684,8 @@ test_that("SAEM with n_leapfrog > 0 uses HMC proposals on the AD build", {
   expect_lte(fit$saem_n_subjects_hmc, fit$n_subjects)
 })
 test_that("SAEM with n_leapfrog = 0 uses MH (no HMC subjects)", {
-  skip_if(
-    !isTRUE(ferx_rust_autodiff_enabled()),
-    "Enzyme autodiff not available — skipping SAEM HMC behavioural test"
-  )
-
-  ex  <- ferx_example("warfarin_saem")
-  fit <- ferx_fit(
-    ex$model, ex$data,
-    method   = "saem",
-    verbose  = FALSE,
-    settings = list(
-      n_leapfrog    = 0L,
-      n_exploration = 50L,
-      n_convergence = 50L,
-      seed          = 42L
-    )
-  )
+  skip_on_cran()
+  fit <- warfarin_saem_leapfrog_fit(0L)
 
   # n_leapfrog = 0 is pure Metropolis-Hastings: no subject uses HMC.
   expect_true(is.na(fit$saem_n_subjects_hmc) || fit$saem_n_subjects_hmc == 0L)
@@ -2706,9 +2691,6 @@ test_that("print.ferx_fit works without eta_param_types (falls back to log_norma
 
 # ---- header from test-data-selection.R ----
 # Tests for [data_selection] / ferx_apply_selection() / ferx_fit(ignore=) support.
-
-# Local alias avoids the ::: operator.
-ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "ferx")
 
 # .sel_attr()/warfarin_sel_fit() come from helper-selection.R
 

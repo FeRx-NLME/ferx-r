@@ -937,9 +937,6 @@ test_that("covtab and covariate_types survive a .fitrx save/load round-trip", {
 # ---- header from test-data-selection.R ----
 # Tests for [data_selection] / ferx_apply_selection() / ferx_fit(ignore=) support.
 
-# Local alias avoids the ::: operator.
-ferx_rust_autodiff_enabled <- getFromNamespace("ferx_rust_autodiff_enabled", "ferx")
-
 # .sel_attr()/warfarin_sel_fit() come from helper-selection.R
 
 # ---------------------------------------------------------------------------
