@@ -341,7 +341,7 @@ ferx_vpc_tte <- function(model, data = NULL, n_sim = 200L, seed = 42L,
       do.call(at_fit, c(args$paths, fit_pieces[c(
         "theta", "omega_flat", "omega_dim", "sigma", "omega_iov_flat",
         "omega_iov_dim", "residual_rho", "residual_rho_pairs",
-        "mixture_overrides", "fit_bindings"
+        "mixture_overrides", "packed_estimate", "fit_bindings"
       )], list(fit_reading = fit_reading), fit_pieces["iov_occasion"],
       args$shared, extra)),
       args$model, args$data

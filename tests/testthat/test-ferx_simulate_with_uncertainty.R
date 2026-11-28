@@ -547,6 +547,84 @@ test_that("a [mixture] fit with per-class overrides simulates each class under i
                tolerance = 0.03)
 })
 
+# Per DRAW and class, the variance of the simulated ETA_CL
+# (`ferx_sim_parameters()`, one row per DRAW, SIM and ID): a DRAW x MIXNUM
+# matrix.
+eta_var_by_class <- function(sim) {
+  p <- ferx_sim_parameters(sim)
+  tapply(p$ETA_CL, list(p$DRAW, p$MIXNUM), stats::var)
+}
+
+test_that("method = \"sir\" draws each DRAW's class override from that DRAW's resample (#673)", {
+  mod <- test_path("fixtures", "mixture_override.ferx")
+  dat <- test_path("fixtures", "mixture_iv.csv")
+  fit <- muffle_mixl_lint(ferx_fit(mod, dat, method = "focei", covariance = TRUE,
+                                   verbose = FALSE))
+  skip_if(is.null(fit$cov_matrix), "mixture covariance step did not converge")
+  sir <- muffle_mixl_lint(ferx_sir(fit, sir_samples = 500L, sir_resamples = 100L,
+                                   sir_seed = 1, sir_keep_samples = TRUE))
+  # One packed vector per column, in cov_matrix order. Premise: theta is packed
+  # on the log scale and a variance as its log SD, as the estimate shows.
+  pool <- matrix(sir$sir_resamples, ncol = sir$sir_resamples_n,
+                 dimnames = list(rownames(fit$cov_matrix), NULL))
+  expect_identical(nrow(pool), length(fit$packed_estimate))
+  est <- stats::setNames(fit$packed_estimate, rownames(pool))
+  expect_equal(exp(est[["TVV"]]), fit$theta[["TVV"]], tolerance = 1e-12)
+  expect_equal(exp(2 * est[["ETA_CL (class 2)"]]), fit$mixture_overrides[[1L]],
+               tolerance = 1e-12)
+
+  sim <- muffle_mixl_lint(ferx_simulate_with_uncertainty(
+    mod, dat, sir, method = "sir", n_uncertainty_draws = 8L, n_sim_per_draw = 100L,
+    seed = 3L
+  ))
+  # V carries no eta, so each DRAW's V is its resample's TVV, which names the
+  # resample it was drawn from.
+  p <- ferx_sim_parameters(sim)
+  v <- tapply(p$V, p$DRAW, unique)
+  col <- vapply(v, function(x) which.min(abs(log(x) - pool["TVV", ])), integer(1))
+  expect_true(all(abs(log(v) - pool["TVV", col]) < 1e-9))
+  override <- exp(2 * pool["ETA_CL (class 2)", col])
+  # Premise: the drawn resamples' overrides differ, by far more than the
+  # 0.15 tolerance below, so a DRAW held at the fitted value would fail.
+  expect_gt(diff(range(log(override))), 0.3)
+  # About 2000 class-2 subjects per DRAW: a variance SE of about 3%, so 0.15
+  # on the log scale is five SEs.
+  var2 <- eta_var_by_class(sim)[, "2"]
+  expect_true(all(abs(log(var2 / override)) < 0.15),
+              label = paste(signif(var2, 3), "vs", signif(override, 3), collapse = "; "))
+})
+
+test_that("an omega(k) and a sigma(k) override reach their own class, omega first (#674)", {
+  mod <- test_path("fixtures", "mixture_override_sigma.ferx")
+  dat <- test_path("fixtures", "mixture_iv.csv")
+  fit <- muffle_mixl_lint(ferx_fit(mod, dat, method = "focei", covariance = TRUE,
+                                   verbose = FALSE))
+  skip_if(is.null(fit$cov_matrix), "mixture covariance step did not converge")
+  ov <- fit$mixture_overrides
+  expect_named(ov, c("ETA_CL (class 2)", "EPS (class 2)"))
+  # Premise: the two values are far enough apart that reading them in the
+  # other order would move both class-2 checks well past their tolerance.
+  expect_gt(abs(log(ov[[1L]] / ov[[2L]])), 0.5)
+
+  # A shrunk covariance matrix puts every DRAW on the estimate.
+  tight <- unsealed_fit(fit)
+  tight$cov_matrix <- fit$cov_matrix * 1e-10
+  sim <- muffle_mixl_lint(ferx_simulate_with_uncertainty(
+    mod, dat, tight, n_uncertainty_draws = 3L, n_sim_per_draw = 100L, seed = 11L
+  ))
+  near <- function(x, target) all(abs(log(x / target)) < 0.15)
+  # ETA spread: the base omega in class 1, the omega(2) override in class 2.
+  v <- eta_var_by_class(sim)
+  expect_true(near(v[, "1"], fit$omega[1L, 1L]), label = paste(signif(v[, "1"], 3)))
+  expect_true(near(v[, "2"], ov[["ETA_CL (class 2)"]]), label = paste(signif(v[, "2"], 3)))
+  # Residual spread: proportional error, so DV_SIM / IPRED - 1 is eps, whose
+  # SD is the base sigma in class 1 and the sigma(2) override in class 2.
+  obs <- sim[sim$TIME > 0, ]
+  s <- tapply(obs$DV_SIM / obs$IPRED - 1, list(obs$DRAW, obs$MIXNUM), stats::sd)
+  expect_true(near(s[, "1"], fit$sigma[[1L]]), label = paste(signif(s[, "1"], 3)))
+  expect_true(near(s[, "2"], ov[["EPS (class 2)"]]), label = paste(signif(s[, "2"], 3)))
+})
+
 test_that("horizon reaches every draw of a drug-driven TTE model (ferx-core #2003)", {
   ex  <- ferx_example("pktte_joint")
   fit <- suppressWarnings(ferx_fit(ex$model, ex$data, method = "focei",

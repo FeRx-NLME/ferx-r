@@ -441,6 +441,8 @@ test_that("ferx_simulate(fit = ) refuses a [mixture] fit that lost its override 
   fit <- mixture_override_fit()
   fit <- unsealed_fit(fit)
   fit$mixture_overrides <- NULL
+  # The packed estimate holds the values too (#675), so it goes as well.
+  fit$packed_estimate <- NULL
   probe <- engine_error_probe(muffle_mixl_lint(ferx_simulate(
     test_path("fixtures", "mixture_override.ferx"),
     test_path("fixtures", "mixture_iv.csv"),

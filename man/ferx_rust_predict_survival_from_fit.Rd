@@ -17,6 +17,7 @@ ferx_rust_predict_survival_from_fit(
   residual_rho,
   residual_rho_pairs,
   mixture_overrides,
+  packed_estimate,
   fit_bindings,
   fit_reading,
   iov_occasion,
