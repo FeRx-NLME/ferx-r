@@ -97,7 +97,7 @@ test_that("CARGO_FEATURES defaults to the shipped feature set", {
   mk <- skip_unless_make_probe_works()
   expect_equal(
     resolve_make_var(mk, "CARGO_FEATURES", env = clean_env()),
-    "--no-default-features --features ci,nn,survival"
+    "--no-default-features --features ci,nn,survival,markov"
   )
 })
 

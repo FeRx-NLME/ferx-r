@@ -21,12 +21,13 @@ endif
 # sensitivities — so the build needs no special toolchain and always uses the
 # stable host channel selected below. `survival` is added back explicitly because
 # `--no-default-features` drops it: TTE support (the datareader routing and
-# `predict_survival`, both behind ferx-core's `survival` feature) must ship here.
+# `predict_survival`, both behind ferx-core's `survival` feature) must ship here,
+# and so must `markov` (`[markov_model]`, #788), which implies `survival`.
 #
 # `?=`, not `=`, so the set can be replaced from the environment without editing
 # this (tracked) file:
 #
-#   CARGO_FEATURES="--no-default-features --features ci,survival" R CMD INSTALL .
+#   CARGO_FEATURES="--no-default-features --features ci,survival,markov" R CMD INSTALL .
 #
 # drops `nn` (Deep Compartment Models / low-dim neural ODEs), the heaviest part
 # of the dependency graph and where the final staticlib link dies on a
@@ -34,7 +35,7 @@ endif
 # environment into its own variable space, so a variable set there is already
 # defined and `?=` declines to overwrite it. Unset, the default below is used
 # and the shipped build is unchanged.
-CARGO_FEATURES ?= --no-default-features --features ci,nn,survival
+CARGO_FEATURES ?= --no-default-features --features ci,nn,survival,markov
 # Thin LTO keeps cross-crate inlining without the fat-LTO link-time/memory cost.
 # `override` keeps the makefile's value authoritative even when make runs with
 # -e and the environment carries a stale CARGO_PROFILE_RELEASE_LTO. R CMD

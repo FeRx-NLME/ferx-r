@@ -1,0 +1,26 @@
+# Discrete-time Markov model (DTMM), 2 states, one eta per transition.
+# From ferx-core nonmem_anchor/dtmm_2state_fit.ferx at the pinned revision:
+# NONMEM 7.5.1's final estimates, evaluated once (maxiter = 0). NONMEM's LAPLACE
+# OFV on the same likelihood is 1049.4031789; the exact closed-form Laplace
+# objective is 1049.4079889 (ferx-core tests/dtmm_nonmem_anchor.rs).
+# Data: dtmm_2state.csv (ferx-core nonmem_anchor/dtmm_2state.csv).
+
+[parameters]
+  theta A_AS(-1.0065933892463419, -10.0, 10.0)
+  theta B_DOSE(0.88239637849927277, -10.0, 10.0)
+  theta A_SA(-0.64393697409745099, -10.0, 10.0)
+  omega ETA_AS ~ 0.062830339797752571
+  omega ETA_SA ~ 0.31079088071690125
+
+[markov_model]
+  type   = dtmm
+  cmt    = 5
+  states = [awake=0, asleep=1]
+  transition awake  -> asleep = inv_logit(A_AS + B_DOSE * DOSE + ETA_AS)
+  transition asleep -> awake  = inv_logit(A_SA + ETA_SA)
+
+[fit_options]
+  method  = focei
+  maxiter = 0
+  inner_tol = 1e-8
+  covariance = false

@@ -16,6 +16,7 @@ Fast nonlinear mixed effects (NLME) modeling in R, powered by a Rust backend.
 - **ODE-based models**: general `[odes]` models, solved with `ode_method = "auto"` (default), which solves a linear system exactly by the matrix exponential and otherwise picks the stepper per integration segment, or with a named stepper -- Dormand-Prince RK45, high-order Verner 7(6), or one of three stiff Rosenbrock methods -- selected with `settings = list(ode_method = ...)`
 - **NONMEM-compatible**: reads standard NONMEM CSV datasets
 - **BLOQ handling**: Beal's M3 likelihood for observations below the LLOQ
+- **Non-Gaussian endpoints**: time-to-event (`[event_model]`), binary and count (`[binary_model]`, `[count_model]`), and continuous- or discrete-time Markov models on an observed state (`[markov_model]`)
 - **Model DSL**: define models in `.ferx` text files
 
 ## Installation
@@ -48,12 +49,13 @@ on memory tends to give up. Drop it by setting `CARGO_FEATURES` in the
 environment:
 
 ```bash
-CARGO_FEATURES="--no-default-features --features ci,survival" R CMD INSTALL .
+CARGO_FEATURES="--no-default-features --features ci,survival,markov" R CMD INSTALL .
 ```
 
-Keep `ci` and `survival`: they carry the covariance step and time-to-event
-support. A build without `nn` rejects a model declaring `[covariate_nn]` with
-`E_NN_FEATURE_DISABLED`; everything else is unchanged.
+Keep `ci`, `survival` and `markov`: they carry the covariance step,
+time-to-event and Markov-model support. A build without `nn` rejects a model
+declaring `[covariate_nn]` with `E_NN_FEATURE_DISABLED`; everything else is
+unchanged.
 
 #### Installing without network access
 

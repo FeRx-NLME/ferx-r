@@ -24,13 +24,19 @@ default = ["survival"]
 # Time-to-event / survival modelling (parametric TTE, `[event_model]` blocks,
 # `predict_survival`). See ferx-core's plans/tte-survival-markov.md.
 survival = ["ferx-core/survival"]
+# Continuous- and discrete-time Markov models (`[markov_model]`, ferx-core
+# Phases 4b/5). Implies `survival`, as ferx-core's own `markov` does: the
+# Markov endpoints ride on the non-Gaussian trunk that feature gates. Like `nn`
+# it is not in `default`; src/Makevars names it, so `R CMD INSTALL` ships it
+# (#788). It adds no dependency crate.
+markov = ["survival", "ferx-core/markov"]
 ci = ["ferx-core/ci"]
 # Deep Compartment Models (DCM) and low-dim neural ODEs — Phase A from
 # ferx-core's plans/dcm-and-low-dim-node.md. Enables parsing of
 # `[covariate_nn]` blocks and the matching `neural_networks` section in
 # `FitResult` / fit YAML / .fitrx output. Not in `default` above, but the R
 # package build names it explicitly (`--no-default-features --features
-# ci,nn,survival` in src/Makevars), so an `R CMD INSTALL` ships it. It is the
+# ci,nn,survival,markov` in src/Makevars), so an `R CMD INSTALL` ships it. It is the
 # heaviest part of the dependency graph; to build without it, override
 # CARGO_FEATURES in the environment - see the comment on that line in
 # src/Makevars.
