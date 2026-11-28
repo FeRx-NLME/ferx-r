@@ -12,6 +12,17 @@
 
 mp_model <- function() test_path("fixtures", "mixture_override.ferx")
 mp_data <- function() test_path("fixtures", "mixture_iv.csv")
+# The fixture fitted with its covariance step, for the uncertainty paths.
+mp_cov_fit <- local({
+  fit <- NULL
+  function() {
+    if (is.null(fit)) {
+      fit <<- muffle_mixl_lint(ferx_fit(mp_model(), mp_data(), method = "focei",
+                                        covariance = TRUE, verbose = FALSE))
+    }
+    fit
+  }
+})
 
 # `run(fit)` and `run()` on the fit without its override values are identical.
 expect_same_without_override_values <- function(fit, run) {
@@ -47,11 +58,18 @@ test_that("ferx_simulate_adaptive(fit = ) reads the overrides from the packed es
     ferx_simulate_adaptive(path, mp_data(), n_sim = 3L, seed = 1L, fit = f)
   })
   expect_gt(nrow(full$trajectories), 0L)
+  # With `uncertainty =` the draws are taken around a second rebuild of the
+  # fit, which needs the packed estimate as well (#803 review, finding 1).
+  fit <- mp_cov_fit()
+  skip_if(is.null(fit$cov_matrix), "mixture covariance step did not converge")
+  expect_same_without_override_values(fit, function(f) {
+    ferx_simulate_adaptive(path, mp_data(), n_sim = 2L, seed = 1L, fit = f,
+                           uncertainty = list(n_draws = 2L))
+  })
 })
 
 test_that("ferx_simulate_with_uncertainty() reads the overrides from the packed estimate (#675)", {
-  fit <- muffle_mixl_lint(ferx_fit(mp_model(), mp_data(), method = "focei",
-                                   covariance = TRUE, verbose = FALSE))
+  fit <- mp_cov_fit()
   skip_if(is.null(fit$cov_matrix), "mixture covariance step did not converge")
   full <- expect_same_without_override_values(fit, function(f) {
     ferx_simulate_with_uncertainty(mp_model(), mp_data(), f, n_uncertainty_draws = 3L,
@@ -78,7 +96,9 @@ test_that("a [mixture] fit with neither override values nor a packed estimate is
   probe <- engine_error_probe(muffle_mixl_lint(ferx_simulate(
     mp_model(), mp_data(), n_sim = 1L, seed = 1L, fit = neither
   )))
+  # Coded, as the same refusal from ferx_simulate_with_uncertainty() is (#672).
   expect_coded_refusal(probe, "omega(2) ETA_CL", "E_FIT_INPUT_MISSING")
+  expect_null(probe$value)
 })
 
 test_that("every glue binding that takes mixture_overrides takes packed_estimate too (#675)", {
