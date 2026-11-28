@@ -351,8 +351,8 @@ ferx_rust_theta_levels_from_fit <-function(model_path, model_hash, theta, theta_
 
 #' @title Internal Rust backend binding
 #' @keywords internal
-ferx_rust_update_model <- function(model_text, theta, theta_names, omega_flat, omega_dim, eta_names, sigma, sigma_names, omega_iov_flat, omega_iov_dim, kappa_names, residual_rho, residual_rho_pairs, mixture_overrides) {
-  .Call("wrap__ferx_rust_update_model", model_text, theta, theta_names, omega_flat, omega_dim, eta_names, sigma, sigma_names, omega_iov_flat, omega_iov_dim, kappa_names, residual_rho, residual_rho_pairs, mixture_overrides)
+ferx_rust_update_model <- function(model_text, theta, theta_names, omega_flat, omega_dim, eta_names, sigma, sigma_names, omega_iov_flat, omega_iov_dim, kappa_names, residual_rho, residual_rho_pairs, mixture_overrides, packed_estimate) {
+  .Call("wrap__ferx_rust_update_model", model_text, theta, theta_names, omega_flat, omega_dim, eta_names, sigma, sigma_names, omega_iov_flat, omega_iov_dim, kappa_names, residual_rho, residual_rho_pairs, mixture_overrides, packed_estimate)
 }
 
 #' @title Internal Rust backend binding

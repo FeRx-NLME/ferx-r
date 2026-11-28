@@ -145,8 +145,8 @@ test_that("every glue binding that takes mixture_overrides takes packed_estimate
     Filter(function(f) arg %in% names(formals(get(f, ns))),
            grep("^ferx_rust_", ls(ns), value = TRUE))
   }
-  readers <- setdiff(takes("mixture_overrides"), "ferx_rust_update_model")
-  expect_gte(length(readers), 9L)
+  readers <- takes("mixture_overrides")
+  expect_gte(length(readers), 10L)
   expect_setequal(takes("packed_estimate"), readers)
   # And the R side hands both to each of them.
   pieces <- validate_fit_for_params(mixture_override_fit())

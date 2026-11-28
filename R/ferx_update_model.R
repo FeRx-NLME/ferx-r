@@ -129,7 +129,10 @@ ferx_update_model <- function(fit, path = NULL, overwrite = FALSE) {
     residual_rho_pairs = .ferx_residual_rho_pairs(fit),
     # A [mixture] fit's per-class omega(k) / sigma(k) overrides, which the
     # engine's edit does not read either (numeric(0) when none).
-    mixture_overrides  = as.numeric(fit$mixture_overrides %||% numeric())
+    mixture_overrides  = as.numeric(fit$mixture_overrides %||% numeric()),
+    # Their source when the fit records none (a .fitrx saved before #655):
+    # the engine reads them from the packed estimate (#675, #803 review).
+    packed_estimate    = as.numeric(fit$packed_estimate %||% numeric())
   )
   for (note in res$notes) warning("ferx_update_model: ", note, call. = FALSE)
   res$text

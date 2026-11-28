@@ -7349,6 +7349,8 @@ fn default_fit_result(
 ///   and their 1-based sigma pairs, flattened `i1, j1, i2, j2, ...`.
 /// @param mixture_overrides A `[mixture]` fit's fitted per-class overrides
 ///   (`fit$mixture_overrides`; empty for none).
+/// @param packed_estimate `fit$packed_estimate` (empty for none): the
+///   overrides' source when `mixture_overrides` is empty (ferx-r #803 review).
 /// @return A list: `text`, the rendered model, and `notes`, one line per
 ///   declaration left as written that a refit would want seeded.
 /// @export
@@ -7369,6 +7371,7 @@ fn ferx_rust_update_model(
     residual_rho: Vec<f64>,
     residual_rho_pairs: Vec<i32>,
     mixture_overrides: Vec<f64>,
+    packed_estimate: Vec<f64>,
 ) -> Robj {
     entry(move || {
         let parsed = ferx_core::parser::model_parser::parse_full_model(model_text)
@@ -7419,7 +7422,21 @@ fn ferx_rust_update_model(
         );
         level_block_notes(model_text, &theta_names, &mut notes);
         let seeded = if parsed.model.default_params.mixture.is_some() {
-            seed_mixture_overrides(&seeded, &mixture_overrides, &mut notes)
+            let overrides = if mixture_overrides.is_empty() {
+                mixture_overrides_from_packed(
+                    &parsed.model,
+                    &theta,
+                    DMatrix::from_row_slice(d, d, &omega_flat),
+                    &sigma,
+                    (k > 0).then(|| DMatrix::from_row_slice(k, k, &omega_iov_flat)),
+                    residual_correlations_from_fit(&parsed.model, &residual_rho, &residual_rho_pairs)
+                        .unwrap_or_default(),
+                    &packed_estimate,
+                )
+            } else {
+                mixture_overrides
+            };
+            seed_mixture_overrides(&seeded, &overrides, &mut notes)
         } else {
             seeded
         };
@@ -7763,6 +7780,51 @@ fn folded_fix(after: &[&str]) -> bool {
 /// is left as written, as a `FIX` base parameter is. A fit that records no
 /// overrides, or another count than the block declares, leaves every override
 /// as written, with a note.
+/// A `[mixture]` fit's override values in `fit$mixture_overrides` order (each
+/// `omega(k)` class variance, then each `sigma(k)` class sigma), read from its
+/// packed estimate, for a fit that records no values (a `.fitrx` saved before
+/// ferx-r #655; #803 review). The engine reads the vector only when it unpacks
+/// bit for bit to the fit's estimates (ferx-core #1815), as on every from-fit
+/// path (#675); otherwise this is empty and the overrides stay as written,
+/// with `seed_mixture_overrides`' note.
+#[allow(clippy::too_many_arguments)]
+fn mixture_overrides_from_packed(
+    model: &CompiledModel,
+    theta: &[f64],
+    omega: DMatrix<f64>,
+    sigma: &[f64],
+    omega_iov: Option<DMatrix<f64>>,
+    residual_correlations: Vec<ResidualCorrelation>,
+    packed_estimate: &[f64],
+) -> Vec<f64> {
+    if packed_estimate.is_empty() {
+        return Vec::new();
+    }
+    let skeleton = default_fit_result(
+        model,
+        theta.to_vec(),
+        omega,
+        sigma.to_vec(),
+        omega_iov,
+        None,
+        None,
+        residual_correlations,
+        None,
+        Some(packed_estimate.to_vec()),
+    );
+    let Ok(params) =
+        ferx_core::estimation::uncertainty_samples::fitted_params_from_result(&skeleton, model)
+    else {
+        return Vec::new();
+    };
+    let Some(mix) = params.mixture else {
+        return Vec::new();
+    };
+    let omega = mix.omega_override_addr.iter().map(|&(c, e)| mix.omega[c].matrix[(e, e)]);
+    let sigma = mix.sigma_override_addr.iter().map(|&(c, i)| mix.sigma[c].values[i]);
+    omega.chain(sigma).collect()
+}
+
 fn seed_mixture_overrides(model_text: &str, overrides: &[f64], notes: &mut Vec<String>) -> String {
     // (line index, is_omega) of every override declaration, in file order.
     let lines: Vec<&str> = model_text.split_inclusive('\n').collect();
