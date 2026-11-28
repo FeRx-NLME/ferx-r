@@ -713,9 +713,10 @@ test_that("fit = with data omitted simulates the fit's own data", {
 })
 
 test_that("ferx_simulate_adaptive(fit = ) refuses a [mixture] fit without override values, coded (#672)", {
-  # The fit list carries no `mixture_overrides` (a .fitrx saved before #655),
-  # so the class rebuild refuses before anything is simulated. The adaptive
-  # prefix on the message must not cost the refusal its code.
+  # The hand-built fit carries neither `mixture_overrides` nor a packed
+  # estimate (#675), so the class rebuild refuses before anything is
+  # simulated. The adaptive prefix on the message must not cost the refusal
+  # its code.
   path <- .write_mixture_adaptive_model()
   fit <- list(theta = c(TVCL1 = 1.2, TVCL2 = 2.5, TVV = 10, MIXL = 0),
               omega = matrix(0.02, 1, 1, dimnames = list("ETA_CL", "ETA_CL")),
