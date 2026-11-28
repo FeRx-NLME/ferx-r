@@ -293,8 +293,9 @@ ferx_xpose <- function(fit,
   # reused ID in a non-contiguous data block) each pick up their own row rather
   # than both matching the first via ID. Fall back to a character-space ID match
   # when the counts don't line up (e.g. a hand-built src covering a subset) -
-  # sdtab IDs are numeric (Rust writes them as f64) while ebe_etas /
-  # individual_estimates IDs are character, so match in character space
+  # IDs are the subjects' text everywhere since #786 (sdtab's were numbers
+  # before), and a hand-built src may still carry numbers in ebe_etas /
+  # individual_estimates, so match in character space
   # (cf. diagnostics.R).
   if (.ferx_subject_positions_fit(subj, df, nrow(src))) {
     idx <- subj
@@ -424,7 +425,7 @@ ferx_xpose <- function(fit,
 # order wins (true LOCF). Observations before any source record for that ID fall
 # back to the earliest record. Vectorised per ID group (no per-row scan).
 .ferx_locf_join <- function(id, t, src_id, src_t, src_val) {
-  id     <- as.character(id)       # sdtab IDs are numeric, covtab IDs character
+  id     <- as.character(id)       # text since #786; a hand-built table may hold numbers
   src_id <- as.character(src_id)
   out <- rep(NA_real_, length(id))
   src_by_id <- split(seq_along(src_id), src_id)

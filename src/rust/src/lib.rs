@@ -5105,18 +5105,10 @@ fn sdtab_entries(
     fit: &FitResult,
     sdtab: &[(String, Vec<f64>)],
 ) -> std::result::Result<HashMap<String, Option<Vec<u8>>>, String> {
-    let repeat = |count: &dyn Fn(&SubjectResult) -> usize| -> Vec<usize> {
-        fit.subjects
-            .iter()
-            .enumerate()
-            .flat_map(|(si, sr)| std::iter::repeat_n(si, count(sr)))
-            .collect()
-    };
-    let gaussian = repeat(&|sr| sr.ipred.len());
-    #[cfg_attr(not(feature = "survival"), allow(unused_mut))]
-    let mut endpoint = repeat(&|sr| sr.discrete_rows.len());
-    #[cfg(feature = "survival")]
-    endpoint.extend(repeat(&|sr| sr.tte_rows.len()));
+    // The one layout `fit$sdtab`'s `ID` is filled from (#786 review, finding 5).
+    let mut gaussian = sdtab_row_subjects(fit);
+    let n_gaussian: usize = fit.subjects.iter().map(|sr| sr.ipred.len()).sum();
+    let endpoint = gaussian.split_off(n_gaussian);
 
     let n_rows = sdtab.first().map_or(0, |(_, values)| values.len());
     if n_rows != gaussian.len() + endpoint.len() || sdtab.iter().any(|(_, v)| v.len() != n_rows) {
@@ -5749,7 +5741,7 @@ fn ferx_rust_bundle_without_data(bundle: Raw) -> Raw {
 /// table, as `ferx_calc_npde()` does. The rows must be the fit's.
 ///
 /// @param bundle The bundle's bytes.
-/// @param sdtab The table as a list of numeric columns.
+/// @param sdtab The table as a list of columns: numeric, and `ID` the subjects' text (#786).
 /// @return The new bundle's bytes.
 /// @export
 #[extendr]
@@ -9982,10 +9974,18 @@ fn sdtab_to_dataframe(
         return Ok(().into());
     }
     let n_rows = cols[0].1.len();
-    if subjects.len() != n_rows || subjects.iter().any(|&si| si >= fit.subjects.len()) {
+    if subjects.len() != n_rows {
         return Err(format!(
-            "internal: the sdtab has {n_rows} rows and names the subjects of {}",
+            "internal: the sdtab has {n_rows} rows but names the subjects of {} rows",
             subjects.len()
+        ));
+    }
+    if let Some((row, &si)) = subjects.iter().enumerate().find(|&(_, &si)| si >= fit.subjects.len()) {
+        return Err(format!(
+            "internal: sdtab row {} names subject {} of a fit with {} subjects",
+            row + 1,
+            si + 1,
+            fit.subjects.len()
         ));
     }
 

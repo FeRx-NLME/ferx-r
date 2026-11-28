@@ -466,11 +466,14 @@ test_that("ferx_xpose joins pktte_joint etas by subject, not ID (#688)", {
   expect_equal(s$value[s$label == "nind"], "6")
 })
 
-test_that("ferx_xpose joins by subject position when IDs share a number (#688)", {
+test_that("ferx_xpose keeps subjects apart whose IDs share a number (#688, control since #786)", {
   # Subject 2 is "0" + subject 1's ID: a distinct subject in the data, which
   # sdtab wrote as the same number until #786, so the run-length index merged
   # their rows and an ID join gave subject 2 subject 1's etas. sdtab now
-  # carries the text; the join still goes by subject position.
+  # carries the text, so the run-length fallback is right here too: this is a
+  # control, and no longer fails if the subject-position join breaks. The
+  # test that does is "carries covariates past a subject with no
+  # observations (#695)" below, whose adjacent equal IDs still merge runs.
   fit <- xpose_edited_fit("warfarin", "zero_padded_id", edit = function(d) {
     subj <- .ferx_subject_index(d$ID)
     d$ID <- as.character(d$ID)
@@ -510,10 +513,11 @@ expect_own_wt <- function(fit, d) {
   expect_equal(df$WT, obs$WT)
 }
 
-test_that("ferx_xpose carries covariates by subject when IDs share a number (#695)", {
+test_that("ferx_xpose carries covariates for IDs that share a number (#695, control since #786)", {
   # Subject 2 is "0" + subject 1's ID. Until #786 sdtab wrote both as one
   # number, so it had one run fewer than covtab and "01" was no sdtab ID: an
-  # ID join left subject 2 with no WT. sdtab now has a run per subject.
+  # ID join left subject 2 with no WT. sdtab now has a run per subject, so
+  # this is a control; the next test is the one that guards the join.
   edit <- function(d) {
     subj <- .ferx_subject_index(d$ID)
     d <- add_time_varying_wt(d)
