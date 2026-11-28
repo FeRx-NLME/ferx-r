@@ -176,6 +176,23 @@
 #'   with \code{uncertainty} at least two draws; otherwise the call is refused
 #'   before the simulation runs, coded \code{E_ADAPTIVE_OPTIONS}. Default
 #'   \code{FALSE}.
+#' @param reference \code{NULL} (default) for one run under the controller,
+#'   or \code{"fixed"} for the controller's effect as a contrast (ferx-core
+#'   #946): the same model, data, seed and options are run twice, once under
+#'   the \code{[adaptive_dosing]} rules (the adaptive arm) and once under the
+#'   fixed reference regimen, the block with its rules cleared, which gives
+#'   each subject the block's start dose at every due point (its own value of
+#'   a \code{start_dose} expression, on the \code{round_to} grid, within
+#'   \code{dose_bounds}, on \code{start_interval}). The two arms share every
+#'   random number - parameter draws, etas, mixture classes, IOV kappas and
+#'   assay noise - so their difference is the controller's effect, not noise.
+#'   It is not a fair reference for a controller with a loading dose: say so
+#'   in \code{arm_labels}.
+#' @param arm_labels With \code{reference}: what each arm is, as
+#'   \code{c(adaptive = ..., reference = ...)}. Defaults to
+#'   \code{c(adaptive = "[adaptive_dosing] rules",
+#'   reference = "start dose every due point")}. An empty label is refused,
+#'   coded \code{E_ADAPTIVE_OPTIONS}: the reference is never implicit.
 #'
 #' @return A list of data frames (five run tables, three summary tables and
 #'   two decomposition tables):
@@ -248,7 +265,13 @@
 #'       \code{"median"} or \code{"fraction_at_least"}), THRESHOLD (the
 #'       \code{summary_thresholds} value of a \code{"fraction_at_least"} row,
 #'       \code{NA} otherwise), VALUE (over the draw's runs that carry the
-#'       metric; \code{NA} when none does), N_RUNS (runs in the draw, every
+#'       metric; \code{NA} when none does), MC_SE (the Monte Carlo standard
+#'       error of VALUE, ferx-core #3215: the delete-one jackknife over the
+#'       draw's sims that carry the metric, a sim being the independent
+#'       replicate since its runs share each subject's eta; read it with a t
+#'       on S - 1 degrees of freedom for S such sims. \code{NA} on a
+#'       \code{"median"} row, where the jackknife is inconsistent, and with
+#'       fewer than two such sims), N_RUNS (runs in the draw, every
 #'       subject, SIM and REP counted equally) and N_MISSING (runs carrying no
 #'       value, which are skipped, never imputed). \code{DISCONTINUED} is
 #'       summarised as 1/0, so its mean is the fraction discontinued;
@@ -294,6 +317,22 @@
 #'   under: \code{1} throughout without \code{uncertainty}, \code{1} to
 #'   \code{n_draws} with it.
 #'
+#'   With \code{reference}, every table gains a first column ARM:
+#'   \code{"adaptive"} and \code{"reference"} rows on all of them (each
+#'   arm's rows are exactly what that arm alone gives), and on the summary
+#'   and decomposition tables also \code{"difference"} rows, adaptive minus
+#'   reference. The difference is paired: \code{summary_rows} holds the
+#'   summary of the per-run differences, so its \code{"mean"} row is the mean
+#'   effect with a paired MC_SE (one sim left out of both arms at once), its
+#'   band the parameter uncertainty of that effect and its prediction
+#'   interval the spread of one patient's effect; a \code{"fraction_at_least"}
+#'   difference row is P(A - R >= threshold), while the change in attainment
+#'   is the adaptive row minus the reference row. On
+#'   \code{variance_components} a negative \code{"bsv"} difference at
+#'   population scope is between-patient variance the controller removed. A
+#'   run (or subject) whose metric is missing in either arm is missing in the
+#'   difference. The labels are the list's \code{arm_labels} element.
+#'
 #' @inheritSection ferx_simulate Errors raised by the engine
 #'
 #' @examples
@@ -317,6 +356,12 @@
 #' subset(res$summary_rows, METRIC == "PCT_READINGS_IN_WINDOW")
 #' subset(res$variance_components, SCOPE == "population" & METRIC == "CUM_DOSE")
 #'
+#' # The controller's effect: the same patients under the fixed start dose.
+#' con <- ferx_simulate_adaptive(ex$model, ex$data, n_sim = 50L, seed = 1L,
+#'                               reference = "fixed")
+#' subset(con$summary_rows, METRIC == "PCT_READINGS_IN_WINDOW" &
+#'                          STATISTIC == "mean")
+#'
 #' # With a fit to observed data, each fitted subject at its own EBEs:
 #' # ferx_simulate_adaptive(model, data, fit = fit, etas = fit$ebe_etas)
 #'
@@ -335,10 +380,13 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
                                    uncertainty = NULL, n_reps = 1L,
                                    summary_probs = c(0.05, 0.5, 0.95),
                                    summary_thresholds = NULL,
-                                   decompose = FALSE) {
+                                   decompose = FALSE, reference = NULL,
+                                   arm_labels = NULL) {
   uncertainty <- .ferx_adaptive_uncertainty(uncertainty, fit)
+  arm_labels <- .ferx_adaptive_arm_labels(reference, arm_labels)
   run_options <- .ferx_adaptive_run_options(n_reps, summary_probs,
-                                            summary_thresholds, decompose)
+                                            summary_thresholds, decompose,
+                                            arm_labels)
   if (!missing(unmatched) && is.null(etas)) {
     warning("ferx_simulate_adaptive: `unmatched` has no effect without ",
             "`etas`; every subject's eta is drawn.", call. = FALSE)
@@ -483,6 +531,8 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
     )
   }
 
+  if (length(arm_labels) > 0L) res <- .ferx_adaptive_stack_arms(res, arm_labels)
+
   .ferx_adaptive_warn_unrecorded_signals(res, run_options)
 
   # Same `simulation_warnings` channel `ferx_simulate()` uses - here it carries
@@ -501,7 +551,8 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
 .ferx_adaptive_run_options <- function(n_reps = 1L,
                                        summary_probs = c(0.05, 0.5, 0.95),
                                        summary_thresholds = NULL,
-                                       decompose = FALSE) {
+                                       decompose = FALSE,
+                                       arm_labels = character(0)) {
   if (!is.numeric(n_reps) || length(n_reps) != 1L || !is.finite(n_reps) ||
       n_reps != round(n_reps) || n_reps < 1 || n_reps > .Machine$integer.max) {
     stop("ferx_simulate_adaptive: `n_reps` must be a single whole number ",
@@ -524,8 +575,67 @@ ferx_simulate_adaptive <- function(model, data = NULL, n_sim = 1L, seed = 42L,
     threshold_value = thr$value,
     threshold_analyte = thr$analyte,
     threshold_decision = thr$decision,
-    decompose = decompose
+    decompose = decompose,
+    arm_labels = unname(arm_labels)
   )
+}
+
+# `reference` and `arm_labels` as the glue's `arm_labels`: `character(0)`
+# for one run, `c(adaptive, reference)` for a contrast. Only the shape is
+# checked here; an empty label is core's to refuse (E_ADAPTIVE_OPTIONS).
+.ferx_adaptive_arm_labels <- function(reference, arm_labels) {
+  if (is.null(reference)) {
+    if (!is.null(arm_labels)) {
+      warning("ferx_simulate_adaptive: `arm_labels` has no effect without ",
+              "`reference`.", call. = FALSE)
+    }
+    return(character(0))
+  }
+  if (!identical(reference, "fixed")) {
+    stop("ferx_simulate_adaptive: `reference` must be NULL or \"fixed\" ",
+         "(the start dose at every due point).", call. = FALSE)
+  }
+  if (is.null(arm_labels)) {
+    return(c(adaptive = "[adaptive_dosing] rules",
+             reference = "start dose every due point"))
+  }
+  if (!is.character(arm_labels) || length(arm_labels) != 2L ||
+      !setequal(names(arm_labels), c("adaptive", "reference")) ||
+      anyNA(arm_labels)) {
+    stop("ferx_simulate_adaptive: `arm_labels` must be a character vector ",
+         "c(adaptive = ..., reference = ...).", call. = FALSE)
+  }
+  arm_labels[c("adaptive", "reference")]
+}
+
+# The glue's contrast list (`adaptive`, `reference` - each one arm's full
+# result - and `difference`, the difference's outcome tables) as one result
+# shaped like a single run's: every table stacked by arm under a leading ARM
+# column. Attributes (`probs`, the design of `variance_components`) are the
+# same in every arm and kept from the first.
+.ferx_adaptive_stack_arms <- function(res, arm_labels) {
+  arms <- list(adaptive = res$adaptive, reference = res$reference,
+               difference = res$difference)
+  out <- lapply(stats::setNames(nm = names(res$adaptive)), function(tab) {
+    parts <- Filter(Negate(is.null), lapply(names(arms), function(a) {
+      df <- arms[[a]][[tab]]
+      if (is.null(df)) return(NULL)
+      cbind(data.frame(ARM = rep(a, nrow(df))), df)
+    }))
+    if (length(parts) == 0L) return(NULL)
+    stacked <- do.call(rbind, parts)
+    rownames(stacked) <- NULL
+    first <- res$adaptive[[tab]]
+    for (a in setdiff(names(attributes(first)), c("names", "row.names", "class"))) {
+      attr(stacked, a) <- attr(first, a)
+    }
+    stacked
+  })
+  out$arm_labels <- arm_labels
+  warnings <- unique(c(attr(res$adaptive, "simulation_warnings", exact = TRUE),
+                       attr(res$reference, "simulation_warnings", exact = TRUE)))
+  attr(out, "simulation_warnings") <- warnings
+  out
 }
 
 # A `SIGNAL` threshold whose analyte and decision no run recorded - a

@@ -50,7 +50,7 @@ test_that("the summary tables are attached, with the documented columns", {
                       "variance_skipped"))
   expect_identical(names(res$summary_rows),
     c("DRAW", "METRIC", "ANALYTE", "DECISION", "STATISTIC", "THRESHOLD",
-      "VALUE", "N_RUNS", "N_MISSING"))
+      "VALUE", "MC_SE", "N_RUNS", "N_MISSING"))
   expect_identical(names(res$summary_bands),
     c("METRIC", "ANALYTE", "DECISION", "STATISTIC", "THRESHOLD",
       "N_DRAWS_PRESENT", "N_DRAWS_MISSING", "STATUS", "LO", "MED", "HI"))

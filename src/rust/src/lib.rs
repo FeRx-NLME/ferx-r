@@ -1518,27 +1518,58 @@ fn simulate_adaptive(
         // refusal (probabilities, a non-finite threshold, a design that cannot
         // separate a layer) is the call's error, coded `E_ADAPTIVE_OPTIONS`.
         Ok(result) => {
-            let summary = ferx_core::summarize_adaptive(&result, &extras.summary)
-                .map_err(|e| engine_refusal("ferx_simulate_adaptive: ", e))?;
+            let refused = |e| engine_refusal("ferx_simulate_adaptive: ", e);
+            let probs = extras.summary.probs;
+            let Some(labels) = &extras.contrast else {
+                let summary = ferx_core::summarize_adaptive(&result, &extras.summary).map_err(refused)?;
+                let decomposition = if extras.decompose {
+                    Some(ferx_core::decompose_adaptive(&result).map_err(refused)?)
+                } else {
+                    None
+                };
+                let list = adaptive_result_to_list(&result, &parsed.model, &summary, probs, decomposition.as_ref());
+                return Ok(attach_sim_warnings(list, occasion_notes, &result));
+            };
+            // The controller-effect contrast (ferx-core #946 PR4): the reference
+            // arm is the same spec with its rules cleared, run on the same
+            // inputs, options and seed, so the two arms share every random
+            // number by construction. Core still checks the pair, and refuses
+            // an empty label.
+            let reference = ferx_core::simulate_adaptive_from_spec_with_inputs(
+                &parsed.model,
+                &population,
+                &inputs,
+                n_sim as usize,
+                &spec.fixed_reference(),
+                &opts,
+            )
+            .map_err(|e| engine_refusal("ferx_simulate_adaptive: the reference arm: ", e))?;
+            let summary = ferx_core::summarize_contrast(&result, &reference, labels, &extras.summary)
+                .map_err(refused)?;
             let decomposition = if extras.decompose {
-                Some(
-                    ferx_core::decompose_adaptive(&result)
-                        .map_err(|e| engine_refusal("ferx_simulate_adaptive: ", e))?,
-                )
+                Some(ferx_core::decompose_contrast(&result, &reference, labels).map_err(refused)?)
             } else {
                 None
             };
-            attach_sim_warnings(
-                adaptive_result_to_list(
-                    &result,
-                    &parsed.model,
-                    &summary,
-                    extras.summary.probs,
-                    decomposition.as_ref(),
-                )?,
-                occasion_notes,
-                &result,
-            )
+            let arm = |r: &ferx_core::AdaptiveSimulationResult,
+                       s: &ferx_core::AdaptivePopulationSummary,
+                       d: Option<&ferx_core::AdaptiveDecomposition>| {
+                adaptive_result_to_list(r, &parsed.model, s, probs, d)
+            };
+            let adaptive = arm(&result, &summary.adaptive, decomposition.as_ref().map(|d| &d.adaptive));
+            let reference_list =
+                arm(&reference, &summary.reference, decomposition.as_ref().map(|d| &d.reference));
+            let difference = adaptive_outcome_tables(
+                &summary.difference,
+                probs,
+                decomposition.as_ref().map(|d| &d.difference),
+            );
+            List::from_pairs(vec![
+                ("adaptive", attach_sim_warnings(adaptive, occasion_notes, &result)),
+                ("reference", attach_sim_warnings(reference_list, OccasionNotes::none(), &reference)),
+                ("difference", List::from_pairs(difference).into()),
+            ])
+            .into()
         }
         Err(e) => return Err(engine_refusal("ferx_simulate_adaptive: ", e)),
     })
@@ -1549,11 +1580,15 @@ fn simulate_adaptive(
 /// builds: `n_reps` (integer), `probs` (three doubles), the summary thresholds
 /// as four parallel vectors `threshold_metric` / `threshold_value` /
 /// `threshold_analyte` / `threshold_decision` (the last two `NA` for a scalar
-/// metric), and `decompose` (logical).
+/// metric), `decompose` (logical) and `arm_labels` (character).
 struct AdaptiveRunExtras {
     n_reps: usize,
     summary: ferx_core::AdaptiveSummaryOptions,
     decompose: bool,
+    /// `Some` also runs the fixed reference arm and returns the contrast
+    /// (ferx-core #946 PR4): from `run_options$arm_labels`, `character(0)`
+    /// for a single run or `c(adaptive, reference)`.
+    contrast: Option<ferx_core::AdaptiveArmLabels>,
 }
 
 impl AdaptiveRunExtras {
@@ -1630,7 +1665,23 @@ impl AdaptiveRunExtras {
         let decompose = col("decompose")?
             .as_bool()
             .ok_or_else(|| mistyped("decompose", "a single logical"))?;
-        Ok(Self { n_reps: n_reps.max(0) as usize, summary, decompose })
+        let arm_labels = col("arm_labels")?
+            .as_string_vector()
+            .ok_or_else(|| mistyped("arm_labels", "a character vector"))?;
+        let contrast = match arm_labels.as_slice() {
+            [] => None,
+            // Core's check (`summarize_contrast`), made first for the same
+            // reasons as `summary_probs`' above: R's spelling, before the run.
+            [a, r] if a.trim().is_empty() || r.trim().is_empty() => {
+                return Err(adaptive_options_refusal(format!(
+                    "`arm_labels`: each arm needs a label that says what it is; got adaptive \
+                     '{a}' and reference '{r}'"
+                )))
+            }
+            [a, r] => Some(ferx_core::AdaptiveArmLabels::new(a, r)),
+            _ => return Err("internal: `run_options$arm_labels` must hold zero or two labels".to_string()),
+        };
+        Ok(Self { n_reps: n_reps.max(0) as usize, summary, decompose, contrast })
     }
 }
 
@@ -1695,32 +1746,9 @@ fn r_number(x: f64) -> String {
     }
 }
 
-/// The scalar summary metrics (ferx-core `AdaptiveSummaryMetric`) and the R
-/// spelling of each: the `metrics` column it summarises, so a summary row joins
-/// back to the column it came from. The one table both directions read; the
-/// per-decision latent signal (`Signal { analyte, decision_idx }`) is `SIGNAL`
-/// with its own `ANALYTE` / `DECISION` columns. Core has no label method on the
-/// enum, so this glue owns the spelling.
-fn scalar_summary_metrics() -> [(&'static str, ferx_core::AdaptiveSummaryMetric); 12] {
-    use ferx_core::AdaptiveSummaryMetric as M;
-    [
-        ("CUM_DOSE", M::CumulativeDose),
-        ("N_DOSES", M::NDoses),
-        ("N_INCREASES", M::NIncreases),
-        ("N_DECREASES", M::NDecreases),
-        ("N_HOLDS", M::NHolds),
-        ("N_NOT_DUE", M::NNotDue),
-        ("DISCONTINUED", M::Discontinued),
-        ("SIGNAL_MIN", M::SignalMin),
-        ("SIGNAL_MAX", M::SignalMax),
-        ("SIGNAL_MEAN", M::SignalMean),
-        ("PCT_READINGS_IN_WINDOW", M::PctReadingsInWindow),
-        ("AUC_TARGET_ATTAINMENT", M::AucTargetAttainment),
-    ]
-}
-
-/// A summary threshold's metric from its R spelling: a `metrics` column name of
-/// [`scalar_summary_metrics`], or `SIGNAL` with an analyte and a 0-based
+/// A summary threshold's metric from its R spelling: the `label()` of one of
+/// core's `AdaptiveSummaryMetric::SCALARS` (the `metrics` column it
+/// summarises, ferx-core #3213), or `SIGNAL` with an analyte and a 0-based
 /// decision index (as `decisions$DECISION` numbers them).
 fn summary_metric_from_r(
     token: &str,
@@ -1750,12 +1778,13 @@ fn summary_metric_from_r(
              belong to a `SIGNAL` threshold only"
         ));
     }
-    scalar_summary_metrics()
-        .into_iter()
-        .find(|(name, _)| *name == token)
-        .map(|(_, m)| m)
+    use ferx_core::AdaptiveSummaryMetric as M;
+    M::SCALARS
+        .iter()
+        .find(|m| m.label() == token)
+        .cloned()
         .ok_or_else(|| {
-            let known: Vec<&str> = scalar_summary_metrics().iter().map(|(n, _)| *n).collect();
+            let known: Vec<&str> = M::SCALARS.iter().map(M::label).collect();
             format!(
                 "ferx_simulate_adaptive: `{token}` is not a summary metric; expected one of {}, or SIGNAL",
                 known.join(", ")
@@ -1763,37 +1792,14 @@ fn summary_metric_from_r(
         })
 }
 
-/// A summary metric as its R columns `(METRIC, ANALYTE, DECISION)`. A metric
-/// this glue has no spelling for (ferx-core added one) is an error, never a
-/// mislabelled row.
-fn summary_metric_to_r(
-    m: &ferx_core::AdaptiveSummaryMetric,
-) -> std::result::Result<(String, Option<String>, Option<i32>), String> {
-    if let ferx_core::AdaptiveSummaryMetric::Signal { analyte, decision_idx } = m {
-        return Ok(("SIGNAL".to_string(), Some(analyte.clone()), Some(*decision_idx as i32)));
-    }
-    scalar_summary_metrics()
-        .into_iter()
-        .find(|(_, known)| known == m)
-        .map(|(name, _)| (name.to_string(), None, None))
-        .ok_or_else(|| {
-            format!("internal: ferx-core reports an adaptive summary metric this glue cannot name: {m:?}")
-        })
-}
-
-/// A per-draw statistic as its R columns `(STATISTIC, THRESHOLD)`.
-fn summary_statistic_to_r(
-    s: ferx_core::AdaptiveSummaryStatistic,
-) -> std::result::Result<(&'static str, Option<f64>), String> {
-    use ferx_core::AdaptiveSummaryStatistic as S;
-    match s {
-        S::Mean => Ok(("mean", None)),
-        S::Median => Ok(("median", None)),
-        S::FractionAtLeast(a) => Ok(("fraction_at_least", Some(a))),
-        other => Err(format!(
-            "internal: ferx-core reports an adaptive summary statistic this glue cannot name: {other:?}"
-        )),
-    }
+/// A per-draw statistic as its R columns `(STATISTIC, THRESHOLD)`: core's
+/// `label()` (ferx-core #3213) and the threshold of a `FractionAtLeast`.
+fn summary_statistic_to_r(s: ferx_core::AdaptiveSummaryStatistic) -> (&'static str, Option<f64>) {
+    let threshold = match s {
+        ferx_core::AdaptiveSummaryStatistic::FractionAtLeast(a) => Some(a),
+        _ => None,
+    };
+    (s.label(), threshold)
 }
 
 /// The metric's three columns, shared by every summary and decomposition frame.
@@ -1805,12 +1811,18 @@ struct MetricCols {
 }
 
 impl MetricCols {
-    fn push(&mut self, m: &ferx_core::AdaptiveSummaryMetric) -> std::result::Result<(), String> {
-        let (metric, analyte, decision) = summary_metric_to_r(m)?;
-        self.metric.push(metric);
+    /// `METRIC` is core's `label()` (ferx-core #3213); a `SIGNAL` also fills
+    /// `ANALYTE` and `DECISION`, `NA` for a scalar metric.
+    fn push(&mut self, m: &ferx_core::AdaptiveSummaryMetric) {
+        let (analyte, decision) = match m {
+            ferx_core::AdaptiveSummaryMetric::Signal { analyte, decision_idx } => {
+                (Some(analyte.clone()), Some(*decision_idx as i32))
+            }
+            _ => (None, None),
+        };
+        self.metric.push(m.label().to_string());
         self.analyte.push(analyte);
         self.decision.push(decision);
-        Ok(())
     }
 
     fn into_pairs(self) -> Vec<(&'static str, Robj)> {
@@ -1837,14 +1849,14 @@ fn quantile_cols(q: &[[Option<f64>; 3]]) -> Vec<(&'static str, Robj)> {
 fn adaptive_summary_to_r(
     s: &ferx_core::AdaptivePopulationSummary,
     probs: [f64; 3],
-) -> std::result::Result<(Robj, Robj, Robj), String> {
+) -> (Robj, Robj, Robj) {
 
     // -- rows: one per (metric, statistic, draw) --
     let mut mc = MetricCols::default();
     let (mut stat, mut thr) = (Vec::new(), Vec::new());
     for r in &s.rows {
-        mc.push(&r.metric)?;
-        let (st, th) = summary_statistic_to_r(r.statistic)?;
+        mc.push(&r.metric);
+        let (st, th) = summary_statistic_to_r(r.statistic);
         stat.push(st.to_string());
         thr.push(th);
     }
@@ -1854,6 +1866,9 @@ fn adaptive_summary_to_r(
     cols.push(("STATISTIC", stat.into()));
     cols.push(("THRESHOLD", thr.into()));
     cols.push(("VALUE", s.rows.iter().map(|r| r.value).collect::<Vec<Option<f64>>>().into()));
+    // The Monte Carlo SE of VALUE (ferx-core #3215): NA where core reports none
+    // (a median, fewer than two sims carrying the metric).
+    cols.push(("MC_SE", s.rows.iter().map(|r| r.mc_se).collect::<Vec<Option<f64>>>().into()));
     cols.push(("N_RUNS", s.rows.iter().map(|r| r.n_runs as i32).collect::<Vec<i32>>().into()));
     cols.push(("N_MISSING", s.rows.iter().map(|r| r.n_missing as i32).collect::<Vec<i32>>().into()));
     let rows = finish_df(cols, s.rows.len());
@@ -1862,20 +1877,15 @@ fn adaptive_summary_to_r(
     let mut mc = MetricCols::default();
     let (mut stat, mut thr, mut status, mut q) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for b in &s.bands {
-        mc.push(&b.metric)?;
-        let (st, th) = summary_statistic_to_r(b.statistic)?;
+        mc.push(&b.metric);
+        let (st, th) = summary_statistic_to_r(b.statistic);
         stat.push(st.to_string());
         thr.push(th);
-        let (label, values) = match b.status {
-            ferx_core::AdaptiveBandStatus::NotDrawn => ("not_drawn", [None; 3]),
-            ferx_core::AdaptiveBandStatus::Quantiles(qs) => ("quantiles", qs.values),
-            other => {
-                return Err(format!(
-                    "internal: ferx-core reports an adaptive band status this glue cannot name: {other:?}"
-                ))
-            }
+        let values = match b.status {
+            ferx_core::AdaptiveBandStatus::Quantiles(qs) => qs.values,
+            _ => [None; 3],
         };
-        status.push(label.to_string());
+        status.push(b.status.label().to_string());
         q.push(values);
     }
     let mut cols: Vec<(&str, Robj)> = mc.into_pairs();
@@ -1899,7 +1909,7 @@ fn adaptive_summary_to_r(
     let mut mc = MetricCols::default();
     let mut q = Vec::new();
     for p in pis {
-        mc.push(&p.metric)?;
+        mc.push(&p.metric);
         q.push(p.quantiles.values);
     }
     let mut cols: Vec<(&str, Robj)> = mc.into_pairs();
@@ -1908,7 +1918,7 @@ fn adaptive_summary_to_r(
     cols.push(("N_MISSING", pis.iter().map(|p| p.n_missing as i32).collect::<Vec<i32>>().into()));
     let mut intervals = finish_df(cols, pis.len());
     intervals.set_attrib("probs", probs.to_vec()).unwrap();
-    Ok((rows, bands, intervals))
+    (rows, bands, intervals)
 }
 
 /// [`ferx_core::AdaptiveDecomposition`] as two R data frames:
@@ -1918,50 +1928,25 @@ fn adaptive_summary_to_r(
 /// a subject whose ID happens to be spelled "population" stays apart.
 fn adaptive_decomposition_to_r(
     d: &ferx_core::AdaptiveDecomposition,
-) -> std::result::Result<(Robj, Robj), String> {
-    use ferx_core::{
-        AdaptiveComponentStatus as St, AdaptiveVarianceLayer as L, AdaptiveVarianceScope as Sc,
-    };
+) -> (Robj, Robj) {
+    use ferx_core::{AdaptiveComponentStatus as St, AdaptiveVarianceScope as Sc};
     let mut mc = MetricCols::default();
     let (mut scope, mut id, mut layer, mut status, mut value, mut mc_se) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    // SCOPE, LAYER and STATUS are core's `label()`s (ferx-core #3213).
     for c in &d.components {
-        mc.push(&c.metric)?;
-        let (sc, who) = match &c.scope {
-            Sc::Population => ("population", None),
-            Sc::Subject(s) => ("subject", Some(s.clone())),
-            other => {
-                return Err(format!(
-                    "internal: ferx-core reports a variance scope this glue cannot name: {other:?}"
-                ))
-            }
+        mc.push(&c.metric);
+        scope.push(c.scope.label().to_string());
+        id.push(match &c.scope {
+            Sc::Subject(s) => Some(s.clone()),
+            _ => None,
+        });
+        layer.push(c.layer.label().to_string());
+        let (v, se) = match c.status {
+            St::Estimated { value, mc_se } => (Some(value), mc_se),
+            _ => (None, None),
         };
-        scope.push(sc.to_string());
-        id.push(who);
-        let ly = match c.layer {
-            L::Parameter => "parameter",
-            L::Bsv => "bsv",
-            L::Within => "within",
-            L::BetweenRow => "between_subject",
-            L::Total => "total",
-            other => {
-                return Err(format!(
-                    "internal: ferx-core reports a variance layer this glue cannot name: {other:?}"
-                ))
-            }
-        };
-        layer.push(ly.to_string());
-        let (st, v, se) = match c.status {
-            St::Estimated { value, mc_se } => ("estimated", Some(value), mc_se),
-            St::NotDrawn => ("not_drawn", None, None),
-            St::Supplied => ("supplied", None, None),
-            other => {
-                return Err(format!(
-                    "internal: ferx-core reports a variance component status this glue cannot name: {other:?}"
-                ))
-            }
-        };
-        status.push(st.to_string());
+        status.push(c.status.label().to_string());
         value.push(v);
         mc_se.push(se);
     }
@@ -1983,7 +1968,7 @@ fn adaptive_decomposition_to_r(
 
     let mut mc = MetricCols::default();
     for k in &d.skipped {
-        mc.push(&k.metric)?;
+        mc.push(&k.metric);
     }
     let mut cols: Vec<(&str, Robj)> = mc.into_pairs();
     cols.push(("ID", d.skipped.iter().map(|k| k.subject.clone()).collect::<Vec<String>>().into()));
@@ -1992,7 +1977,7 @@ fn adaptive_decomposition_to_r(
         d.skipped.iter().map(|k| k.n_missing as i32).collect::<Vec<i32>>().into(),
     ));
     let skipped = finish_df(cols, d.skipped.len());
-    Ok((components, skipped))
+    (components, skipped)
 }
 
 
@@ -2018,7 +2003,7 @@ fn adaptive_result_to_list(
     summary: &ferx_core::AdaptivePopulationSummary,
     summary_probs: [f64; 3],
     decomposition: Option<&ferx_core::AdaptiveDecomposition>,
-) -> std::result::Result<Robj, String> {
+) -> Robj {
     let trajectories = sim_results_to_df(&result.trajectories);
 
     // -- doses: one row per realized dose --
@@ -2102,25 +2087,38 @@ fn adaptive_result_to_list(
         m.len(),
     );
 
-    let (summary_rows, summary_bands, prediction_intervals) = adaptive_summary_to_r(summary, summary_probs)?;
-    let (variance_components, variance_skipped) = match decomposition {
-        Some(d) => adaptive_decomposition_to_r(d)?,
-        None => (Robj::from(()), Robj::from(())),
-    };
-
-    Ok(List::from_pairs(vec![
+    let mut pairs = vec![
         ("trajectories", trajectories),
         ("doses", doses),
         ("decisions", decisions),
         ("metrics", metrics),
         ("parameters", drawn_parameters_to_df(&result.parameters, model)),
+    ];
+    pairs.extend(adaptive_outcome_tables(summary, summary_probs, decomposition));
+    List::from_pairs(pairs).into()
+}
+
+/// The outcome tables of one summary and its optional decomposition:
+/// `summary_rows`, `summary_bands`, `prediction_intervals`, and
+/// `variance_components` / `variance_skipped` (`NULL` without a
+/// decomposition). One arm's run, or a contrast's difference.
+fn adaptive_outcome_tables(
+    summary: &ferx_core::AdaptivePopulationSummary,
+    summary_probs: [f64; 3],
+    decomposition: Option<&ferx_core::AdaptiveDecomposition>,
+) -> Vec<(&'static str, Robj)> {
+    let (summary_rows, summary_bands, prediction_intervals) = adaptive_summary_to_r(summary, summary_probs);
+    let (variance_components, variance_skipped) = match decomposition {
+        Some(d) => adaptive_decomposition_to_r(d),
+        None => (Robj::from(()), Robj::from(())),
+    };
+    vec![
         ("summary_rows", summary_rows),
         ("summary_bands", summary_bands),
         ("prediction_intervals", prediction_intervals),
         ("variance_components", variance_components),
         ("variance_skipped", variance_skipped),
-    ])
-    .into())
+    ]
 }
 
 /// An adaptive run's parameter draws (ferx-core #946) as an R data frame: one

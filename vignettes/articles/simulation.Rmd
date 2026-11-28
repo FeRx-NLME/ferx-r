@@ -319,6 +319,46 @@ force the controller is not consulted: `decisions$OUTCOME` reads `"not_due"`,
 points (`N_HOLDS` counts only consulted decisions that gave no dose).
 `decisions$INTERVAL` is the interval in force after each decision.
 
+### What does the controller buy? A contrast against a fixed regimen
+
+The controller has no variance of its own: given the same patients and the
+same noise it always doses the same way. Its effect is therefore a
+**contrast**: the same patients run twice, once under the rules and once under
+a reference regimen. `reference = "fixed"` does this in one call. The
+reference arm is the `[adaptive_dosing]` block with its rules cleared, which
+gives the start dose at every due point. Both arms run on the same seed, so
+they share every random number (parameter draws, etas, IOV and assay noise),
+and their difference is the controller's effect rather than simulation noise.
+
+The bundled `adaptive_tdm` example has between-patient variability and assay
+noise, so its arms differ from run to run:
+
+```{r adaptive-contrast, message = FALSE, warning = FALSE}
+tdm <- ferx_example("adaptive_tdm")
+con <- ferx_simulate_adaptive(tdm$model, tdm$data, n_sim = 50L, seed = 1L,
+                              reference = "fixed",
+                              arm_labels = c(adaptive = "trough TDM rule",
+                                             reference = "start dose every due point"))
+rows <- con$summary_rows
+rows[rows$STATISTIC == "mean" &
+       rows$METRIC %in% c("CUM_DOSE", "PCT_READINGS_IN_WINDOW"),
+     c("ARM", "METRIC", "VALUE", "MC_SE")]
+```
+
+Every table gains a leading `ARM` column. Run tables (`doses`, `metrics`, ...)
+hold an `"adaptive"` and a `"reference"` arm. The summary tables add
+`"difference"` rows, adaptive minus reference, computed from the paired
+per-run differences. So the difference's `MC_SE` (the jackknife Monte Carlo
+standard error that every `"mean"` and `"fraction_at_least"` row carries) is
+the paired one: it leaves the same sim out of both arms at once, so it
+accounts for the arms' correlation, which combining their own SEs as
+`sqrt(se_A^2 + se_R^2)` ignores. Add
+`decompose = TRUE` (with `n_reps >= 2`) to see which variance layer the
+controller removes: a negative `"bsv"` difference at population scope is
+between-patient variability the feedback took out. A fixed start dose is not a
+fair reference for a controller with a loading dose: name your reference in
+`arm_labels`.
+
 ---
 
 ## Choosing between the four
