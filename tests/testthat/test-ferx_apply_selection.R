@@ -167,6 +167,24 @@ test_that("ferx_fit(ignore=) produces same exclusion count as [data_selection] m
     fit_mod$exclusions$n_obs_excluded
   )
 })
+test_that("an unknown column never matches in the engine as in the preview (#776)", {
+  skip_on_cran()
+  # Pins what ?ferx_apply_selection says the engine does, so the docs fail a
+  # test rather than drift: an ignore warns W_FILTER_COLUMN_ABSENT and excludes
+  # nothing, an accept excludes every record.
+  ex  <- ferx_example("warfarin")
+  fit_on <- function(...) {
+    suppressWarnings(ferx_fit(ex$model, ex$data, ..., verbose = FALSE,
+                              settings = list(maxiter = 2L)))
+  }
+  fit <- fit_on(ignore = "FOO == 1")
+  expect_true(any(startsWith(fit$warnings, "W_FILTER_COLUMN_ABSENT")))
+  expect_equal(fit$exclusions$n_obs_excluded, 0)
+  expect_error(fit_on(accept = "FOO == 1"), "E_NO_SCORED_OBSERVATIONS", fixed = TRUE)
+  n <- nrow(utils::read.csv(ex$data))
+  expect_equal(nrow(ferx_apply_selection(ex$data, ignore = "FOO == 1")), n)
+  expect_equal(nrow(ferx_apply_selection(ex$data, accept = "FOO == 1")), 0L)
+})
 test_that("ferx_apply_selection() returns ferx_data S3 class", {
   skip_on_cran()
   ex  <- ferx_example("warfarin")
