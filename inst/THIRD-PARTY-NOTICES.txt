@@ -13,7 +13,7 @@ licenses/.
 ferx-core, ferx-tools and ferx-search are built from the ferx-core repository
 at the commit src/rust/Cargo.lock pins, which is their complete source:
 
-  https://github.com/FeRx-NLME/ferx-core/tree/586c4d26362c6181b67a55b9bda10f24f90903c5
+  https://github.com/FeRx-NLME/ferx-core/tree/c92fa891d25ed7649c7c0c189ea533eb1486cb89
 
 Crates linked into the compiled package (name, version, declared license):
 
