@@ -316,10 +316,12 @@ jobs:
 
       # README.md says a first install "takes a few minutes" with no figure,
       # since a figure drifts (#771, #801): 3m 39s on 2026-11-20, 4m 49s on
-      # 2026-11-28. This is the cold, single-crate-cache build a user's first
-      # install is, so warn here once it is no longer a few minutes. Cargo
-      # prints `Xm YYs` from a minute up and `N.NNs` below; a line this cannot
-      # read is a warning too, never a failure.
+      # 2026-11-28. This is a cold build from the vendored crates, as a user's
+      # first install is, so warn here once it is no longer a few minutes.
+      # Cargo prints `Xm YYs` from a minute up and `N.NNs` below; a line this
+      # cannot read is a warning too, never a failure. The line is uncoloured
+      # because sudo drops the job's CARGO_TERM_COLOR=always and the env list
+      # above does not pass it on; a coloured line would not match the grep.
       - name: Rust build-time budget
         run: |
           budget=600
