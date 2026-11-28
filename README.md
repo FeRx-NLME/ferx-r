@@ -36,11 +36,10 @@ Or from a local clone:
 R CMD INSTALL .
 ```
 
-Installing compiles the Rust engine from source: about 5 minutes on a 4-core
-Linux CI runner, a few minutes on a typical workstation, longer on slower
-machines. A `pak` install of a new version compiles it again; only the
-downloaded crates in `~/.cargo` are reused. Rebuilding a local clone with
-`R CMD INSTALL .` reuses `src/rust/target` and is fast.
+Installing compiles the Rust engine from source, which takes a few minutes
+(longer on slower machines). A `pak` install of a new version compiles it
+again; rebuilding a local clone with `R CMD INSTALL .` reuses
+`src/rust/target` and is fast.
 
 All estimation methods (FOCE/FOCEI/SAEM/IMP) work with the standard build.
 
