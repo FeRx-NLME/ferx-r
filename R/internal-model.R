@@ -526,6 +526,33 @@ ferx_section_headers <- function(lines) {
              stringsAsFactors = FALSE)
 }
 
+# The clauses a model file's `[data_selection]` block states (#794), as a list
+# of character vectors `ignore`, `accept` and `ignore_ids`, in the engine's
+# spelling: `ignore` / `accept` as the reader reports them in
+# `fit$exclusions` (minus the `ignore: ` / `accept: ` prefix), not the raw
+# block text, which keeps a quoted value's quotes. All empty when the block
+# states none, or when `model_path` is NULL / not a file. `strict = FALSE` also
+# maps a model the engine cannot parse to empty, so ferx_fit() reaches its own
+# parse of that model and raises its own classed refusal.
+.ferx_model_data_selection <- function(model_path, strict = TRUE) {
+  none <- list(ignore = character(0), accept = character(0),
+               ignore_ids = character(0))
+  if (is.null(model_path) || !is.character(model_path) ||
+      length(model_path) != 1L || is.na(model_path) ||
+      !file.exists(model_path)) {
+    return(none)
+  }
+  s <- if (strict) {
+    ferx_rust_model_data_selection(normalizePath(model_path))
+  } else {
+    tryCatch(ferx_rust_model_data_selection(normalizePath(model_path)),
+             error = function(e) NULL)
+  }
+  if (is.null(s)) return(none)
+  list(ignore = as.character(s$ignore), accept = as.character(s$accept),
+       ignore_ids = as.character(s$ignore_subjects))
+}
+
 # Rename `df`'s columns the way the engine's reader applies a `[data]` column
 # map: each `actual` header (case-insensitive) takes its `target` name, every
 # header resolved against the original names before any rename. Used by the R
