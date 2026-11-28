@@ -38,13 +38,19 @@
 #'   \code{.exclude_reason} column naming the first rule that dropped each record
 #'   (this replaces the former \code{ferx_selection_excluded()} accessor).
 #' @param model Optional path to the \code{.ferx} model file (or a
-#'   \code{ferx_model} object) the data will be fitted with. When the model
-#'   declares a \code{[data]} column map (e.g. \code{time = TAFD}), the
-#'   expressions and \code{ignore_ids} are evaluated against the columns under
-#'   the names the engine gives them, so \code{"TIME > 24"} matches the
-#'   \code{TAFD} column as it does at fit time. The returned records keep the
-#'   dataset's own headers. Ignored when \code{data} is a \code{ferx_data}
-#'   object; for a \code{ferx_fit} the fit's recorded model is used.
+#'   \code{ferx_model} object) the data will be fitted with. Its
+#'   \code{[data_selection]} clauses (\code{ignore}, \code{accept},
+#'   \code{ignore_subjects}) are applied first, then \code{ignore},
+#'   \code{accept} and \code{ignore_ids}, so the preview selects the records
+#'   \code{\link{ferx_fit}(model, data)} with the same arguments would. The
+#'   clauses are still evaluated by the lenient R preview described above.
+#'   When the model declares a \code{[data]} column map (e.g.
+#'   \code{time = TAFD}), the expressions and IDs are evaluated against the
+#'   columns under the names the engine gives them, so \code{"TIME > 24"}
+#'   matches the \code{TAFD} column as it does at fit time. The returned
+#'   records keep the dataset's own headers. Ignored when \code{data} is a
+#'   \code{ferx_data} object; for a \code{ferx_fit} the rules the fit fired are
+#'   replayed, with only the column map read from the fit's model file.
 #'
 #' @return When \code{excluded = FALSE}, an object of class \code{"ferx_data"}
 #'   (also a \code{data.frame}) containing the \strong{retained} records. When
@@ -61,8 +67,11 @@
 #'       object's rows no longer match them - it was subset or edited -
 #'       \code{\link{ferx_fit}} fits the rows it now holds, with a warning,
 #'       instead of \code{source_path} / \code{source_data}.}
-#'     \item{\code{ignore}, \code{accept}, \code{ignore_ids}}{The filter
-#'       conditions used (character / character / character vectors).}
+#'     \item{\code{ignore}, \code{accept}, \code{ignore_ids}}{Every filter
+#'       condition the preview applied, the \code{model}'s
+#'       \code{[data_selection]} clauses first (character / character /
+#'       character vectors). \code{\link{ferx_fit}} sends the ones its own
+#'       model does not state.}
 #'     \item{\code{excluded_rows}}{A data.frame of the excluded records with
 #'       an extra column \code{.exclude_reason} (first matching rule string).}
 #'     \item{\code{exclusions}}{A named list mirroring \code{fit$exclusions}:
@@ -106,6 +115,31 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
   if (!is.null(ignore_ids) && !is.numeric(ignore_ids) && !is.character(ignore_ids))
     stop("`ignore_ids` must be a numeric or character vector")
 
+  if (inherits(model, "ferx_model")) model <- model$model
+  if (!is.null(model) && !(is.character(model) && length(model) == 1L &&
+                           file.exists(model))) {
+    stop("`model` must be a path to an existing .ferx file or a ferx_model object")
+  }
+  # The model's own `[data_selection]` clauses go first: the engine's reader
+  # evaluates the block's clauses before the call's (#794).
+  block <- .ferx_model_data_selection(model)
+  .ferx_select(
+    df, source_path,
+    ignore     = unique(c(block$ignore, as.character(ignore))),
+    accept     = unique(c(block$accept, as.character(accept))),
+    ignore_ids = unique(c(block$ignore_ids, as.character(ignore_ids))),
+    column_map = .ferx_model_column_map(model),
+    excluded   = excluded
+  )
+}
+
+# The selection itself: evaluate `ignore` / `accept` / `ignore_ids` exactly as
+# given on `df` (renamed by `column_map` for evaluation only) and build the
+# ferx_data, or the excluded rows when `excluded = TRUE`. Reads no model file,
+# so a fit's replay (.ferx_selection_from_fit) applies the fit's fired clauses
+# and nothing a since-edited model file states.
+.ferx_select <- function(df, source_path, ignore, accept, ignore_ids,
+                         column_map, excluded = FALSE) {
   ignore     <- as.character(ignore)
   accept     <- as.character(accept)
   ignore_ids <- as.character(ignore_ids)
@@ -114,12 +148,7 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
   # engine's reader gives it (the model's `[data]` map applied); the rows
   # returned come from `df`, with the dataset's own headers, so a ferx_data
   # passed on to ferx_fit() still matches the model's map.
-  if (inherits(model, "ferx_model")) model <- model$model
-  if (!is.null(model) && !(is.character(model) && length(model) == 1L &&
-                           file.exists(model))) {
-    stop("`model` must be a path to an existing .ferx file or a ferx_model object")
-  }
-  df_eval <- .ferx_apply_column_map(df, .ferx_model_column_map(model))
+  df_eval <- .ferx_apply_column_map(df, column_map)
 
   .get_col <- function(df, name) {
     idx <- match(name, tolower(names(df)))
@@ -140,6 +169,7 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
   include <- rep(TRUE, n)
   exclude_reason <- rep(NA_character_, n)
 
+  fired_ignore <- character(0)
   id_col <- .get_col(df_eval, "id")
   if (length(ignore_ids) > 0L && !is.null(id_col)) {
     ids_char <- as.character(id_col)
@@ -147,9 +177,11 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
     exclude_reason[mask & is.na(exclude_reason)] <-
       paste0("ignore_subjects: ", ids_char[mask & is.na(exclude_reason)])
     include[mask] <- FALSE
+    # The engine names each listed subject that removed a record among its
+    # fired ignore rules (#794 audit A3).
+    fired_ignore <- unique(exclude_reason[mask])
   }
 
-  fired_ignore <- character(0)
   for (expr in ignore) {
     mask <- .eval_expr(expr, df_eval) & include
     if (any(mask)) fired_ignore <- c(fired_ignore, paste0("ignore: ", expr))
@@ -164,6 +196,16 @@ ferx_apply_selection <- function(data, ignore = NULL, accept = NULL,
     exclude_reason[mask & is.na(exclude_reason)] <- paste0("accept: ", expr)
     include[mask] <- FALSE
   }
+
+  # The engine's reader lists a rule when it first removes a record, so its
+  # fired lists run in the order of each rule's first excluded record, not in
+  # clause order (#794). Each rule claims exactly the records whose reason it
+  # is, so its first one is the first match of that reason.
+  by_first_row <- function(fired) {
+    fired[order(match(fired, exclude_reason))]
+  }
+  fired_ignore <- by_first_row(fired_ignore)
+  fired_accept <- by_first_row(fired_accept)
 
   retained <- df[include, , drop = FALSE]
   excluded_df <- df[!include, , drop = FALSE]
@@ -284,16 +326,24 @@ print.ferx_data <- function(x, n = 6L, ...) {
   }
   # fired_ignore / fired_accept carry an "ignore: " / "accept: " prefix (matching
   # the Rust ExclusionSummary format); strip it to recover bare expressions.
-  strip_prefix <- function(x) sub("^(ignore|accept): ", "", x)
-  ferx_apply_selection(
-    dp,
-    ignore     = strip_prefix(ex$fired_ignore),
-    accept     = strip_prefix(ex$fired_accept),
-    ignore_ids = ex$excluded_subject_ids,
-    excluded   = excluded,
-    # The fit's `[data]` column map, when its model file is still there, so the
-    # replayed rules see the columns the fit's reader saw.
-    model      = .ferx_existing_path(fit$model_path)
+  # fired_ignore also names each listed subject as "ignore_subjects: <ID>":
+  # that is an ID, not an expression, so it goes back into ignore_ids (#794
+  # audit A4) - as an `ignore` clause the engine refuses it as malformed.
+  fired_ignore <- as.character(ex$fired_ignore)
+  is_subject <- startsWith(fired_ignore, "ignore_subjects: ")
+  df <- utils::read.csv(dp, stringsAsFactors = FALSE, check.names = FALSE)
+  # The worker, not ferx_apply_selection(model = ): the replay applies the
+  # rules the fit fired and nothing else, so a `[data_selection]` clause added
+  # to the model file since the fit must not join them. Only the file's
+  # `[data]` column map is read, when the file is still there, so the replayed
+  # rules see the columns the fit's reader saw.
+  .ferx_select(
+    df, dp,
+    ignore     = sub("^ignore: ", "", fired_ignore[!is_subject]),
+    accept     = sub("^accept: ", "", as.character(ex$fired_accept)),
+    ignore_ids = sub("^ignore_subjects: ", "", fired_ignore[is_subject]),
+    column_map = .ferx_model_column_map(.ferx_existing_path(fit$model_path)),
+    excluded   = excluded
   )
 }
 

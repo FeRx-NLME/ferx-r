@@ -2834,9 +2834,18 @@ ferx_fit <- function(model, data = NULL,
     } else {
       data <- attr(fd, "source_path") %||% attr(fd, "source_data") %||% rows
     }
-    ignore      <- unique(c(attr(fd, "ignore"),    ignore))
-    accept      <- unique(c(attr(fd, "accept"),    accept))
-    ignore_ids  <- unique(c(attr(fd, "ignore_ids"), ignore_ids))
+    # A ferx_data built with `model =` carries that model's `[data_selection]`
+    # clauses. The engine applies the fit model's own block anyway, so resending
+    # them would only list the model's clauses as call-time settings in
+    # `fit$call_settings` (#794). Only what this model does not state is sent; a
+    # ferx_data built against another model keeps the clauses this one lacks.
+    # `strict = FALSE`: a model the engine cannot parse reaches the fit's own
+    # parse below, and its classed refusal.
+    own <- .ferx_model_data_selection(model, strict = FALSE)
+    ignore      <- unique(c(setdiff(attr(fd, "ignore"), own$ignore), ignore))
+    accept      <- unique(c(setdiff(attr(fd, "accept"), own$accept), accept))
+    ignore_ids  <- unique(c(setdiff(attr(fd, "ignore_ids"), own$ignore_ids),
+                            ignore_ids))
   }
   # `gradient = NULL` (the default) defers to the model file's
   # `[fit_options] gradient`; an explicit value overrides it. The engine reads

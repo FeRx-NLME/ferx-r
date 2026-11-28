@@ -47,13 +47,19 @@ a plain data.frame of the \strong{excluded} records instead, with an extra
 (this replaces the former \code{ferx_selection_excluded()} accessor).}
 
 \item{model}{Optional path to the \code{.ferx} model file (or a
-\code{ferx_model} object) the data will be fitted with. When the model
-declares a \code{[data]} column map (e.g. \code{time = TAFD}), the
-expressions and \code{ignore_ids} are evaluated against the columns under
-the names the engine gives them, so \code{"TIME > 24"} matches the
-\code{TAFD} column as it does at fit time. The returned records keep the
-dataset's own headers. Ignored when \code{data} is a \code{ferx_data}
-object; for a \code{ferx_fit} the fit's recorded model is used.}
+\code{ferx_model} object) the data will be fitted with. Its
+\code{[data_selection]} clauses (\code{ignore}, \code{accept},
+\code{ignore_subjects}) are applied first, then \code{ignore},
+\code{accept} and \code{ignore_ids}, so the preview selects the records
+\code{\link{ferx_fit}(model, data)} with the same arguments would. The
+clauses are still evaluated by the lenient R preview described above.
+When the model declares a \code{[data]} column map (e.g.
+\code{time = TAFD}), the expressions and IDs are evaluated against the
+columns under the names the engine gives them, so \code{"TIME > 24"}
+matches the \code{TAFD} column as it does at fit time. The returned
+records keep the dataset's own headers. Ignored when \code{data} is a
+\code{ferx_data} object; for a \code{ferx_fit} the rules the fit fired are
+replayed, with only the column map read from the fit's model file.}
 }
 \value{
 When \code{excluded = FALSE}, an object of class \code{"ferx_data"}
@@ -71,8 +77,11 @@ records included, or \code{NULL} when \code{data} was a path.
 object's rows no longer match them - it was subset or edited -
 \code{\link{ferx_fit}} fits the rows it now holds, with a warning,
 instead of \code{source_path} / \code{source_data}.}
-\item{\code{ignore}, \code{accept}, \code{ignore_ids}}{The filter
-conditions used (character / character / character vectors).}
+\item{\code{ignore}, \code{accept}, \code{ignore_ids}}{Every filter
+condition the preview applied, the \code{model}'s
+\code{[data_selection]} clauses first (character / character /
+character vectors). \code{\link{ferx_fit}} sends the ones its own
+model does not state.}
 \item{\code{excluded_rows}}{A data.frame of the excluded records with
 an extra column \code{.exclude_reason} (first matching rule string).}
 \item{\code{exclusions}}{A named list mirroring \code{fit$exclusions}:
