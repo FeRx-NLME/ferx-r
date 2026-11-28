@@ -148,8 +148,8 @@
 #'       ignore_ids =)}), applied to every record it removed, doses included,
 #'       and the fit's skip of a record with an empty \code{DV}. On the fit's
 #'       own model and data the rows are the ones the fit was scored on: the
-#'       observation rows of a simulation or prediction are
-#'       \code{fit$sdtab}'s, in order, and a survival prediction or a VPC
+#'       continuous (Gaussian) observation rows of a simulation or prediction
+#'       are \code{fit$sdtab}'s, in order, and a survival prediction or a VPC
 #'       covers the fit's subjects. They are checked against
 #'       \code{fit$population_fingerprint}, so a data file edited since the
 #'       fit is refused with code \code{E_POPULATION_MISMATCH}. On another
@@ -158,9 +158,10 @@
 #'   }
 #'   A fit made before the selection was recorded is refused under
 #'   \code{"fit"} when its \code{fit$exclusions} show a clause its model file
-#'   does not state. The two are different simulations, not one and a filter
-#'   of it: with the same \code{seed}, removing records moves the random
-#'   stream, so \code{"fit"} is not \code{"all"} with some rows dropped.
+#'   does not state. For a simulation the two are different runs, not one
+#'   and a filter of it: with the same \code{seed}, removing records moves
+#'   the random stream, so \code{"fit"} is not \code{"all"} with some rows
+#'   dropped.
 #' @return A data.frame, one row per simulated record, with these columns:
 #'   \describe{
 #'     \item{\code{DRAW}}{Parameter draw. Always 1 here; it is the grouping
