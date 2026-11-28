@@ -586,6 +586,28 @@ test_that("T8: selection = \"fit\" needs a fit (#793)", {
                "should be one of")
 })
 
+test_that("T17: selection = \"fit\" skips an empty-DV design record, as the fit did (#793 review 1)", {
+  # A design grid (`DV = .` at every sampling time): "all" simulates every
+  # record, "fit" reads the data as the fit read them, and the fit skips a
+  # record whose DV is empty, so it simulates none of them and says why.
+  ex <- ferx_example("warfarin_data_selection")
+  fit <- warfarin_sel_fit()
+  rows <- utils::read.csv(ex$data, na.strings = ".")
+  rows$DV[rows$EVID == 0] <- NA
+  grid <- withr::local_tempfile(fileext = ".csv")
+  utils::write.csv(rows, grid, row.names = FALSE, quote = FALSE, na = ".")
+  expect_identical(nrow(sel_sim(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit)), 110L)
+  expect_warning(
+    sim <- ferx_simulate(ex$model, grid, n_sim = 1L, seed = 1L, fit = fit,
+                         selection = "fit"),
+    "W_MISSING_DV: 110 observation row(s)", fixed = TRUE
+  )
+  expect_identical(nrow(sim), 0L)
+  expect_identical(nrow(suppressWarnings(
+    ferx_predict(ex$model, grid, fit = fit, selection = "fit")
+  )), 0L)
+})
+
 test_that("T9: ferx_simulate_with_uncertainty(selection = \"fit\") simulates the fit's rows (#793)", {
   ex <- ferx_example("warfarin_data_selection")
   fit <- warfarin_sel_fit()
