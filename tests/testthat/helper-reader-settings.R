@@ -172,20 +172,21 @@ rs_first_ids <- function(rows) utils::head(unique(rows$ID), 5L)
 
 # A TTE example fitted without its first five subjects, dropped by a
 # record-only `ignore_ids =`. `data` (a frame) replaces the example's file;
-# cached per example. The fit's own reading has the other subjects only.
+# only the example's own file is cached (per example), so two frames never
+# share a fit. The fit's own reading has the other subjects only.
 rs_tte_subjects_fit <- local({
   cache <- list()
+  fit_it <- function(model, data, rows) {
+    suppressWarnings(ferx_fit(model, data, verbose = FALSE, covariance = FALSE,
+                              ignore_ids = rs_first_ids(rows)))
+  }
   function(name = "tte_exponential", data = NULL) {
-    key <- paste(name, is.null(data))
-    if (is.null(cache[[key]])) {
-      ex <- ferx_example(name)
-      rows <- if (is.null(data)) utils::read.csv(ex$data) else data
-      cache[[key]] <<- suppressWarnings(ferx_fit(
-        ex$model, if (is.null(data)) ex$data else data, verbose = FALSE,
-        covariance = FALSE, ignore_ids = rs_first_ids(rows)
-      ))
+    ex <- ferx_example(name)
+    if (!is.null(data)) return(fit_it(ex$model, data, data))
+    if (is.null(cache[[name]])) {
+      cache[[name]] <<- fit_it(ex$model, ex$data, utils::read.csv(ex$data))
     }
-    cache[[key]]
+    cache[[name]]
   }
 })
 
